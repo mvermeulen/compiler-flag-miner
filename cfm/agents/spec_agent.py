@@ -43,6 +43,7 @@ def run_one_trial(
     phase: str = "screening",
     profile: Optional[str] = None,
     experiment_id: Optional[int] = None,
+    parent_trial_id: Optional[int] = None,
     workload: Optional[WorkloadBackend] = None,
     instrumentation: Optional[InstrumentationBackend] = None,
 ) -> dict:
@@ -56,7 +57,9 @@ def run_one_trial(
     one call -- the orchestrator needs a different wspy profile per phase (``quick``
     for screening, ``deep-cpu`` for baseline/confirmation, doc/DESIGN.md sec. 6),
     which a single fixed ``cfg.wspy_profile`` can't express across calls sharing one
-    ``CfmConfig``.
+    ``CfmConfig``. ``parent_trial_id`` is passed straight through to
+    ``db.record_trial()`` -- doc/DESIGN.md sec. 6 Phase 5's greedy-combination
+    lineage (``trials.parent_trial_id``), unused before M1's confirmation stage.
     """
     workload = workload or SpecCpu2026Workload(cfg.spec_dir, cfg.spec_config)
     run_index_path = cfg.output_root / "cpu2026" / "run-index.jsonl"
@@ -86,6 +89,7 @@ def run_one_trial(
             trial_id = db.record_trial(
                 conn, experiment_id=experiment_id, phase=phase, flags=flags,
                 optimize_string=optimize_string, build_status="build-failed",
+                parent_trial_id=parent_trial_id,
             )
             return {
                 "experiment_id": experiment_id, "trial_id": trial_id,
@@ -105,6 +109,7 @@ def run_one_trial(
             conn, experiment_id=experiment_id, phase=phase, flags=flags,
             optimize_string=optimize_string, build_status=build_status,
             wspy_run_ref=signature.wspy_run_ref, ratio=run_result.ratio,
+            parent_trial_id=parent_trial_id,
         )
 
         return {

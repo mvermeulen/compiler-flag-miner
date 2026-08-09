@@ -123,6 +123,29 @@ def record_trial(
     return cur.lastrowid
 
 
+def update_trial_verdict(
+    conn: sqlite3.Connection,
+    trial_id: int,
+    *,
+    verdict: str,
+    delta_vs_baseline_pct: Optional[float] = None,
+    ci_overlap: Optional[bool] = None,
+) -> None:
+    """Sets a trial row's verdict/delta_vs_baseline_pct/ci_overlap after the fact
+    -- these can't be known at ``record_trial()``'s insert time.
+    ``agents.spec_agent.run_one_trial()`` creates the row immediately as each
+    individual measurement completes, before the orchestrator has aggregated a
+    candidate's repeated confirmation-stage trials into one accept/reject decision
+    (doc/DESIGN.md sec. 6 Phase 4) -- this is the update that applies that decision
+    to every trial row that contributed to it.
+    """
+    conn.execute(
+        "UPDATE trials SET verdict=?, delta_vs_baseline_pct=?, ci_overlap=? WHERE id=?",
+        (verdict, delta_vs_baseline_pct, None if ci_overlap is None else int(ci_overlap), trial_id),
+    )
+    conn.commit()
+
+
 def get_experiment(conn: sqlite3.Connection, experiment_id: int) -> Optional[dict]:
     row = conn.execute("SELECT * FROM experiments WHERE id=?", (experiment_id,)).fetchone()
     return dict(row) if row else None
