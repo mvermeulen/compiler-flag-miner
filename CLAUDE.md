@@ -2,12 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working in this repository.
 
-**Status: M0 shipped** (doc/DESIGN.md §14) — the mechanical pipeline (`cfm measure`) exists and is
-unit-tested, but hasn't yet been exercised against this host's real SPEC CPU2026/wspy install (wspy
-isn't built here yet — `preflight()` catches that and fails cleanly rather than mid-pipeline). No
-search loop, compiler-knowledge catalog wiring, cross-benchmark knowledge transfer, or LLM driver yet
-— those are M1-M3 (doc/DESIGN.md §13's layout table marks exactly what exists vs. what's still
-pending, module by module).
+**Status: M0 shipped, M1 in progress** (doc/DESIGN.md §14) — the mechanical pipeline (`cfm measure`)
+is unit-tested and has been verified end to end against this host's real SPEC CPU2026/wspy install
+(a real `--action=validate` run, single-pass `quick` profile). M1's rule-based screening/confirmation
+loop (§6 Phases 1-5) is under active development, landing as a series of small merged PRs (git log has
+current progress). Compiler-knowledge catalog wiring, cross-benchmark knowledge transfer, and the LLM
+driver are still ahead — M2-M3 (doc/DESIGN.md §13's layout table marks exactly what exists vs. what's
+still pending, module by module).
 
 ## Documentation map
 
@@ -159,8 +160,31 @@ Full branch/PR discipline, same shape as wspy's:
   <hostname>:<run_id>` could never find anything (`wspy-archetype: no run found for ...`) even on a
   perfectly healthy run. Fixed via `_resolve_run_identity()`, which diffs the run-index file's line
   count before/after the `wspy-run` call and reads the real `(hostname, run_id)` back off the
-  newly-appended record — and raises loudly (rather than guessing) if a multi-pass profile appended
-  more than one new line, since M0 doesn't yet know which pass's `run_id` should represent "the" run.
+  newly-appended record — falling through to `_resolve_multi_pass_identity()` (M1, see the next entry)
+  if a multi-pass profile appended more than one new line, rather than guessing.
+- **Resolved (M1): a multi-pass profile's "obviously right" pass for archetype data was wrong —
+  confirmed live, not by inspection.** `deep-cpu` launches 3 separate `wspy` processes per invocation
+  (`systemtime`, `counters`, `amdtopdown` — one `wspy-run --list` entry, three real processes). The
+  natural first guess for "which one feeds `wspy-archetype`'s `resource_dominance` scoring" is
+  `counters` — `wspy-run --help` literally describes it as "used for topdown characterization," and
+  it's the pass covering `topdown2`/`cache2`/`cache3`/`memory`/`float`/`topdown-frontend`/
+  `topdown-optlb`. **That guess is wrong**: `counters` runs via wspy's native `--passes=` multipass
+  execution with no `--csv` (human-readable output only, matching the `wspy-store`-only-parses-CSV
+  trap two entries below), so its own `wspy-archetype --run` scorecard comes back
+  `resource_dominance=unknown, confidence=insufficient-data` even though real topdown data was
+  measured. It's the plain, non-multiplexed `amdtopdown` pass (`--csv --counters=topdown`) whose
+  scorecard is actually populated (`resource_dominance=memory-bound`, `resource_dominance_pct=89.80`
+  in a live confirming run against a toy workload). Correlating "pass name" (only in the run-level
+  `manifest.json`'s `passes[]` list) to "run_id" (only in the run-index) isn't direct — neither file
+  carries the other's identifier — but both independently record the same millisecond-precision
+  ISO-8601 `start_time`/`timing.start_time`, confirmed byte-for-byte as an exact join key. Implemented
+  in `cfm/instrumentation/wspy.py`'s `_ARCHETYPE_PASS_NAME` map (`{"deep-cpu": "amdtopdown"}`, only
+  the one profile M1 actually uses) plus `_resolve_multi_pass_identity()`; any other multi-pass
+  profile (`deep-cpu-intel`, `deep-gpu`, `zen4plus-deep`, a comma-composed profile list) still raises
+  rather than guessing. **Lesson for next time**: a tool's own docs describing what a pass is "used
+  for" describe its human-readable narrative role, not necessarily which pass a *different* downstream
+  tool's machine-readable classification actually reads from — check the real scorecard per pass, not
+  the profile description, before wiring a new multi-pass profile in here.
 - **`wspy-store` only parses metric *values* out of CSV output — human-readable text enriches the
   manifest fields but carries zero `run_features`.** Passing `--counters=topdown` without `--csv`
   still measures and reports the data (visible in the human-readable printout), but

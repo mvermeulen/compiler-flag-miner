@@ -166,13 +166,15 @@ the rest of the system consumes:
   produce the same `RunSignature` shape. `preflight()` checks all five wspy binaries exist before any
   subprocess call, failing fast and specifically (mirroring `wspy --preflight`'s own posture) rather
   than surfacing a missing binary as an opaque subprocess error mid-pipeline.
-- **`deep-cpu` (multi-pass) confirmation-stage support is not built yet.** `characterize()` currently
-  raises `RuntimeError` on any profile that makes `wspy-run` launch more than one underlying `wspy`
-  process (`deep-cpu` included) — each pass gets its own independently-generated `run_id`
-  (CLAUDE.md's "wspy dependency" traps log has the full story), and which pass's `run_id` should
-  represent "the" run for `wspy-archetype` purposes isn't resolved yet. Single-pass profiles (`quick`,
-  M0's only exercised profile) work end to end. Resolving this is part of wiring Phase 4's confirmation
-  stage for M1, not a pre-existing gap in the design above — just not yet implemented.
+- **`deep-cpu` (multi-pass) confirmation-stage support is built (M1).** `characterize()` resolves
+  which of `deep-cpu`'s 3 underlying `wspy` processes (`systemtime`/`counters`/`amdtopdown`, each with
+  its own independently-generated `run_id`) actually carries the CSV topdown data
+  `wspy-archetype`'s `resource_dominance` scoring reads — confirmed live to be `amdtopdown`, not the
+  `counters` pass wspy's own docs might suggest at first read (CLAUDE.md's "wspy dependency" traps log
+  has the full story, including the wrong initial guess). Single-pass profiles (`quick`) and the
+  `deep-cpu` multi-pass profile both work end to end; any other multi-pass profile
+  (`deep-cpu-intel`/`deep-gpu`/`zen4plus-deep`/a comma-composed list) still raises rather than
+  guessing, since none of those are exercised by this project yet.
 - **wspy dependency**: `vendor/wspy` is a git submodule pinned to a specific, tested commit (not a live
   checkout this project tracks automatically), with `tests/test_wspy_interface.py` as a contract-test
   suite run against it — real `wspy`/`wspy-run`/`wspy-store`/`wspy-archetype` invocations against a toy
