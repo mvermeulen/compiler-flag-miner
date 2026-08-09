@@ -20,7 +20,9 @@ from typing import Optional
 
 from .. import db
 from ..config import CfmConfig
+from ..instrumentation.base import InstrumentationBackend
 from ..instrumentation.wspy import WspyInstrumentation
+from ..workloads.base import WorkloadBackend
 from ..workloads.spec_cpu2026 import SpecCpu2026Workload
 
 
@@ -39,15 +41,31 @@ def run_one_trial(
     tune: str = "peak",
     iterations: int = 3,
     phase: str = "screening",
+    profile: Optional[str] = None,
     experiment_id: Optional[int] = None,
+    workload: Optional[WorkloadBackend] = None,
+    instrumentation: Optional[InstrumentationBackend] = None,
 ) -> dict:
-    workload = SpecCpu2026Workload(cfg.spec_dir, cfg.spec_config)
+    """``workload``/``instrumentation`` are injectable (defaulting to the real
+    ``SpecCpu2026Workload``/``WspyInstrumentation`` backends built from ``cfg``) so
+    ``cfm/orchestrator.py``'s tests can pass in fakes conforming to
+    ``workloads.base.WorkloadBackend``/``instrumentation.base.InstrumentationBackend``
+    and exercise the orchestrator's phase logic with no real SPEC/wspy calls --
+    ``cfm measure`` (``cli.py``) and every M0 caller keep working unchanged, since
+    both default to ``None``. ``profile`` overrides ``cfg.wspy_profile`` for this
+    one call -- the orchestrator needs a different wspy profile per phase (``quick``
+    for screening, ``deep-cpu`` for baseline/confirmation, doc/DESIGN.md sec. 6),
+    which a single fixed ``cfg.wspy_profile`` can't express across calls sharing one
+    ``CfmConfig``.
+    """
+    workload = workload or SpecCpu2026Workload(cfg.spec_dir, cfg.spec_config)
     run_index_path = cfg.output_root / "cpu2026" / "run-index.jsonl"
-    instrumentation = WspyInstrumentation(
+    instrumentation = instrumentation or WspyInstrumentation(
         cfg.wspy_dir,
         store_db=cfg.output_root / "store.db",
         run_index_path=run_index_path,
     )
+    profile = profile or cfg.wspy_profile
 
     problems = instrumentation.preflight()
     if problems:
@@ -78,7 +96,7 @@ def run_one_trial(
         command = workload.run_command(benchmark, tune, config_path, iterations=iterations)
         signature = instrumentation.characterize(
             command=command, suite="cpu2026", benchmark=benchmark, run_id=run_id,
-            profile=cfg.wspy_profile, output_root=cfg.output_root,
+            profile=profile, output_root=cfg.output_root,
         )
         run_result = workload.parse_result(benchmark, tune, signature.raw_output)
 

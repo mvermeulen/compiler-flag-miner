@@ -38,6 +38,19 @@ def test_schema_experiment_trial_roundtrip(tmp_path):
         conn.close()
 
 
+def test_set_baseline_run_ref_does_not_touch_status_or_finished_at(tmp_path):
+    conn = db.connect(tmp_path / "cfm.db")
+    try:
+        exp_id = db.create_experiment(conn, benchmark="x", hostname="h", compiler="gcc")
+        db.set_baseline_run_ref(conn, exp_id, "h:run0")
+        exp = db.get_experiment(conn, exp_id)
+        assert exp["baseline_run_ref"] == "h:run0"
+        assert exp["status"] == "running"  # unlike finish_experiment(), unaffected
+        assert exp["finished_at"] is None  # ditto
+    finally:
+        conn.close()
+
+
 def test_init_schema_is_idempotent(tmp_path):
     conn = db.connect(tmp_path / "cfm.db")
     try:
