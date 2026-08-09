@@ -513,8 +513,14 @@ compiler-flag-miner/
     cli.py                        [M0] `cfm measure <benchmark> --flags "..."` --
                                    NOT `cfm mine`; the search-driving orchestrator
                                    command doesn't exist until M1
-    orchestrator.py                [M1] phase state machine (§5-6)
-    compilers/{base,gcc}.py        [M2] Compiler Knowledge agent (§4.3)
+    orchestrator.py                [M1] phase state machine (§5-6) -- pending, not yet built
+    compilers/{base,gcc}.py        [M1] Compiler Knowledge agent (§4.3) -- built ahead of M2
+                                   on purpose: candidate_flags_for_signature() ignores its
+                                   own signature argument in M1 ("static catalog priors
+                                   only"), returning the whole applicable-language catalog
+                                   uniformly; M2 wires real resource_dominance-based
+                                   filtering into this same file rather than creating it
+                                   fresh
     agents/{knowledge_agent,hypothesis_agent}.py   [M2/M4]
     llm/driver.py, llm/prompts/    [M3] local LLM driver (§4.5, §9)
     agents/report_agent.py         [M3] Report agent (§10)
