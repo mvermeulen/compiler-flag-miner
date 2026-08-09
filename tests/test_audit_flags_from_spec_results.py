@@ -64,6 +64,86 @@ def test_looks_like_gnu_compiler_false_for_non_gnu():
     assert not is_gnu
 
 
+def test_looks_like_gnu_compiler_resolves_dollar_paren_speclang_prefix():
+    # Confirmed live against a real 494-config corpus (2026-08-09): SPEC's own
+    # example config template writes CC = $(SPECLANG)gcc with SPECLANG defined
+    # elsewhere as a directory path -- checking the raw unresolved "$(SPECLANG)gcc"
+    # string for a "gcc" suffix fails (it doesn't end in a /-delimited "gcc" until
+    # resolved); 31/31 real configs written this way were wrongly rejected before
+    # this fix. SPECLANG's own value below still contains an unresolved %{gcc_dir}
+    # percent-brace macro (a distinct, unhandled SPEC preprocessor construct) --
+    # deliberately left that way, since the rsplit("/", 1)[-1] basename check only
+    # needs the text after the *last* "/" to be exactly "gcc", regardless of
+    # whatever unresolved macro noise precedes it.
+    text = (
+        "SPECLANG = %{gcc_dir}/bin/\n"
+        "CC       = $(SPECLANG)gcc     -std=c99   %{model}\n"
+        "CXX      = $(SPECLANG)g++     -std=c++03 %{model}\n"
+        "FC       = $(SPECLANG)gfortran           %{model}\n"
+    )
+    is_gnu, ident = audit.looks_like_gnu_compiler(text)
+    assert is_gnu, ident
+
+
+def test_looks_like_gnu_compiler_requires_all_three_roles_to_be_gnu():
+    # Confirmed live against the same corpus: AOCC sets CC=clang/CXX=clang++ but
+    # FC=gfortran (a real gfortran binary, AOCC-plugin-modified codegen per the
+    # config's own notes_comp banner) -- any() previously let FC's "gfortran"
+    # alone pass the whole config as "GNU". 463/463 real AOCC configs were wrongly
+    # counted as GCC before this fix (all() now correctly rejects them on CC/CXX).
+    text = "CC = clang\nCXX = clang++\nFC = gfortran\n"
+    is_gnu, ident = audit.looks_like_gnu_compiler(text)
+    assert not is_gnu
+    assert "clang" in ident and "gfortran" in ident  # diagnostic text still shows all three
+
+
+def test_looks_like_gnu_compiler_vendor_marker_overrides_gnu_looking_identity():
+    # Defense-in-depth: even if CC/CXX/FC all *look* GNU by name, a config that
+    # self-identifies as a known non-GNU vendor (_KNOWN_NON_GNU_VENDOR_MARKERS) is
+    # still rejected -- not yet observed in the wild for a vendor whose C/C++
+    # driver is literally named gcc/g++, but the all()-role check alone wouldn't
+    # catch that hypothetical case.
+    text = (
+        "CC = gcc\nCXX = g++\nFC = gfortran\n"
+        "notes_comp_025 = The AOCC Fortran Plugin version 1.2 was used\n"
+    )
+    is_gnu, ident = audit.looks_like_gnu_compiler(text)
+    assert not is_gnu
+    assert "AOCC" in ident
+
+
+def test_looks_like_gnu_compiler_true_for_all_gnu_with_no_vendor_banner():
+    text = "CC = gcc\nCXX = g++\nFC = gfortran\n"
+    is_gnu, _ident = audit.looks_like_gnu_compiler(text)
+    assert is_gnu
+
+
+def test_looks_like_gnu_compiler_handles_speclang_with_no_path_separator():
+    # Confirmed live: 1/494 real configs define SPECLANG = %{gcc_dir} with no
+    # trailing "/bin/" (unlike the far more common template), resolving CC to
+    # "%{gcc_dir}gcc ..." -- no "/" anywhere in the string at all.
+    text = (
+        "SPECLANG = %{gcc_dir}\n"
+        "CC       = $(SPECLANG)gcc     -std=c99   %{model}\n"
+        "CXX      = $(SPECLANG)g++     -std=c++03 %{model}\n"
+        "FC       = $(SPECLANG)gfortran           %{model}\n"
+    )
+    is_gnu, ident = audit.looks_like_gnu_compiler(text)
+    assert is_gnu, ident
+
+
+def test_gnu_name_if_any_rejects_clang_plus_plus():
+    # The exact case a naive .endswith("g++") check would get wrong.
+    assert audit._gnu_name_if_any("clang++") is None
+    assert audit._gnu_name_if_any("clang") is None
+
+
+def test_gnu_name_if_any_accepts_target_triple_prefixed_cross_compiler():
+    assert audit._gnu_name_if_any("aarch64-linux-gnu-gcc") == "gcc"
+    assert audit._gnu_name_if_any("/usr/bin/g++") == "g++"
+    assert audit._gnu_name_if_any("%{gcc_dir}gfortran") == "gfortran"
+
+
 def test_resolve_refs_substitutes_and_flags_unresolved():
     all_vars = {"FOO": "-fbar -fbaz"}
     resolved, had_unresolved = audit.resolve_refs("$(FOO) -fqux", all_vars)
@@ -134,3 +214,30 @@ def test_run_audit_end_to_end_against_fixture(tmp_path, monkeypatch):
     report = audit.render_report(result, audit.DEFAULT_CATALOG)
     assert "-mtune" in report
     assert "-flto" in report
+
+
+# -- ignore-list additions (confirmed live against a real all-GCC corpus) ---------
+
+def test_is_ignored_diagnostic_and_build_speed_flags():
+    for tok in ("-Wno-error", "-Wno-implicit-int", "-w", "-pipe", "-fpermissive"):
+        assert audit.is_ignored(audit.normalize_base(tok), tok), tok
+
+
+def test_is_ignored_linker_passthrough_z():
+    # "-z muldefs" is two argv tokens; only "-z" itself is ever a candidate token
+    # at all ("muldefs" doesn't start with "-", filtered by _tokenize itself).
+    assert audit.is_ignored("-z", "-z")
+
+
+def test_is_ignored_legacy_buildability_shims():
+    for tok in (
+        "-fgnu89-inline", "-fallow-argument-mismatch", "-fcommon",
+        "-fconvert", "-funsigned-char",
+    ):
+        assert audit.is_ignored(audit.normalize_base(tok), tok), tok
+
+
+def test_is_ignored_does_not_swallow_a_real_tuning_flag():
+    # Sanity check the new -Wno- prefix/exact additions didn't overreach.
+    assert not audit.is_ignored("-fomit-frame-pointer", "-fomit-frame-pointer")
+    assert not audit.is_ignored("-mcpu", "-mcpu=native")

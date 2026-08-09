@@ -96,11 +96,47 @@ _VARREF_RE = re.compile(r"\$\(([A-Za-z_][A-Za-z0-9_]*)\)")
 # Flags that are real argv tokens but not the kind of tuning knob this audit cares about:
 # language-standard/ABI selection, preprocessor defines, linker/include/lib plumbing, and
 # the baseline optimization level (every result sets one; not itself a candidate to mine).
+#
+# Confirmed live against a real, all-GCC 31-config corpus (2026-08-09, after fixing
+# looks_like_gnu_compiler's misclassification bugs -- see that function's docstring):
+# every entry below is a genuine, common real-world GCC flag, but none of them are
+# performance-tuning knobs, so surfacing them as "new candidates" every run would just
+# be noise to re-triage by hand each time:
+#   -Wno-<x>/-w   diagnostic suppression only, zero codegen effect.
+#   -pipe         build-speed only (pipes vs. temp files between cc1/as); zero runtime effect.
+#   -fpermissive  C++ non-conformance relaxation, a compatibility switch, not a codegen one.
+#   -z            linker passthrough (e.g. "-z muldefs", confirmed used to work around a
+#                 symbol-collision quirk in 502.gcc_r/602.gcc_s's own sources) -- the
+#                 *value* token (e.g. "muldefs") never reaches here since it doesn't start
+#                 with "-" (_tokenize's own filter), only the "-z" flag itself does.
+#   -fgnu89-inline, -fallow-argument-mismatch, -fcommon, -fconvert, -funsigned-char
+#                 buildability/ABI-compatibility shims for legacy C/Fortran source on a
+#                 newer GCC (e.g. -fallow-argument-mismatch is needed for pre-Fortran-2018
+#                 argument-mismatched code since GCC 10 made this a hard error by default)
+#                 -- real, common, but never a performance lever; this project mines for
+#                 flags that make a *correct* build faster, not ones that make an
+#                 otherwise-broken build merely compile.
 _IGNORE_EXACT = {
     "-m64", "-m32", "-pthread", "-static", "-no-pie", "-fPIC", "-fPIE", "-shared",
     "-O0", "-O1", "-O2", "-O3", "-Os", "-Og", "-g",
+    "-w", "-pipe", "-fpermissive", "-z",
+    "-fgnu89-inline", "-fallow-argument-mismatch", "-fcommon", "-fconvert", "-funsigned-char",
 }
-_IGNORE_PREFIXES = ("-D", "-I", "-L", "-l", "-o", "-std=", "-V", "--version")
+_IGNORE_PREFIXES = ("-D", "-I", "-L", "-l", "-o", "-std=", "-V", "--version", "-Wno-")
+
+# Config self-identification text (sw_compiler000/notes_comp_*) known to name a
+# non-GNU vendor that nonetheless drives (or plugs into) a binary literally named
+# gcc/g++/gfortran -- confirmed live against a real 494-config corpus (2026-08-09):
+# every "AOCC" config in that corpus sets CC=clang/CXX=clang++ (caught by the
+# all-three-must-be-GNU check below on its own) but FC=gfortran running "The AOCC
+# Fortran Plugin ... to leverage AOCC optimizers with gfortran" (the config's own
+# words) -- a real gfortran binary, just AOCC-plugin-modified codegen, not
+# something the CC/CXX/FC identity strings alone can distinguish from vanilla
+# gfortran. This banner check is belt-and-suspenders defense for a
+# vendor whose C/C++ driver is *also* literally named gcc/g++ (not observed yet,
+# but the CC/CXX check alone wouldn't catch it) -- grow this set from confirmed
+# evidence when the next one turns up, not by guessing ahead of time.
+_KNOWN_NON_GNU_VENDOR_MARKERS = ("AOCC",)
 
 
 def _looks_like_cgi_bin(url: str) -> bool:
@@ -126,20 +162,84 @@ def extract_cfg_links(html: str, base_url: str) -> list[str]:
 
 def looks_like_gnu_compiler(cfg_text: str) -> tuple[bool, str]:
     """Cross-check that a fetched config actually used gcc/g++/gfortran, rather than
-    trusting the search filter (or a hand-curated seed page) blindly -- catches things
-    like a GCC-compatible-frontend compiler whose --version banner mentions gcc but whose
-    CC/CXX/FC lines invoke something else entirely."""
+    trusting the search filter (or a hand-curated seed page) blindly.
+
+    Two real bugs here were only caught by checking against a real 494-config corpus,
+    not by inspection (2026-08-09):
+
+    1. **CC/CXX/FC identities need $(VAR) resolution before checking, same as flag
+       values do.** SPEC's own example config template (cpu2017/Docs/config.html)
+       writes ``SPECLANG = %{gcc_dir}/bin/`` + ``CC = $(SPECLANG)gcc`` -- an extremely
+       common real-world idiom, not an edge case. Checking the raw unresolved text
+       for the literal substring "gcc" fails on ``"$(SPECLANG)gcc"`` (the identity
+       string is ``"$(SPECLANG)gcc"``, whose first "token" doesn't end in a
+       ``/``-delimited "gcc" until $(SPECLANG) is substituted) -- 31 out of 31
+       configs written this way were wrongly skipped as "not GNU" before this fix,
+       every one of them confirmed real GCC (9.1.0 through 13.2.0, plus "Ampere
+       GCC") via the config's own ``sw_compiler000`` banner.
+    2. **All three declared roles must independently be GNU, not just one
+       (`any()` -> `all()`).** AOCC (AMD's compiler) sets CC=clang/CXX=clang++ but
+       FC=gfortran (a real gfortran binary, AOCC-plugin-modified codegen -- see
+       _KNOWN_NON_GNU_VENDOR_MARKERS' comment) -- `any()` let FC's "gfortran" alone
+       pass the *entire* config as "GNU", incorrectly attributing every
+       clang-driven COPTIMIZE/CXXOPTIMIZE flag (including raw ``-mllvm <opt>``
+       LLVM-internal option passthroughs) to GCC. 463 out of 463 configs in the
+       same corpus were AOCC, all wrongly counted, before this fix.
+
+    A third, narrower gap in the same corpus (1 config, still worth fixing): a
+    ``rsplit("/", 1)[-1]`` basename split assumes the resolved identity is always
+    "/"-delimited before the compiler name. ``SPECLANG = %{gcc_dir}`` (no trailing
+    ``/bin/``, unlike the far more common template) resolves ``CC`` to
+    ``"%{gcc_dir}gcc ..."`` -- no ``/`` anywhere, so the whole glued string failed
+    the equality check even though it plainly ends in "gcc". Fixed by
+    ``_gnu_name_if_any()``'s word-boundary regex instead of path-splitting -- also
+    correctly handles a real, common invocation style this splitting approach
+    would have gotten right anyway (target-triple-prefixed cross-compilers like
+    ``aarch64-linux-gnu-gcc``), while still correctly rejecting "clang++" (which
+    literally ends in the three characters "g++" with no non-letter boundary
+    before them -- a naive ``.endswith("g++")`` check would wrongly match it).
+    """
+    all_vars = parse_all_vars(cfg_text)
     idents = []
     for var in ("CC", "CXX", "FC"):
         m = re.search(rf"^\s*{var}\s*=\s*(.+)$", cfg_text, re.MULTILINE)
         if m:
-            idents.append(m.group(1).strip())
+            resolved, _unresolved = resolve_refs(m.group(1).strip(), all_vars)
+            idents.append(resolved)
     joined = " | ".join(idents) if idents else "(no CC/CXX/FC found)"
-    gnu_names = ("gcc", "g++", "gfortran")
-    is_gnu = any(
-        ident.split()[0].rsplit("/", 1)[-1] in gnu_names for ident in idents if ident.split()
-    )
+
+    resolved_names = [_gnu_name_if_any(ident.split()[0]) for ident in idents if ident.split()]
+    is_gnu = bool(resolved_names) and all(name is not None for name in resolved_names)
+
+    vendor_marker = _non_gnu_vendor_marker(cfg_text)
+    if vendor_marker:
+        is_gnu = False
+        joined += f" [vendor marker: {vendor_marker}]"
+
     return is_gnu, joined
+
+
+# Matches gcc/g++/gfortran at the *end* of a token, immediately preceded by
+# either the start of the token or a non-letter character -- a real path
+# separator, a macro-substitution artifact (%{gcc_dir}gcc), or a target-triple
+# prefix (aarch64-linux-gnu-gcc) all qualify; "clang++" (ends in the literal
+# characters "g++", preceded by the letter "n") correctly does not.
+_GNU_NAME_SUFFIX_RE = re.compile(r"(?:^|[^A-Za-z])(gcc|g\+\+|gfortran)$")
+
+
+def _gnu_name_if_any(token: str) -> str | None:
+    m = _GNU_NAME_SUFFIX_RE.search(token)
+    return m.group(1) if m else None
+
+
+def _non_gnu_vendor_marker(cfg_text: str) -> str | None:
+    banner = "\n".join(
+        re.findall(r"^\s*(?:sw_compiler\d+|notes_comp_\d+)\s*=.*$", cfg_text, re.MULTILINE)
+    )
+    for marker in _KNOWN_NON_GNU_VENDOR_MARKERS:
+        if marker.lower() in banner.lower():
+            return marker
+    return None
 
 
 def _join_continuations(text: str) -> str:
@@ -266,6 +366,11 @@ class AuditResult:
     examples: dict = field(default_factory=dict)  # base -> [source_url, ...] (first few)
     configs_used: int = 0
     configs_skipped_non_gnu: int = 0
+    # Keyed by the resolved CC | CXX | FC identity string (looks_like_gnu_compiler's
+    # own diagnostic text) so *why* a batch of configs was skipped is visible in the
+    # report without re-deriving it -- exactly the "don't rediscover this a second
+    # time" this field exists for.
+    skip_reasons: Counter = field(default_factory=Counter)
     configs_with_unresolved_refs: int = 0
     fetch_failures: list = field(default_factory=list)  # [(url, error_str)]
 
@@ -284,9 +389,10 @@ def run_audit(cfg_urls: list[str], catalog_path: Path, cache_dir: Path, user_age
             continue
 
         if not skip_compiler_check:
-            is_gnu, _ident = looks_like_gnu_compiler(text)
+            is_gnu, ident = looks_like_gnu_compiler(text)
             if not is_gnu:
                 result.configs_skipped_non_gnu += 1
+                result.skip_reasons[ident] += 1
                 continue
 
         tokens, had_unresolved = extract_flag_tokens(text)
@@ -340,6 +446,15 @@ def render_report(result: AuditResult, catalog_path: Path) -> str:
         "",
         ", ".join(f"`{b}` ({c})" for b, c in result.ignored.most_common()) or "_(none)_",
     ]
+    if result.skip_reasons:
+        lines += [
+            "",
+            "## Configs skipped as non-GNU, by identity",
+            "",
+            "| CC \\| CXX \\| FC (resolved) | Configs |",
+            "|---|---|",
+        ]
+        lines += [f"| `{ident}` | {count} |" for ident, count in result.skip_reasons.most_common()]
     if result.fetch_failures:
         lines += ["", "## Fetch failures", ""]
         lines += [f"- {url}: {err}" for url, err in result.fetch_failures]
@@ -422,6 +537,7 @@ def main(argv: list[str] | None = None) -> int:
             "examples": result.examples,
             "configs_used": result.configs_used,
             "configs_skipped_non_gnu": result.configs_skipped_non_gnu,
+            "skip_reasons": dict(result.skip_reasons),
             "configs_with_unresolved_refs": result.configs_with_unresolved_refs,
             "fetch_failures": result.fetch_failures,
         }, indent=2))
