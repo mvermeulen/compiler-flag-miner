@@ -213,6 +213,34 @@ cycle — validated ahead of time, not discovered by trial-and-error:
   str`. `compilers/gcc.py` is the concrete implementation; `compilers/llvm.py`/`compilers/aocc.py` are
   the future modularity seam.
 
+**Generalizing the signature vocabulary beyond topdown L1 (M2.5, §14).** The table above is keyed
+purely on `resource_dominance`/`memory_attribution` — both derived only from topdown L1 percentages
+(retire/frontend/backend/speculate). That's real signal, but too coarse for some catalog entries: e.g.
+`-mprefer-vector-width=256/512` is currently gated on `memory-bound-corroborated`/`compute-bound` alone
+(confirmed against the seed catalog live, 2026-08-09), meaning a memory-bound *integer* workload
+(hash tables, graph traversal, chess move generation) gets vector-width flags proposed just as readily
+as a genuinely FP-heavy one — those flags are near-irrelevant without floating-point/vector work to
+widen. Confirmed live the same session that wspy already *measures* several relevant additional
+counters that just aren't wired into this table yet:
+  - **Floating-point/vector-op density** — wspy's `float` metric (AMD-only, `topdown.c:print_float()`,
+    `(fp_ret_fops_AVX512+...+fp_ret_fops_scalar)/instructions*100`) is real and already reaches
+    `store.db` as a generic metric (confirmed live via a direct `wspy --counters=float --csv` probe),
+    but isn't yet promoted into `run_features` — `wspy-archetype`'s own maintainers already flagged
+    this exact gap in `archetype.c`'s own header comment ("a new axis, e.g. floating-point density once
+    `--float` has real cross-workload validation") as a deliberately deferred extension, not an
+    oversight.
+  - **Page-fault rate** — unlike `float`, wspy's `fault_rate` ((minflt+majflt)/elapsed) is *already* a
+    promoted `[feature]` reaching `run_features` today (confirmed against `doc/METRICS.md`) — purely a
+    cfm-side gap (never added to this catalog's signal vocabulary), no wspy-side work needed to use it.
+  - Other PDF-suggested axes (`backend_memory` vs. `backend_cpu` split, `icache`/`opcache`/`dTLB` miss
+    rates, IBS DRAM-bound rate) are a mix of already-`[feature]` and `[raw]`-only — each needs the same
+    live check before assuming either way, not a blanket assumption.
+
+See §14's M2.5 for the concrete plan (new `RunSignature` fields, expanded catalog `topdown_signals`
+vocabulary, and how this relates to the external reference-matrix corpus) and §15 for the resolved
+design questions (where a new axis is computed, and how document-style guidance like a generated
+GCC-optimization guide should — and shouldn't — reach the LLM).
+
 ### 4.4 Hypothesis / Experiment Designer agent
 
 The bridge between "counters say X" and "here's the next trial to run" — deterministic ranking logic,
@@ -586,8 +614,74 @@ compiler-flag-miner/
 - **M2 — signature-aware candidate filtering.** Wire in `wspy-archetype`'s `resource_dominance`/
   `memory_attribution` to drive Compiler Knowledge agent candidate selection (the table in §4.3),
   instead of trying the whole catalog uniformly.
+- **M2.5 — generalized signature axes, external reference-matrix corpus, adaptive trial cost.**
+  Motivated directly by two things confirmed live during M1's real end-to-end verification run
+  (2026-08-09): the existing signature vocabulary is too coarse for some catalog entries (§4.3's new
+  "Generalizing the signature vocabulary" note), and a single confirmation-grade (`deep-cpu`, 3
+  repetitions) trial against a real, substantial SPEC benchmark took multiple hours on real hardware
+  (PMU multiplexing — this host's 6 general-purpose counter slots can't fit `deep-cpu`'s full counter
+  sweep in one pass, so wspy internally re-executes the workload several times per pass; invisible
+  against a toy sub-second probe, very real against a multi-minute real benchmark). Three concrete
+  pieces of work, sequenced by dependency:
+  1. **New `RunSignature` fields, sourced without waiting on wspy upstream.** Add fields like
+     `fp_op_density_pct` (from wspy's `float` metric — `[raw]` today, reachable via a
+     `wspy-summary --metric float` call the same way `check_regression()` already reaches
+     `wspy-summary`, independent of `wspy-archetype`'s own axis set) and wire in `fault_rate` (already
+     a promoted `[feature]`, purely a catalog/cfm-side gap today). Expand
+     `config/gcc_flag_catalog.seed.json`'s `topdown_signals` vocabulary and §4.3's table to reference
+     these — e.g. re-key `-mprefer-vector-width=256/512` off real FP/vector density instead of the
+     current too-coarse `memory-bound-corroborated`/`compute-bound` pair. Thresholds (what counts as
+     "FP-dense") start as an explicitly-labeled uncalibrated heuristic (same posture `wspy-archetype`'s
+     own thresholds already take toward *their* hand-picked numbers), refined once real data exists —
+     see item 2.
+  2. **Leverage the external reference-matrix corpus (`mvermeulen.org/workload`) rather than
+     re-collecting it.** This is real, already-running infrastructure: `wspy-publish` posts run data
+     from a distributed set of machines over time, and `scripts/publish_reference_matrix.py`
+     (wspy's own repo) aggregates it per `(suite, benchmark, machine)` cell via
+     `wspy-testpoint aggregate --suite --benchmark --machine --db <db> [--report-root <path>] --csv`
+     — an **already-existing, already-working stable CLI** in the currently-pinned wspy build
+     (confirmed live), so this is a `WspyInstrumentation`-style shell-out addition, not new wspy
+     feature work or a departure from cfm's established "only integrate via stable wspy CLIs, never
+     import wspy's internal Python" posture. Two real uses, given the explicit non-comparability
+     caveat below:
+     - **Hypothesis aid**: before spending a real trial, check whether this benchmark's reference-
+       matrix history (on this exact machine, or the closest available one) already suggests a
+       flag/signature combination is directionally promising — informing Phase 2 candidate
+       generation/ranking, never substituting for a real measurement.
+     - **Adaptive trial cost** (item 3 below): the reference matrix's own historical spread
+       (`stddev`/`cv_percent` across its many prior repetitions) is a real, data-backed noise-floor
+       estimate for deciding "is one quick run's result already unambiguous, or genuinely too close to
+       call" — better than a guessed threshold.
+     Cross-machine comparability is **not** assumed (SOC/frequency/config can differ) — this is "the
+     shape of the data," a prior to inform search direction, never a substitute for a real, validated
+     measurement on the actual host being optimized (§15's decision makes this explicit). Local-`--db`
+     access (cfm's own accumulating `results/store.db`, growing as it mines more benchmarks — zero new
+     dependencies) is the near-term path; a `vendor/workload`-style pinned clone of the actual
+     report-root repository (richer, real cross-machine data, but a new vendored dependency mirroring
+     `vendor/wspy`'s own submodule-pinning discipline) is a real but heavier follow-on, not needed to
+     start.
+  3. **Adaptive/sequential trial-count strategy for Phase 3/4/5.** Today's fixed "always 3 confirmation-
+     grade repetitions" is the direct cause of the multi-hour-per-trial cost observed live. Proposed:
+     run one rep first; if the observed delta is unambiguous against the relevant comparison point's
+     own noise floor (informed by item 2's historical spread when available, a conservative fallback
+     threshold otherwise) — either a clear win, a clear loss, or an outright build/validate failure —
+     decide immediately rather than spending the other repetitions confirming what's already obvious;
+     escalate to the full repetition count only when the single-run result is genuinely close to the
+     noise floor (the PDF's own framing: "already have our answer before doing a more in-depth
+     comparison trying to figure out whether something is a 0.8% increase or a 0.8% decrease"). Phase 1
+     (baseline) is the yardstick every other trial compares against and likely keeps its full repetition
+     count regardless; Phase 4 (confirmation)/5 (combination), one decision per candidate/step, are
+     where this pays off most.
 - **M3 — local LLM integration**, default Ollama (§9 all four jobs, §15) plus the Report agent's
-  narrative section.
+  narrative section. The LLM's structured context for jobs 1/2 (§9) includes whatever deterministic
+  signature fields M2.5 adds (FP density, page-fault rate, ...) as pre-classified labels, not raw
+  counters for the model to threshold itself — the same "generated GCC-optimization guide" content a
+  document like a hand-written counter-to-flag mapping PDF provides belongs *upstream*, mined into
+  M2.5's deterministic rule table, not handed to the LLM as free-form context to reason over raw
+  numbers with (principle 1's whole reason for existing: a small local model doing open-ended
+  quantitative reasoning reliably is the risk that principle guards against). The LLM's own narrative
+  job can still *reference* a pre-classified signal ("this workload showed elevated FP density") as
+  color once it's a real, computed field — it just never does the thresholding itself.
 - **M4 — cross-benchmark knowledge transfer** (§8): mine a second, differently-shaped benchmark and
   confirm its starting hypothesis queue is visibly informed by the first benchmark's results.
 - **M5 — expand the modularity seams** (§12): a second compiler or workload backend, proving the
@@ -627,3 +721,31 @@ code was written so M0-M4 have no ambiguity to stall on.
   real, already-published example to match. The `llm/driver.py` interface (§4.5) supports `llama-server`
   identically via the same OpenAI-chat-compatible client; adding it as a second `--llm` target later is
   a config change, not new code, so it's not blocked on this decision — just not the M3 default.
+- **New signature axes are computed cfm-side first, not blocked on a wspy upstream change.** `float`
+  (FP-op density) isn't promoted into wspy's own `run_features`/`wspy-archetype` axis set yet — its own
+  maintainers are deliberately waiting for "real cross-workload validation" before picking thresholds.
+  Rather than block M2.5 on that upstream work, cfm reads the underlying `[raw]` metric directly (a
+  `wspy-summary`-style shell-out, same pattern `check_regression()` already uses) and does its own
+  threshold classification, explicitly labeled uncalibrated. Once cfm's own mining (and the external
+  reference-matrix corpus, which already has more cross-workload history than cfm alone will generate
+  for a while) produces real threshold data, contributing a `float_pct`/vectorization-density axis
+  upstream to wspy becomes a real, well-grounded proposal instead of a guess — tracked as
+  [wspy#227](https://github.com/mvermeulen/wspy/issues/227), filed 2026-08-09, rather than left to
+  fall out of this document.
+- **External reference-matrix data is a hypothesis aid, never a substitute measurement.** SOC/frequency/
+  configuration differences across the machines `mvermeulen.org/workload`'s corpus spans mean a cross-
+  machine number is *not* assumed comparable to a trial on the actual host being optimized — it
+  informs "does this look directionally promising" (candidate ranking) and "how much noise should we
+  expect" (adaptive trial-count's stop/escalate decision, M2.5 item 3), never an accept/reject verdict
+  by itself. Every accepted result still has to independently clear cfm's own `--action=validate` +
+  non-overlapping-CI bar on the host it's actually being mined for, no exceptions — the same posture §11
+  already takes toward every other trial, just reaffirmed here since a new external data source is
+  exactly the kind of thing that invites a shortcut around it.
+- **Reference-matrix access: shell out to `wspy-testpoint aggregate`, not wspy's internal Python.**
+  Confirmed live (2026-08-09) that this CLI already exists and works in the currently-pinned wspy build
+  — `scripts/publish_reference_matrix.py` (wspy's own repo) already builds the published site from
+  exactly this tool's output, so cfm reusing it is asking wspy for data through the same door its own
+  publishing pipeline uses, not a new integration surface. `--db <path>` against cfm's own accumulating
+  `results/store.db` (zero new dependencies, grows organically as cfm mines more benchmarks) is the
+  near-term path; a `vendor/workload`-style pinned clone of the real report-root repository (richer,
+  genuine cross-machine data via `--report-root`) is real future work, not needed to start M2.5.
