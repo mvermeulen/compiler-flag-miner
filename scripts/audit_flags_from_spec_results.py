@@ -40,8 +40,10 @@ This is a best-effort line-oriented scanner for SPEC's cfg format (see
 cpu2017/Docs/config.html for the real grammar), not a full implementation of its
 %if/%define preprocessor -- it resolves simple $(VAR) substitutions but does not
 evaluate conditional blocks. Good enough to surface catalog-gap candidates for human
-(or later, M2's Compiler Knowledge agent) review; not a guarantee that every resolved
-flag is exactly what a given trial's peak build used.
+(or the Compiler Knowledge agent's own validate_flagset, cfm/compilers/gcc.py) review;
+not a guarantee that every resolved flag is exactly what a given trial's peak build
+used. Flag-name normalization (normalize_flag_base/catalog_flag_base) lives in
+cfm/util.py, shared with cfm/compilers/gcc.py rather than duplicated here.
 """
 
 from __future__ import annotations
@@ -59,6 +61,14 @@ from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+# Runnable standalone (`python3 scripts/audit_flags_from_spec_results.py`, no `pip
+# install -e .` needed first) by making sure the local `cfm` package resolves even
+# when this script's own directory -- not the repo root -- is what Python put on
+# sys.path. A no-op when cfm is already importable (e.g. the dev venv).
+sys.path.insert(0, str(REPO_ROOT))
+from cfm.util import normalize_flag_base as normalize_base  # noqa: E402
+from cfm.util import catalog_flag_base as _catalog_base  # noqa: E402
+
 DEFAULT_CATALOG = REPO_ROOT / "config" / "gcc_flag_catalog.seed.json"
 DEFAULT_CACHE_DIR = REPO_ROOT / ".cache" / "spec_flag_audit"
 
@@ -199,32 +209,10 @@ def extract_flag_tokens(cfg_text: str) -> tuple[list[str], bool]:
     return tokens, had_unresolved
 
 
-def normalize_base(token: str) -> str:
-    """Collapse a flag token to the name a catalog entry would use, e.g.
-    '-mbranch-cost=4' and the catalog's '-mbranch-cost=N' both normalize to
-    '-mbranch-cost'; '--param=prefetch-latency=200' normalizes to
-    '--param:prefetch-latency' to match '--param prefetch-latency=N'."""
-    if token.startswith("--param="):
-        sub = token.split("=", 2)[1]
-        return f"--param:{sub.split('=')[0]}"
-    if "=" in token:
-        return token.split("=", 1)[0]
-    return token
-
-
 def is_ignored(base: str, token: str) -> bool:
     if token in _IGNORE_EXACT:
         return True
     return any(token.startswith(p) for p in _IGNORE_PREFIXES)
-
-
-def _catalog_base(flag: str) -> str:
-    """Normalize a catalog entry's 'flag' field into normalize_base()'s same base-name
-    space, e.g. '--param prefetch-latency=N' -> '--param:prefetch-latency'."""
-    if flag.startswith("--param"):
-        sub = flag.split()[1]
-        return f"--param:{sub.split('=')[0]}"
-    return normalize_base(flag)
 
 
 def load_catalog_bases(catalog_path: Path) -> set[str]:
