@@ -1,0 +1,22 @@
+I want you to design an agentic system for intelligently flag mining compiler options.
+
+We will focus first on optimizing SPEC CPU2026 gcc/gfortran compiler options but design a system
+that is modular so we can expand to other compilers, and other workloads.
+
+I expect this initial system will likely have several types of agents such as:
+1. An agent that knows how to operate SPEC CPU 2026 including the configuration files,
+   building and running and measuring results.
+2. An agent that runs the wspy instrumentation platform to get measurements such as
+   performance counters and other analysis.  See /home/mev/source/wspy for sources and
+   https://mvermeulen.org/workload/cpu2026/706-stockfish_r/gcc_o3-base/amd-370-64gb/20260803t014918-096-b0966cf7/ for example of reports/analysis that can be created.
+3. An agent that knows about gcc compiler options, e.g. https://gcc.gnu.org/onlinedocs/gcc-16.2.0/gcc/Optimize-Options.html
+4. Some way of relating performance counter results with likely compiler options to try to create
+   hypothesis and experiments of which options might optimize. Also some way of retaining
+   retaining learnings of past experiments so they might also be tried with future benchmarks.
+5. Some way of driving the combination of these agents using a choice of a local llm running
+   either llama.cpp or ollama. Guiding the overall process.
+
+These items are mostly illustrating the key aspects of the system rather than a specific
+architecture. Use these to explore and design a system where the first use case will be
+"given a SPEC CPU2026 benchmark name, create and execute a plan for finding peak compiler
+options to get the highest performance".
