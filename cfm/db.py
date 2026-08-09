@@ -78,6 +78,20 @@ def finish_experiment(
     conn.commit()
 
 
+def set_baseline_run_ref(conn: sqlite3.Connection, experiment_id: int, baseline_run_ref: str) -> None:
+    """Records Phase 1's baseline reference on a still-*running* experiment --
+    deliberately not ``finish_experiment()`` reused with ``status="running"``,
+    which would also unconditionally stamp ``finished_at`` (that column means what
+    it says: the experiment actually ending, doc/DESIGN.md sec. 6 Phase 7). A
+    single-purpose UPDATE avoids that side effect entirely.
+    """
+    conn.execute(
+        "UPDATE experiments SET baseline_run_ref=? WHERE id=?",
+        (baseline_run_ref, experiment_id),
+    )
+    conn.commit()
+
+
 def record_trial(
     conn: sqlite3.Connection,
     *,

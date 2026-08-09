@@ -509,11 +509,20 @@ compiler-flag-miner/
     db.py                         [M0] cfm.db schema application + typed accessors
     workloads/{base,spec_cpu2026}.py     [M0] SPEC Runner agent (§4.1)
     instrumentation/{base,wspy}.py       [M0] Instrumentation agent (§4.2)
-    agents/spec_agent.py          [M0] run_one_trial(): the M0 pipeline glue
+    agents/spec_agent.py          [M0] run_one_trial(): the M0 pipeline glue --
+                                   workload/instrumentation backends and the wspy
+                                   profile are now injectable/overridable per call
+                                   (M1: orchestrator.py needs a different profile
+                                   per phase, and its own tests need fakes with no
+                                   real SPEC/wspy calls)
     cli.py                        [M0] `cfm measure <benchmark> --flags "..."` --
                                    NOT `cfm mine`; the search-driving orchestrator
-                                   command doesn't exist until M1
-    orchestrator.py                [M1] phase state machine (§5-6) -- pending, not yet built
+                                   command doesn't exist until PR 6 of M1's own
+                                   build-out
+    orchestrator.py                [M1] phase state machine (§5-6) -- Phases 1
+                                   (baseline)/2 (candidate generation, trivial)/3
+                                   (screening) built; Phase 4 (confirmation)/5
+                                   (greedy combination) still pending, next PR
     compilers/{base,gcc}.py        [M1] Compiler Knowledge agent (§4.3) -- built ahead of M2
                                    on purpose: candidate_flags_for_signature() ignores its
                                    own signature argument in M1 ("static catalog priors
