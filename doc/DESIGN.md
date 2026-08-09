@@ -132,10 +132,14 @@ of an existing one — see below) for a candidate flag set, running `--action=bu
   already have working `gcc_O3` base+peak build scaffolding on this host (`source.json`,
   `build.gcc_O3.log`) spanning intrate and fprate — real, already-proven `runcpu` mechanics to build
   the SPEC Runner agent against immediately, no new SPEC-side plumbing required to start.
-- **Interface** (`workloads/base.py`, §12): `generate_config(bench, tune, flags) -> path`,
-  `build(bench, tune, config) -> BuildResult`, `run(bench, tune, config, wspy_profile) -> RunResult`,
-  `parse_result(...) -> {ratio, seconds, status}`. This is the seam a future `workloads/spec_cpu2017.py`
-  or `workloads/phoronix.py` implements identically.
+- **Interface** (`workloads/base.py`, §12, implemented): `generate_config(bench, tune, flags) ->
+  Path`, `build(bench, tune, config_path) -> BuildResult`, `run_command(bench, tune, config_path,
+  iterations) -> argv`, `parse_result(bench, tune, raw_output) -> RunResult`. Note the one refinement
+  from earlier drafts: `run_command` returns the argv for the measured run rather than executing it
+  (originally sketched as `run(...) -> RunResult` directly) — this class never launches the measured
+  run itself, since wrapping it in `wspy-run` is the whole reason it happens under the Instrumentation
+  agent's control (§4.2) instead. This is the seam a future `workloads/spec_cpu2017.py` or
+  `workloads/phoronix.py` implements identically.
 
 ### 4.2 Instrumentation agent (wspy)
 
@@ -153,11 +157,15 @@ the rest of the system consumes:
   `wspy-archetype --run <host:run_id>` (get `resource_dominance`/`memory_attribution` — the "signature"
   the Compiler Knowledge and Hypothesis agents key off), `wspy-summary --run-id ... --check-regression`
   style comparison against the running baseline for the statistical accept/reject call.
-- **Interface** (`instrumentation/base.py`): `characterize(bench, tune, config, profile) ->
-  RunSignature` where `RunSignature` bundles the wspy run id, the archetype scorecard, and the metric
-  table wspy-summary would report — the one object every other agent reasons about, so a future
-  non-wspy instrumentation backend (e.g. raw `perf stat` on a host without wspy) only needs to produce
-  the same `RunSignature` shape.
+- **Interface** (`instrumentation/base.py`, implemented): `characterize(command, suite, benchmark,
+  run_id, profile, output_root) -> RunSignature` — this is the method that actually shells out to
+  `wspy-run <profile> -- <command>` (the `command` argv comes from the SPEC Runner agent's
+  `run_command()`, §4.1) — where `RunSignature` bundles the wspy run id, the archetype scorecard, and
+  the metric table wspy-summary would report — the one object every other agent reasons about, so a
+  future non-wspy instrumentation backend (e.g. raw `perf stat` on a host without wspy) only needs to
+  produce the same `RunSignature` shape. `preflight()` checks all five wspy binaries exist before any
+  subprocess call, failing fast and specifically (mirroring `wspy --preflight`'s own posture) rather
+  than surfacing a missing binary as an opaque subprocess error mid-pipeline.
 
 ### 4.3 Compiler Knowledge agent (GCC/GFortran)
 
@@ -461,7 +469,9 @@ prior knowledge-base entries were reused vs. newly discovered here.
 | Instrumentation | `instrumentation/base.py` | `instrumentation/wspy.py` | a `perf stat`-only fallback for hosts without a wspy build, same `RunSignature` output shape |
 | LLM | `llm/driver.py` | one OpenAI-chat-compatible client, pointed at Ollama or `llama-server` | vLLM, LM Studio, or a hosted API — `base_url`/`model` change only |
 
-## 13. Proposed repository layout
+## 13. Repository layout
+
+Marked per-item with what's actually implemented (M0) vs. still pending (a later milestone, §14):
 
 ```
 compiler-flag-miner/
@@ -469,28 +479,43 @@ compiler-flag-miner/
     prompt.txt                    (existing)
     DESIGN.md                     (this document)
   config/
-    gcc_flag_catalog.seed.json    (seed knowledge base -- see companion artifact)
+    gcc_flag_catalog.seed.json    (seed knowledge base; not yet read by any code -- M2)
   schema/
-    cfm_schema.sql                (DDL from §7 -- see companion artifact)
-  cfm/                            (python package, not yet scaffolded -- see §14 M0)
-    orchestrator.py                phase state machine (§5-6)
-    db.py                          cfm.db schema + typed accessors
-    compilers/{base,gcc}.py
-    workloads/{base,spec_cpu2026}.py
-    instrumentation/{base,wspy}.py
-    llm/driver.py, llm/prompts/
-    agents/{spec_agent,wspy_agent,knowledge_agent,hypothesis_agent,report_agent}.py
-    cli.py                         `cfm mine <benchmark> ...` entry point
-  tests/
+    cfm_schema.sql                (DDL from §7)
+  cfm/                            (python package)
+    util.py                       [M0] shared helpers (parse_kv_lines, ...)
+    config.py                     [M0] CfmConfig, env-var-driven
+    db.py                         [M0] cfm.db schema application + typed accessors
+    workloads/{base,spec_cpu2026}.py     [M0] SPEC Runner agent (§4.1)
+    instrumentation/{base,wspy}.py       [M0] Instrumentation agent (§4.2)
+    agents/spec_agent.py          [M0] run_one_trial(): the M0 pipeline glue
+    cli.py                        [M0] `cfm measure <benchmark> --flags "..."` --
+                                   NOT `cfm mine`; the search-driving orchestrator
+                                   command doesn't exist until M1
+    orchestrator.py                [M1] phase state machine (§5-6)
+    compilers/{base,gcc}.py        [M2] Compiler Knowledge agent (§4.3)
+    agents/{knowledge_agent,hypothesis_agent}.py   [M2/M4]
+    llm/driver.py, llm/prompts/    [M3] local LLM driver (§4.5, §9)
+    agents/report_agent.py         [M3] Report agent (§10)
+  tests/                           [M0] pure-logic unit tests only -- nothing that
+                                   shells out to a real runcpu/wspy binary; a real
+                                   end-to-end smoke run against this host's SPEC
+                                   install is a separate, manual, opt-in step
+  pyproject.toml                   [M0] stdlib-only, `pip install -e .` gives `cfm`
 ```
 
 ## 14. Phased build plan
 
-- **M0 — mechanical pipeline, no search, no LLM.** Given one fixed, hand-chosen flag set, generate a
-  real peak config, build, run under `wspy-run`, and get one validated, wspy-measured ratio for
-  `706.stockfish_r`. Proves the SPEC Runner + Instrumentation agents' plumbing end to end. Low risk —
-  the `runcpu` mechanics for this exact benchmark are already proven on this host (existing
-  `gcc_O3/{base,peak}` scaffolding).
+- **M0 — mechanical pipeline, no search, no LLM. Shipped** (`cfm measure <benchmark> --flags "..."`,
+  not the eventual `cfm mine` search command — that's M1). Given one fixed, hand-chosen flag set,
+  generate a real peak config, build, run under `wspy-run`, and get one validated, wspy-measured ratio
+  for `706.stockfish_r`. Proves the SPEC Runner + Instrumentation agents' plumbing end to end. Low risk
+  — the `runcpu` mechanics for this exact benchmark are already proven on this host (existing
+  `gcc_O3/{base,peak}` scaffolding). Unit-tested without needing a real SPEC/wspy install (§13); a real
+  end-to-end run needs `make` run in the wspy checkout first (`instrumentation/wspy.py`'s `preflight()`
+  checks for this and fails fast/specifically rather than mid-pipeline) and hasn't been exercised
+  against the live install yet — the `.rsf` ratio-field-name guess in
+  `workloads/spec_cpu2026.py`'s `CANDIDATE_RATIO_FIELDS` is unconfirmed until it has.
 - **M1 — rule-based screening/confirmation loop (§6 Phases 1-5), no LLM.** Static catalog priors only;
   first fully-automated "peak beats base" result, backed by wspy-summary's own statistical bar.
 - **M2 — signature-aware candidate filtering.** Wire in `wspy-archetype`'s `resource_dominance`/

@@ -2,12 +2,12 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working in this repository.
 
-**Status: planning stage, no `cfm/` code yet.** This file is deliberately a minimal placeholder —
-practices and conventions only. It does not describe an "Architecture" or "Common edits" section
-(wspy's `CLAUDE.md` has both) because there is no mechanism yet to describe accurately; a section
-that claims to cover mechanism before mechanism exists goes stale on day one. Expand this file with
-those sections once `cfm/` (doc/DESIGN.md §13) actually lands — wspy's own `CLAUDE.md` is the
-template to imitate for shape/tone at that point, not to copy before there's something real to say.
+**Status: M0 shipped** (doc/DESIGN.md §14) — the mechanical pipeline (`cfm measure`) exists and is
+unit-tested, but hasn't yet been exercised against this host's real SPEC CPU2026/wspy install (wspy
+isn't built here yet — `preflight()` catches that and fails cleanly rather than mid-pipeline). No
+search loop, compiler-knowledge catalog wiring, cross-benchmark knowledge transfer, or LLM driver yet
+— those are M1-M3 (doc/DESIGN.md §13's layout table marks exactly what exists vs. what's still
+pending, module by module).
 
 ## Documentation map
 
@@ -76,12 +76,78 @@ Full branch/PR discipline, same shape as wspy's:
 
 ## Non-obvious traps
 
-None yet — this project has no code. Entries go here as they're found, each with enough context
-(what broke, why it wasn't obvious, what to check before repeating the mistake) that a future session
-doesn't have to rediscover it the hard way.
+- **SPEC's `.rsf` ratio field name is an educated guess, not a confirmed fact.**
+  `cfm/workloads/spec_cpu2026.py`'s `CANDIDATE_RATIO_FIELDS` assumes the per-benchmark/tune ratio
+  lives under a `...ratio` key in the `.rsf` file, based on SPEC's docs and CPU2017-generation
+  naming conventions — but no `--action=run`/`validate` has ever completed on this host (only
+  `--action=build`), so there is no real `.rsf` file to check it against yet. The first real trial run
+  must confirm or correct this list; update this entry (don't just delete it) once it has, so the next
+  session knows the guess was actually verified rather than just no-longer-flagged.
+- **A bare `subprocess.run()` does not get SPEC's `shrc`-exported environment.** `runcpu` needs
+  `PATH`/`PERL5LIB`/etc. that `$SPEC/shrc` exports; wspy's own `workload/cpu2017/run_test.sh` gets
+  this for free by sourcing `shrc` once into its own long-lived shell before calling anything else.
+  `cfm/workloads/spec_cpu2026.py` doesn't have that luxury (Python subprocess calls don't inherit a
+  sourced-but-not-exported shell function's environment), so every `runcpu` invocation is individually
+  wrapped as `bash -c 'cd $SPECDIR && source shrc && ulimit -s unlimited && exec runcpu ...'` — don't
+  "simplify" this back to a bare `subprocess.run(["runcpu", ...])`, it will fail to find `runcpu` (and
+  worse, may silently find a *different* stale `runcpu` on `PATH`) without the sourced environment.
 
 ## Build & test
 
-No code yet. See `doc/DESIGN.md` §14 for the M0-M6 phased build plan; M0 ("mechanical pipeline, no
-search, no LLM") is the first milestone that will give this section something real to say. Until
-then, there is nothing to build or test here beyond the docs/schema/catalog files themselves.
+```
+python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
+.venv/bin/pytest -q                      # unit tests only -- no real SPEC/wspy calls, see below
+.venv/bin/cfm init-db --db /tmp/x.db     # sanity-checks schema application, no SPEC/wspy needed
+.venv/bin/cfm measure 706.stockfish_r --flags "-O3 -march=native -flto"
+                                          # the real thing -- needs `make` run in the wspy checkout
+                                          # first (`preflight()` says so explicitly if it isn't) and a
+                                          # working SPEC CPU2026 install; a real invocation launches an
+                                          # actual SPEC build+run (minutes, real CPU/disk use) --
+                                          # confirm with the user before running this one, per the
+                                          # exclusive-machine-access rule above.
+```
+
+`tests/` covers pure logic only (config resolution, `.rsf`/trace-output parsing, `cfm.db` schema and
+accessors, SPEC config rendering, preflight's binary-existence check) — nothing that shells out to a
+real `runcpu` or `wspy` binary, so the suite runs identically on a host with no SPEC license or wspy
+checkout at all. A real end-to-end run is the manual, opt-in `cfm measure` invocation above, not part
+of the automated test suite.
+
+## Architecture
+
+**Data flow (M0):** `cfm measure` (`cli.py`) → `agents/spec_agent.run_one_trial()` → SPEC Runner
+(`workloads/spec_cpu2026.py`: render a trial config, build, hand a `runcpu --action=validate` argv to
+—) → Instrumentation (`instrumentation/wspy.py`: `wspy-run` executes that argv, then `wspy-validate`/
+`wspy-store`/`wspy-archetype` sequence over the result) → back to the SPEC Runner to parse the `.rsf`
+ratio → one row each in `cfm.db`'s `experiments`/`trials` tables (`db.py`), regardless of outcome.
+
+| File | Responsibility |
+|---|---|
+| `cfm/util.py` | `parse_kv_lines()` — shared `key=value`-per-line parser for both wspy's trace-style CLI output and SPEC's `.rsf` format. |
+| `cfm/config.py` | `CfmConfig.from_env()` — env-var-driven paths/hostname (`CFM_SPEC_DIR`, `CFM_WSPY_DIR`, ... — see the file for the full list and defaults), explicit kwargs > environment > built-in default, resolved at call time. |
+| `cfm/db.py` | Applies `schema/cfm_schema.sql` (idempotent) and provides typed `create_experiment`/`record_trial`/`get_experiment`/`list_trials`/`finish_experiment` accessors. No ORM. |
+| `cfm/workloads/base.py` | `WorkloadBackend` interface + `BuildResult`/`RunResult` dataclasses (doc/DESIGN.md §4.1/§12). |
+| `cfm/workloads/spec_cpu2026.py` | The only implementation: renders a per-trial SPEC config via `include:` + a `<bench>=peak:` override section, drives `runcpu --action=build`/`--action=validate` through a `shrc`-sourcing `bash -c` wrapper (see Non-obvious traps above), parses the resulting `.rsf` file. |
+| `cfm/instrumentation/base.py` | `InstrumentationBackend` interface + `RunSignature` dataclass (doc/DESIGN.md §4.2/§12). |
+| `cfm/instrumentation/wspy.py` | The only implementation: `preflight()` checks all five wspy binaries exist; `characterize()` runs `wspy-run <profile> -- <command>`, then `wspy-validate`/`wspy-store`/`wspy-archetype`. |
+| `cfm/agents/spec_agent.py` | `run_one_trial()` — the M0 pipeline glue described above. The only agent module that exists; `knowledge_agent`/`hypothesis_agent`/`report_agent` are M2-M3. |
+| `cfm/cli.py` | `cfm measure`/`cfm init-db`. Not `cfm mine` — that's the orchestrator's entry point, M1. |
+
+## Common edits
+
+- **New workload/suite backend** (e.g. `workloads/spec_cpu2017.py`): implement `WorkloadBackend`'s
+  four methods (`workloads/base.py`). `run_command()` must return an argv, not execute anything —
+  see that file's docstring for why. Fork wspy's own `workload/cpu2017/run_test.sh` for the real
+  `runcpu`/`shrc` mechanics rather than re-deriving them (doc/DESIGN.md §4.1's "existing groundwork"
+  note).
+- **New instrumentation backend** (e.g. a `perf stat`-only fallback): implement
+  `InstrumentationBackend.characterize()` (`instrumentation/base.py`), returning the same
+  `RunSignature` shape so nothing downstream needs to know which backend produced it.
+- **New `cfm.db` field**: add the column to `schema/cfm_schema.sql` (it's applied via
+  `executescript()`, so a fresh db always gets the latest DDL — there is no migration-step dispatch
+  yet, unlike wspy's `store.c`; add one when this project has existing-database rows worth preserving
+  across a schema change), bump `schema_meta.schema_version` in the same commit (MINOR/MAJOR per the
+  "Schema and prompt-template versioning" section above), and update `doc/DESIGN.md` §7's SQL excerpt
+  to match — the two have drifted out of sync once already by hand; don't let it happen again in code.
+- **New `cfm db.py` accessor**: keep it a direct, obvious SQL statement (no ORM) — matches every
+  existing accessor in that file.
