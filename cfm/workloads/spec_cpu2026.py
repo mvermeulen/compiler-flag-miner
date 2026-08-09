@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import statistics
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -15,18 +16,21 @@ from typing import Optional
 from ..util import parse_kv_lines
 from .base import BuildResult, RunResult, WorkloadBackend
 
-# Candidate .rsf field-name suffixes for "the" per-benchmark/tune ratio, most-likely
-# first. SPEC has kept the .rsf raw-result format's dotted-key naming stable across
-# generations (runcpu.html: "will always include .rsf, for raw (unformatted) run
-# data"; "spec.cpu2026.results.<bench>.<tune>.<field>" per its own "Rolling
-# round-robin rate results" section, e.g. spec.cpu2026.results.714_cpython_r.base.
-# time_avg), and "ratio" is the term SPEC has used for this field since CPU2017 --
-# but this hasn't been confirmed against a real .rsf file on THIS host yet: no
-# --action=run/validate has ever completed here, only --action=build (see
-# workload/cpu2026/*/gcc_O3/*/build.gcc_O3.log in the wspy checkout). The first real
-# M0 run must confirm or correct this list; record the outcome as a CLAUDE.md
-# "Non-obvious traps" entry either way.
-CANDIDATE_RATIO_FIELDS = ("ratio", "selected_ratio", "reported_ratio")
+# .rsf field name for the per-*iteration* SPECrate score, confirmed against a real
+# --action=validate --iterations 3 run of 706.stockfish_r on this host (CLAUDE.md's
+# Non-obvious traps log has the full story -- an earlier version of this constant
+# was an unconfirmed guess that turned out to be missing a whole path segment, not a
+# wrong field name): keys look like
+# spec.cpu2026.results.706_stockfish_r.peak.000.ratio, one such block per iteration
+# (000, 001, 002, ...), never a single non-iteration-indexed rollup field. The
+# formula checks out exactly against the sibling fields in the same block:
+# ratio == copies * reference / reported_time (32 * 1260 / 315.907284 == 127.632384
+# for iteration 000 of the confirming run). "ratio_avg" also exists per iteration
+# (the mean of per-copy ratios rather than the reference/reported_time formula
+# above) -- deliberately not used here, since it's a different, looser statistic.
+_RATIO_FIELD = "ratio"
+_SECONDS_FIELD = "reported_time"
+_ITERATION_FIELD_RE = re.compile(r"^\d{3}\.(\w+)$")
 
 _EXIT_RE = re.compile(r"\[runcpu (\w+) exited (\d+)\]")
 _LOG_PATH_RE = re.compile(r"The log for this run is in (\S+)")
@@ -118,13 +122,30 @@ class SpecCpu2026Workload(WorkloadBackend):
                 status="ok-no-rsf", raw_output=raw_output,
             )
 
-        fields = parse_kv_lines(rsf_path.read_text(errors="replace"))
+        # .rsf uses "key: value" (colon-space), not "key=value" -- a different
+        # convention from wspy-archetype's own trace output (parse_kv_lines'
+        # default), confirmed by reading the real file: the default "=" separator
+        # matched zero lines here (none of these keys contain "="), so every ratio
+        # silently came back None even once the iteration-index fix above landed.
+        fields = parse_kv_lines(rsf_path.read_text(errors="replace"), sep=": ")
         prefix = f"spec.cpu2026.results.{bench.replace('.', '_')}.{tune}."
+        # Stripping the prefix leaves keys like "000.ratio"/"001.ratio" (one block
+        # per --iterations run, see _RATIO_FIELD's comment above) -- never a bare
+        # "ratio". Reporting the median across iterations rather than picking one is
+        # deliberate: SPEC's own rate-mode methodology already medians per-copy
+        # times within an iteration (runcpu.html's "Rolling round-robin rate
+        # results"), and doing the same one level up, across iterations, is the
+        # same outlier-robust idea applied consistently for a *mining* trial's
+        # number (not a "reportable run" -- SPEC's own official selection rule
+        # for that is a separate, stricter thing this project doesn't need to
+        # replicate).
         scoped = {key[len(prefix):]: value for key, value in fields.items() if key.startswith(prefix)}
+        ratios = _iteration_values(scoped, _RATIO_FIELD)
+        seconds_values = _iteration_values(scoped, _SECONDS_FIELD)
         return RunResult(
             ok=True, validated=True,
-            ratio=_first_float(scoped, CANDIDATE_RATIO_FIELDS),
-            seconds=_first_float(scoped, ("time_avg",)),
+            ratio=statistics.median(ratios) if ratios else None,
+            seconds=statistics.median(seconds_values) if seconds_values else None,
             status="ok", raw_output=raw_output, result_files=[rsf_path],
         )
 
@@ -148,11 +169,17 @@ def _latest_rsf(result_dir: Path) -> Optional[Path]:
     return candidates[-1] if candidates else None
 
 
-def _first_float(fields: dict, keys: tuple) -> Optional[float]:
-    for key in keys:
-        if key in fields:
+def _iteration_values(scoped: dict, field: str) -> list[float]:
+    """Collects one value per iteration block (scoped keys shaped "NNN.<field>")
+    for the given field name, skipping any that don't parse as a float rather than
+    raising -- a malformed/partial .rsf record shouldn't crash the whole trial.
+    """
+    values = []
+    for key, value in scoped.items():
+        match = _ITERATION_FIELD_RE.match(key)
+        if match and match.group(1) == field:
             try:
-                return float(fields[key])
+                values.append(float(value))
             except ValueError:
                 continue
-    return None
+    return values

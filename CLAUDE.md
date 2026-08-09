@@ -105,13 +105,28 @@ Full branch/PR discipline, same shape as wspy's:
 
 ## Non-obvious traps
 
-- **SPEC's `.rsf` ratio field name is an educated guess, not a confirmed fact.**
-  `cfm/workloads/spec_cpu2026.py`'s `CANDIDATE_RATIO_FIELDS` assumes the per-benchmark/tune ratio
-  lives under a `...ratio` key in the `.rsf` file, based on SPEC's docs and CPU2017-generation
-  naming conventions — but no `--action=run`/`validate` has ever completed on this host (only
-  `--action=build`), so there is no real `.rsf` file to check it against yet. The first real trial run
-  must confirm or correct this list; update this entry (don't just delete it) once it has, so the next
-  session knows the guess was actually verified rather than just no-longer-flagged.
+- **Resolved 2026-08-09: SPEC's `.rsf` ratio field, confirmed against a real run — field name was right,
+  two structural assumptions weren't.** A real `--action=validate --iterations 3` run of
+  `706.stockfish_r` (`gcc_O3` peak, `-O3 -march=native -flto`, 14m25s wall-clock) confirmed `ratio` is
+  the correct field name (formula checks out exactly: `ratio == copies * reference / reported_time`,
+  `32 * 1260 / 315.907284 == 127.632384`) — but two things the original guess got wrong meant `ratio`
+  came back `None` anyway until both were fixed:
+  1. **No non-iteration-indexed rollup field exists.** Every field lives under
+     `spec.cpu2026.results.<bench>.<tune>.<NNN>.<field>` (`NNN` = zero-padded iteration index, one
+     block per `--iterations` run) — never a bare `spec.cpu2026.results.<bench>.<tune>.ratio`. Original
+     code stripped the `<bench>.<tune>.` prefix and looked for an exact `"ratio"` key, which could never
+     match a scoped key like `"000.ratio"`. Fixed by collecting every `NNN.ratio` value across
+     iterations and reporting the **median** (`cfm/workloads/spec_cpu2026.py`'s `_iteration_values()`)
+     — deliberately not SPEC's own "reportable run" selection rule, which this project doesn't need to
+     replicate; just an outlier-robust aggregate for a mining trial's number.
+  2. **`.rsf` uses `"key: value"` (colon-space), not `"key=value"`.** `util.parse_kv_lines()`'s default
+     separator is `"="` (correct for `wspy-archetype`'s own trace-output format, which really is
+     `=`-separated — confirmed the same session) but wrong for `.rsf`. The hand-written unit-test
+     fixtures used `"="` too, so they passed against the *same wrong assumption* this bug depended on —
+     they were only caught by testing against `tests/fixtures/706.stockfish_r.peak.sample.rsf`, a real
+     captured excerpt, not another hand-written guess. **Lesson for next time this class of bug shows
+     up**: a hand-rolled fixture that encodes the same assumption as the code it's testing proves
+     nothing; prefer a fixture copied from real captured output whenever one is available cheaply.
 - **A bare `subprocess.run()` does not get SPEC's `shrc`-exported environment.** `runcpu` needs
   `PATH`/`PERL5LIB`/etc. that `$SPEC/shrc` exports; wspy's own `workload/cpu2017/run_test.sh` gets
   this for free by sourcing `shrc` once into its own long-lived shell before calling anything else.

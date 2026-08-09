@@ -529,23 +529,26 @@ compiler-flag-miner/
 
 ## 14. Phased build plan
 
-- **M0 — mechanical pipeline, no search, no LLM. Shipped** (`cfm measure <benchmark> --flags "..."`,
-  not the eventual `cfm mine` search command — that's M1). Given one fixed, hand-chosen flag set,
-  generate a real peak config, build, run under `wspy-run`, and get one validated, wspy-measured ratio
-  for `706.stockfish_r`. Proves the SPEC Runner + Instrumentation agents' plumbing end to end. Low risk
-  — the `runcpu` mechanics for this exact benchmark are already proven on this host (existing
-  `gcc_O3/{base,peak}` scaffolding). Unit-tested without needing a real SPEC/wspy install (§13); a real
-  end-to-end run needs `make` run in the wspy checkout first (`instrumentation/wspy.py`'s `preflight()`
-  checks for this and fails fast/specifically rather than mid-pipeline) and hasn't been exercised
-  against the live install yet — the `.rsf` ratio-field-name guess in
-  `workloads/spec_cpu2026.py`'s `CANDIDATE_RATIO_FIELDS` is unconfirmed until it has. The
-  Instrumentation agent side of the pipeline *has* been exercised end to end, against a real, built
-  `vendor/wspy` submodule and a toy workload (`tests/test_wspy_interface.py`) rather than only unit
-  tests — this caught and fixed three real integration bugs before they could surface against a real
-  SPEC run (a manifest-schema mismatch in `_validate()`, `wspy`'s silent no-op on a missing
-  `--run-index` parent directory, and a `wspy-run --run-id`-vs-wspy's-own-generated-`run_id` identity
-  mismatch — full detail in CLAUDE.md's Non-obvious traps log). Single-pass profiles (`quick`) only;
-  `deep-cpu`/multi-pass support is explicitly deferred, see §4.2.
+- **M0 — mechanical pipeline, no search, no LLM. Shipped and verified end to end against a real SPEC
+  run** (`cfm measure <benchmark> --flags "..."`, not the eventual `cfm mine` search command — that's
+  M1). Given one fixed, hand-chosen flag set, generate a real peak config, build, run under `wspy-run`,
+  and get one validated, wspy-measured ratio for `706.stockfish_r`. Proves the SPEC Runner +
+  Instrumentation agents' plumbing end to end — literally: a real `--action=validate --iterations 3`
+  run (`-O3 -march=native -flto`, 14m25s wall-clock) completed with `spec_validated: true`,
+  `wspy_validated: true`, and a real extracted ratio (`151.206688`, median across 3 iterations). Getting
+  there caught and fixed real bugs on both sides of the pipeline rather than leaving them for a future
+  session to hit blind — full detail in CLAUDE.md's Non-obvious traps log:
+  - **Instrumentation side**, caught by `tests/test_wspy_interface.py` (real `vendor/wspy` submodule +
+    a toy workload, not just unit tests): a manifest-schema mismatch in `_validate()`, `wspy`'s silent
+    no-op on a missing `--run-index` parent directory, and a `wspy-run --run-id`-vs-wspy's-own-
+    generated-`run_id` identity mismatch.
+  - **SPEC Runner side**, only caught by the real run itself: `.rsf` has no non-iteration-indexed
+    rollup field (every value lives under a per-`NNN`-iteration block — fixed by reporting the median
+    across iterations) and uses `"key: value"`, not `"key=value"` (the hand-written unit-test fixtures
+    used `=` too, so they'd passed against the same wrong assumption — only a fixture copied from a real
+    captured `.rsf` excerpt caught it, now `tests/fixtures/706.stockfish_r.peak.sample.rsf`). The
+    `ratio` field name itself was right the whole time; both bugs were structural, not a wrong guess.
+  Single-pass profiles (`quick`) only; `deep-cpu`/multi-pass support is explicitly deferred, see §4.2.
 - **M1 — rule-based screening/confirmation loop (§6 Phases 1-5), no LLM.** Static catalog priors only;
   first fully-automated "peak beats base" result, backed by wspy-summary's own statistical bar.
 - **M2 — signature-aware candidate filtering.** Wire in `wspy-archetype`'s `resource_dominance`/

@@ -5,11 +5,12 @@ CPU2026 gcc/gfortran, instrumented via [wspy](https://github.com/mvermeulen/wspy
 deterministic Python state machine with a local LLM (llama.cpp or Ollama) doing narrowly-scoped,
 structured-output reasoning at specific decision points -- never freely driving the tool loop.
 
-Status: **M0 shipped** -- the mechanical pipeline (`cfm measure`: generate a SPEC config for one
-hand-chosen flag set, build, run under wspy instrumentation, record the result) exists, is
-unit-tested, and has been exercised end to end against a real, built wspy (a toy workload, not yet a
-real SPEC run). No search loop, LLM, or cross-benchmark knowledge transfer yet -- see `doc/DESIGN.md`
-§14 for the M0-M6 plan and §13 for exactly what's implemented vs. pending.
+Status: **M0 shipped and verified end to end** -- the mechanical pipeline (`cfm measure`: generate a
+SPEC config for one hand-chosen flag set, build, run under wspy instrumentation, record the result) has
+completed a real SPEC CPU2026 run (`706.stockfish_r`, `-O3 -march=native -flto`: build OK, SPEC's own
+`--action=validate` passed, wspy's counter-collection validated, ratio `151.206688`). No search loop,
+LLM, or cross-benchmark knowledge transfer yet -- see `doc/DESIGN.md` §14 for the M0-M6 plan and §13
+for exactly what's implemented vs. pending.
 
 ```
 git clone --recurse-submodules <this repo>   # or: git submodule update --init --recursive

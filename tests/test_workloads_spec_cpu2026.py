@@ -1,6 +1,11 @@
+import shutil
+from pathlib import Path
+
 import pytest
 
 from cfm.workloads.spec_cpu2026 import SpecCpu2026Workload
+
+_FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 def _make_workload(tmp_path):
@@ -49,21 +54,65 @@ def test_run_command_shape(tmp_path):
 
 
 def test_parse_result_success_extracts_ratio(tmp_path):
+    # Shape AND separator confirmed against a real --action=validate --iterations 3
+    # run of 706.stockfish_r on this host (cfm/workloads/spec_cpu2026.py's
+    # _RATIO_FIELD comment, CLAUDE.md's Non-obvious traps log): one
+    # "NNN.ratio"/"NNN.reported_time" block per iteration (never a bare "ratio" key
+    # directly under ".peak."), and "key: value" (colon-space), not "key = value" --
+    # an earlier version of this fixture used "=" and passed against the *wrong*
+    # separator this test itself was also (incorrectly) assuming, which is exactly
+    # why hand-rolled fixtures didn't catch the bug the real .rsf file did.
     workload = _make_workload(tmp_path)
     workload.result_dir.mkdir(parents=True)
-    rsf_path = workload.result_dir / "CPU2026.001.intrate.rsf"
+    rsf_path = workload.result_dir / "CPU2026.001.intrate.refrate.rsf"
     rsf_path.write_text(
-        "spec.cpu2026.results.706_stockfish_r.peak.ratio = 12.34\n"
-        "spec.cpu2026.results.706_stockfish_r.peak.time_avg = 55.1\n"
-        "spec.cpu2026.results.706_stockfish_r.base.ratio = 10.0\n"
+        "spec.cpu2026.results.706_stockfish_r.peak.000.ratio: 12.0\n"
+        "spec.cpu2026.results.706_stockfish_r.peak.000.reported_time: 55.0\n"
+        "spec.cpu2026.results.706_stockfish_r.base.000.ratio: 9.0\n"
     )
     raw = "...\n[runcpu validate exited 0]\nSuccess: 1x706.stockfish_r\n"
     result = workload.parse_result("706.stockfish_r", "peak", raw)
     assert result.ok
     assert result.validated
     assert result.status == "ok"
-    assert result.ratio == 12.34
-    assert result.seconds == 55.1
+    assert result.ratio == 12.0
+    assert result.seconds == 55.0
+
+
+def test_parse_result_medians_across_multiple_iterations(tmp_path):
+    workload = _make_workload(tmp_path)
+    workload.result_dir.mkdir(parents=True)
+    rsf_path = workload.result_dir / "CPU2026.001.intrate.refrate.rsf"
+    rsf_path.write_text(
+        "spec.cpu2026.results.706_stockfish_r.peak.000.ratio: 10.0\n"
+        "spec.cpu2026.results.706_stockfish_r.peak.001.ratio: 30.0\n"
+        "spec.cpu2026.results.706_stockfish_r.peak.002.ratio: 20.0\n"
+    )
+    raw = "...\n[runcpu validate exited 0]\nSuccess: 1x706.stockfish_r\n"
+    result = workload.parse_result("706.stockfish_r", "peak", raw)
+    assert result.ratio == 20.0  # median of [10, 30, 20], not the first/last block
+    assert result.seconds is None  # no reported_time fields present at all
+
+
+def test_parse_result_against_real_captured_rsf(tmp_path):
+    # Golden-output test: tests/fixtures/706.stockfish_r.peak.sample.rsf is a real
+    # excerpt from an actual SPEC CPU2026 run on this host, not another hand-written
+    # guess at the format -- the two bugs the hand-written fixtures above didn't
+    # catch (missing iteration-index level, wrong "=" separator) were both only
+    # caught by testing against real captured output. This test is what keeps a
+    # future refactor honest against the same real data.
+    workload = _make_workload(tmp_path)
+    workload.result_dir.mkdir(parents=True)
+    shutil.copy(
+        _FIXTURES_DIR / "706.stockfish_r.peak.sample.rsf",
+        workload.result_dir / "CPU2026.001.intrate.refrate.rsf",
+    )
+    raw = "...\n[runcpu validate exited 0]\nSuccess: 1x706.stockfish_r\n"
+    result = workload.parse_result("706.stockfish_r", "peak", raw)
+    assert result.ok
+    assert result.status == "ok"
+    assert result.ratio == pytest.approx(151.206688)  # median of the 3 real iterations
+    assert result.seconds == pytest.approx(266.654868)  # median reported_time
 
 
 def test_parse_result_failure_on_nonzero_exit(tmp_path):
