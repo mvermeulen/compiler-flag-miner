@@ -133,23 +133,34 @@ def test_archetype_scorecard_has_the_keys_cfm_parses(real_signature):
     assert "memory_attribution" in real_signature.metrics
 
 
-def test_characterize_raises_on_a_multi_pass_profile(tmp_path_factory, toy_binary):
-    # doc/DESIGN.md sec. 6 Phase 4's confirmation stage needs a multi-pass profile
-    # (deep-cpu) -- M0 doesn't support that yet (_resolve_run_identity()'s
-    # docstring explains why), and this is what confirms the guard actually fires
-    # against a real multi-pass wspy-run invocation rather than only the synthetic
-    # unit-test version in tests/test_instrumentation_wspy.py.
+def test_characterize_succeeds_on_deep_cpu_with_a_populated_scorecard(tmp_path_factory, toy_binary):
+    # doc/DESIGN.md sec. 6 Phase 4's confirmation stage needs the multi-pass
+    # "deep-cpu" profile -- M0 didn't support that (_resolve_run_identity() raised
+    # rather than guess which of deep-cpu's 3 underlying wspy runs was "the" run);
+    # M1 resolves it via _ARCHETYPE_PASS_NAME (see that constant's comment in
+    # cfm/instrumentation/wspy.py for the live-confirmed reasoning: it's the
+    # "amdtopdown" pass, not the "counters" multipass sweep one might expect from
+    # wspy-run --help's own description). This is what confirms the real fix works
+    # end to end against a real multi-pass wspy-run invocation, not just the
+    # synthetic fixture in tests/test_instrumentation_wspy.py.
     output_root = tmp_path_factory.mktemp("wspy_output_multipass")
     instrumentation = WspyInstrumentation(
         _wspy_dir(),
         store_db=output_root / "store.db",
         run_index_path=output_root / "cpu2026" / "run-index.jsonl",
     )
-    with pytest.raises(RuntimeError, match="multi-pass"):
-        instrumentation.characterize(
-            command=[str(toy_binary)], suite="cfmtest", benchmark="toy_compute",
-            run_id="multipass-run", profile="deep-cpu", output_root=output_root,
-        )
+    signature = instrumentation.characterize(
+        command=[str(toy_binary)], suite="cfmtest", benchmark="toy_compute",
+        run_id="multipass-run", profile="deep-cpu", output_root=output_root,
+    )
+    assert signature.validated is True
+    assert signature.resource_dominance in (
+        "compute-bound", "frontend-bound", "memory-bound", "speculation-bound",
+    )
+    assert signature.resource_dominance_pct is not None
+    hostname, _, run_id = signature.wspy_run_ref.partition(":")
+    assert hostname == socket.gethostname()
+    assert run_id  # non-empty, and (per the fix) not "multipass-run" itself
 
 
 def test_wspy_archetype_reports_a_populated_scorecard_with_topdown_data(tmp_path_factory, toy_binary):

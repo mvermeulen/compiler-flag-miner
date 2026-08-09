@@ -15,6 +15,24 @@ from typing import Optional
 from ..util import parse_kv_lines
 from .base import InstrumentationBackend, RunSignature
 
+# Which named pass (from the run-level manifest.json's own passes[] list) carries the
+# CSV topdown data wspy-archetype's resource_dominance scoring actually reads, for a
+# multi-pass profile whose wspy-run invocation launches more than one wspy process. Not
+# guessable from the profile's documentation alone -- confirmed live against a real
+# `deep-cpu` run (doc/DESIGN.md sec. 4.2, CLAUDE.md's Non-obvious traps log has the full
+# story): the natural first guess is deep-cpu's "counters" pass (wspy-run --help
+# describes it as "used for topdown characterization"), but that pass has no --csv (it's
+# wspy's native --passes= multipass sweep, human-readable output only), so wspy-store
+# can't ingest its metric values at all -- its own wspy-archetype scorecard comes back
+# resource_dominance=unknown, confidence=insufficient-data. It's deep-cpu's "amdtopdown"
+# pass (--csv --counters=topdown, a plain non-multiplexed topdown-percentages pass) whose
+# scorecard is actually populated. Only deep-cpu is mapped -- any other multi-pass
+# profile (deep-cpu-intel, deep-gpu, zen4plus-deep, a comma-composed profile list) raises
+# rather than guessing, same posture as the single-new-line check this replaces.
+_ARCHETYPE_PASS_NAME = {
+    "deep-cpu": "amdtopdown",
+}
+
 
 class WspyInstrumentation(InstrumentationBackend):
     def __init__(self, wspy_dir, store_db, run_index_path):
@@ -74,7 +92,7 @@ class WspyInstrumentation(InstrumentationBackend):
 
         validated = self._validate(rundir)
         self._ingest()
-        real_hostname, real_run_id = self._resolve_run_identity(lines_before)
+        real_hostname, real_run_id = self._resolve_run_identity(rundir, profile, lines_before)
         scorecard = self._archetype(real_hostname, real_run_id)
 
         return RunSignature(
@@ -125,7 +143,7 @@ class WspyInstrumentation(InstrumentationBackend):
             capture_output=True, text=True, check=False,
         )
 
-    def _resolve_run_identity(self, lines_before: int) -> tuple[str, str]:
+    def _resolve_run_identity(self, rundir: Path, profile: str, lines_before: int) -> tuple[str, str]:
         """wspy-run's own ``--run-id`` only names the *output directory*
         (doc/ARTIFACT_CONTRACT.md sec. "Unified output layout": "it identifies the
         whole wspy-run invocation, which may launch several wspy processes, not one
@@ -144,22 +162,56 @@ class WspyInstrumentation(InstrumentationBackend):
         new_lines = all_lines[lines_before:]
         if not new_lines:
             raise RuntimeError(f"wspy-run wrote no new run-index record to {self.run_index_path}")
-        if len(new_lines) > 1:
-            # A multi-pass profile (e.g. deep-cpu) launches several wspy processes,
-            # each getting its own run_id -- which one carries the
-            # topdown/archetype-relevant data isn't resolved yet. M0 only exercises
-            # single-pass profiles (the "quick" default) end to end; fail loudly
-            # here rather than silently guessing which pass "the" run is.
+        if len(new_lines) == 1:
+            record = json.loads(new_lines[0])
+            return record["hostname"], record["run_id"]
+        return self._resolve_multi_pass_identity(rundir, profile, new_lines)
+
+    def _resolve_multi_pass_identity(
+        self, rundir: Path, profile: str, new_lines: list[str],
+    ) -> tuple[str, str]:
+        """A multi-pass profile (e.g. ``deep-cpu``) launches several ``wspy``
+        processes in one ``wspy-run`` invocation, each appending its own run-index
+        record -- see ``_ARCHETYPE_PASS_NAME``'s comment for which *named* pass
+        actually carries archetype-relevant data, confirmed live rather than
+        guessed. Correlating "pass name" (only recorded in the run-level
+        ``manifest.json``'s ``passes[]`` list, doc/ARTIFACT_CONTRACT.md "Unified
+        output layout") to "run_id" (only recorded in the run-index) isn't direct --
+        neither a per-pass ``--manifest`` file nor a run-index record carries the
+        other's identifier -- but both independently record the same
+        millisecond-precision ISO-8601 ``start_time``/``timing.start_time``, which
+        is an exact, checkable join key (confirmed byte-for-byte against a real run).
+        """
+        pass_name = _ARCHETYPE_PASS_NAME.get(profile)
+        if pass_name is None:
             raise RuntimeError(
                 f"{len(new_lines)} new run-index records from one wspy-run invocation "
-                "(a multi-pass profile) -- characterize() doesn't yet know which one "
-                "to treat as 'the' run for archetype scoring. Single-pass profiles "
-                "like 'quick' are the only ones M0 supports (doc/DESIGN.md sec. 14); "
-                "resolving this is part of wiring deep-cpu in for M1's confirmation "
-                "stage (doc/DESIGN.md sec. 6 Phase 4)."
+                f"(profile {profile!r}) -- characterize() only knows which pass carries "
+                f"archetype-relevant CSV topdown data for {sorted(_ARCHETYPE_PASS_NAME)}. "
+                "Add a mapping entry to _ARCHETYPE_PASS_NAME (confirmed against a real "
+                "run, see its comment) before using this profile here."
             )
-        record = json.loads(new_lines[0])
-        return record["hostname"], record["run_id"]
+        run_manifest_path = rundir / "manifest.json"
+        run_manifest = json.loads(run_manifest_path.read_text())
+        pass_entries = {p["name"]: p for p in run_manifest.get("passes", [])}
+        entry = pass_entries.get(pass_name)
+        if entry is None or not entry.get("manifest"):
+            raise RuntimeError(
+                f"profile {profile!r}'s designated pass {pass_name!r} has no manifest "
+                f"entry in {run_manifest_path}"
+            )
+        pass_manifest = json.loads((rundir / entry["manifest"]).read_text())
+        start_time = pass_manifest["timing"]["start_time"]
+
+        records = [json.loads(line) for line in new_lines]
+        matches = [r for r in records if r.get("start_time") == start_time]
+        if len(matches) != 1:
+            raise RuntimeError(
+                f"expected exactly one new run-index record with start_time "
+                f"{start_time!r} (profile {profile!r}, pass {pass_name!r}), found "
+                f"{len(matches)}"
+            )
+        return matches[0]["hostname"], matches[0]["run_id"]
 
     def _archetype(self, hostname: str, run_id: str) -> dict:
         proc = subprocess.run(

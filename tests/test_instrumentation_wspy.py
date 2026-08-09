@@ -51,6 +51,8 @@ def test_resolve_run_identity_reads_the_newly_appended_record(tmp_path):
     # This is the fix for the bug tests/test_wspy_interface.py caught live: the
     # run_id wspy-store/wspy-archetype key on is the one *wspy itself* generated
     # and wrote to --run-index, not whatever run_id characterize() was called with.
+    # rundir/profile are irrelevant on the single-new-line path (not touched until
+    # more than one new record shows up), so dummy values are fine here.
     instrumentation = _make(tmp_path)
     instrumentation.run_index_path.write_text(
         json.dumps({"hostname": "otherhost", "run_id": "pre-existing-run"}) + "\n"
@@ -58,7 +60,7 @@ def test_resolve_run_identity_reads_the_newly_appended_record(tmp_path):
     lines_before = _count_lines(instrumentation.run_index_path)
     with instrumentation.run_index_path.open("a") as f:
         f.write(json.dumps({"hostname": "realhost", "run_id": "20260809T000000.000-12345"}) + "\n")
-    hostname, run_id = instrumentation._resolve_run_identity(lines_before)
+    hostname, run_id = instrumentation._resolve_run_identity(tmp_path, "quick", lines_before)
     assert hostname == "realhost"
     assert run_id == "20260809T000000.000-12345"
 
@@ -70,17 +72,62 @@ def test_resolve_run_identity_raises_when_nothing_new_was_written(tmp_path):
     )
     lines_before = _count_lines(instrumentation.run_index_path)
     with pytest.raises(RuntimeError, match="no new run-index record"):
-        instrumentation._resolve_run_identity(lines_before)
+        instrumentation._resolve_run_identity(tmp_path, "quick", lines_before)
 
 
-def test_resolve_run_identity_raises_on_multiple_new_records(tmp_path):
-    # A multi-pass profile (e.g. deep-cpu) -- characterize() doesn't yet know which
-    # pass's run_id to treat as "the" run, so this must fail loudly, not guess.
+def test_resolve_run_identity_picks_the_designated_pass_for_a_known_multi_pass_profile(tmp_path):
+    # Mirrors a real deep-cpu run's shape (confirmed live, see _ARCHETYPE_PASS_NAME's
+    # comment in cfm/instrumentation/wspy.py): 3 new run-index records, only one of
+    # which shares its start_time with the "amdtopdown" pass's own per-pass manifest.
+    instrumentation = _make(tmp_path)
+    rundir = tmp_path / "cpu2026" / "706.stockfish_r" / "run1"
+    rundir.mkdir(parents=True)
+    (rundir / "manifest.json").write_text(json.dumps({
+        "layout_version": "1.0.0",
+        "passes": [
+            {"name": "systemtime", "manifest": "systemtime.manifest.json", "status": "ok"},
+            {"name": "counters", "manifest": "counters.manifest.json", "status": "ok"},
+            {"name": "amdtopdown", "manifest": "amdtopdown.manifest.json", "status": "ok"},
+        ],
+    }))
+    for name, start_time in (
+        ("systemtime", "2026-08-09T16:41:52.036Z"),
+        ("counters", "2026-08-09T16:41:54.507Z"),
+        ("amdtopdown", "2026-08-09T16:42:14.157Z"),
+    ):
+        (rundir / f"{name}.manifest.json").write_text(
+            json.dumps({"timing": {"start_time": start_time}})
+        )
+
+    instrumentation.run_index_path.write_text("")
+    lines_before = _count_lines(instrumentation.run_index_path)
+    with instrumentation.run_index_path.open("a") as f:
+        f.write(json.dumps({
+            "hostname": "h", "run_id": "20260809T164152.036-1",
+            "start_time": "2026-08-09T16:41:52.036Z",
+        }) + "\n")
+        f.write(json.dumps({
+            "hostname": "h", "run_id": "20260809T164154.507-2",
+            "start_time": "2026-08-09T16:41:54.507Z",
+        }) + "\n")
+        f.write(json.dumps({
+            "hostname": "h", "run_id": "20260809T164214.157-3",
+            "start_time": "2026-08-09T16:42:14.157Z",
+        }) + "\n")
+
+    hostname, run_id = instrumentation._resolve_run_identity(rundir, "deep-cpu", lines_before)
+    assert hostname == "h"
+    assert run_id == "20260809T164214.157-3"  # the amdtopdown pass's run, not systemtime/counters
+
+
+def test_resolve_run_identity_raises_on_unmapped_multi_pass_profile(tmp_path):
+    # A multi-pass profile with no _ARCHETYPE_PASS_NAME entry (e.g. deep-cpu-intel) --
+    # this must fail loudly, not guess which pass's run_id to use.
     instrumentation = _make(tmp_path)
     instrumentation.run_index_path.write_text("")
     lines_before = _count_lines(instrumentation.run_index_path)
     with instrumentation.run_index_path.open("a") as f:
         f.write(json.dumps({"hostname": "h", "run_id": "run-a"}) + "\n")
         f.write(json.dumps({"hostname": "h", "run_id": "run-b"}) + "\n")
-    with pytest.raises(RuntimeError, match="multi-pass"):
-        instrumentation._resolve_run_identity(lines_before)
+    with pytest.raises(RuntimeError, match="deep-cpu-intel"):
+        instrumentation._resolve_run_identity(tmp_path, "deep-cpu-intel", lines_before)
