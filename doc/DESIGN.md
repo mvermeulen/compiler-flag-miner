@@ -515,16 +515,21 @@ compiler-flag-miner/
                                    (M1: orchestrator.py needs a different profile
                                    per phase, and its own tests need fakes with no
                                    real SPEC/wspy calls)
-    cli.py                        [M0] `cfm measure <benchmark> --flags "..."` --
-                                   NOT `cfm mine`; the search-driving orchestrator
-                                   command doesn't exist until PR 6 of M1's own
-                                   build-out
+    cli.py                        [M0+M1] `cfm measure <benchmark> --flags "..."`
+                                   (M0) and `cfm mine <benchmark> [--max-trials N]`
+                                   (M1) -- `mine` wires all five orchestrator
+                                   phases into one command, unit-tested against
+                                   mocked orchestrator calls, but not yet run for
+                                   real against this host's SPEC/wspy install
+                                   (that's a manual, opt-in confirmation step,
+                                   same posture `cfm measure` had before M0's own
+                                   real-run milestone)
     orchestrator.py                [M1] phase state machine (§5-6) -- Phases 1-5
                                    (baseline/candidate generation/screening/
-                                   confirmation/greedy combination) all built; no
-                                   `cfm mine` CLI wiring yet (next PR), so the
-                                   full loop isn't runnable end to end as a real
-                                   command until that lands
+                                   confirmation/greedy combination) all built and
+                                   wired into `cfm mine` (cli.py); see that row
+                                   for what's still outstanding before this is a
+                                   "shipped and verified" milestone the way M0 is
     compilers/{base,gcc}.py        [M1] Compiler Knowledge agent (§4.3) -- built ahead of M2
                                    on purpose: candidate_flags_for_signature() ignores its
                                    own signature argument in M1 ("static catalog priors
@@ -568,8 +573,16 @@ compiler-flag-miner/
     captured `.rsf` excerpt caught it, now `tests/fixtures/706.stockfish_r.peak.sample.rsf`). The
     `ratio` field name itself was right the whole time; both bugs were structural, not a wrong guess.
   Single-pass profiles (`quick`) only; `deep-cpu`/multi-pass support is explicitly deferred, see §4.2.
-- **M1 — rule-based screening/confirmation loop (§6 Phases 1-5), no LLM.** Static catalog priors only;
-  first fully-automated "peak beats base" result, backed by wspy-summary's own statistical bar.
+- **M1 — rule-based screening/confirmation loop (§6 Phases 1-5), no LLM. Built, landed as 6 small PRs;
+  real end-to-end run against this host's SPEC/wspy install still pending.** Static catalog priors
+  only; `cfm mine <benchmark>` wires all five phases together (`orchestrator.py`), backed by
+  `cfm/stats.py`'s CI logic for the accept/reject bar. Every phase function and the CLI's own
+  argument/summary-building logic is unit-tested against mocked `WorkloadBackend`/
+  `InstrumentationBackend` backends (103+ tests) plus the real, live-confirmed `deep-cpu` multi-pass
+  fix from M1's first PR (§4.2) -- but unlike M0, which earned "shipped and verified" only after an
+  actual `706.stockfish_r` run, M1's first fully-automated "peak beats base" result against real
+  SPEC/wspy hasn't happened yet. That's a manual, opt-in step (CLAUDE.md's exclusive-machine-access
+  rule) once actually run.
 - **M2 — signature-aware candidate filtering.** Wire in `wspy-archetype`'s `resource_dominance`/
   `memory_attribution` to drive Compiler Knowledge agent candidate selection (the table in §4.3),
   instead of trying the whole catalog uniformly.

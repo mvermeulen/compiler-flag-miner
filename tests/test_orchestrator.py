@@ -521,3 +521,79 @@ def test_greedy_combine_pair_tournament_is_bounded(tmp_path):
     assert len(result.pair_trials) == 3
     assert result.winning_flags == baseline.flags  # nothing cleared the bar
     assert MAX_PAIR_TOURNAMENT_TRIALS == 10  # sanity: the module default didn't drift silently
+
+
+# -- full pipeline (Phases 1-5 chained) ----------------------------------------
+# Exercises real composition -- Phase N's actual return value feeding Phase N+1,
+# not hand-constructed intermediate objects -- which is exactly what cfm mine
+# (cli.py) itself does. cli.py's own argv/JSON-summary glue is covered separately
+# in tests/test_cli.py with these orchestrator calls mocked; this is the reverse:
+# real orchestrator composition, fake workload/instrumentation.
+
+def test_full_pipeline_surfaces_a_genuinely_better_flag(tmp_path):
+    cfg = _cfg(tmp_path)
+    baseline_flags = ["-O3"]
+    candidates = [_candidate("-good-flag"), _candidate("-bad-flag")]
+    # ScriptedBackends pops from one queue per flags-tuple regardless of which
+    # phase is asking -- ("-good-flag",) is used both by Phase 3's single
+    # screening run and Phase 4's 3 confirmation reps, consumed in call order, so
+    # its queue needs 1 (screening) + 3 (confirmation) = 4 entries queued up front.
+    backends = ScriptedBackends(ratio_sequences={
+        ("-O3",): [100.0, 100.0, 100.0],                     # baseline, 3 reps
+        ("-good-flag",): [110.0, 111.0, 111.0, 111.0],       # 1 screening + 3 confirmation
+        ("-bad-flag",): [80.0],                              # 1 screening only (pruned)
+        ("-O3", "-good-flag"): [112.0, 112.0, 112.0],        # Phase 5's greedy step
+    })
+
+    baseline = run_baseline(
+        cfg, benchmark="fake_r", base_flags=baseline_flags, workload=backends, instrumentation=backends,
+    )
+    screened = screen_candidates(
+        cfg, experiment_id=baseline.experiment_id, benchmark="fake_r", baseline=baseline,
+        candidates=candidates, workload=backends, instrumentation=backends,
+    )
+    confirmed = confirm_candidates(
+        cfg, experiment_id=baseline.experiment_id, benchmark="fake_r", baseline=baseline,
+        screened=screened, workload=backends, instrumentation=backends,
+    )
+    combination = greedy_combine(
+        cfg, experiment_id=baseline.experiment_id, benchmark="fake_r", baseline=baseline,
+        confirmed=confirmed, workload=backends, instrumentation=backends, rng=random.Random(0),
+    )
+
+    assert {o.candidate.flag for o in screened if o.survived} == {"-good-flag"}
+    assert len(confirmed) == 1
+    assert confirmed[0].accepted is True
+    assert combination.winning_flags == ["-O3", "-good-flag"]
+    assert combination.winning_ci.mean == pytest.approx(112.0)
+
+
+def test_full_pipeline_reports_baseline_when_nothing_helps(tmp_path):
+    cfg = _cfg(tmp_path)
+    candidates = [_candidate("-bad-flag-1"), _candidate("-bad-flag-2")]
+    backends = ScriptedBackends(ratio_sequences={
+        ("-O3",): [100.0, 100.0, 100.0],
+        ("-bad-flag-1",): [70.0],
+        ("-bad-flag-2",): [60.0],
+    })
+
+    baseline = run_baseline(
+        cfg, benchmark="fake_r", base_flags=["-O3"], workload=backends, instrumentation=backends,
+    )
+    screened = screen_candidates(
+        cfg, experiment_id=baseline.experiment_id, benchmark="fake_r", baseline=baseline,
+        candidates=candidates, workload=backends, instrumentation=backends,
+    )
+    confirmed = confirm_candidates(
+        cfg, experiment_id=baseline.experiment_id, benchmark="fake_r", baseline=baseline,
+        screened=screened, workload=backends, instrumentation=backends,
+    )
+    combination = greedy_combine(
+        cfg, experiment_id=baseline.experiment_id, benchmark="fake_r", baseline=baseline,
+        confirmed=confirmed, workload=backends, instrumentation=backends, rng=random.Random(0),
+    )
+
+    assert all(not o.survived for o in screened)
+    assert confirmed == []
+    assert combination.winning_flags == baseline.flags
+    assert combination.winning_ci is baseline.ci
