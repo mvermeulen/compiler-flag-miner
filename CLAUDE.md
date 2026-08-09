@@ -2,13 +2,17 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working in this repository.
 
-**Status: M0 shipped, M1 in progress** (doc/DESIGN.md §14) — the mechanical pipeline (`cfm measure`)
-is unit-tested and has been verified end to end against this host's real SPEC CPU2026/wspy install
-(a real `--action=validate` run, single-pass `quick` profile). M1's rule-based screening/confirmation
-loop (§6 Phases 1-5) is under active development, landing as a series of small merged PRs (git log has
-current progress). Compiler-knowledge catalog wiring, cross-benchmark knowledge transfer, and the LLM
-driver are still ahead — M2-M3 (doc/DESIGN.md §13's layout table marks exactly what exists vs. what's
-still pending, module by module).
+**Status: M0 shipped; M1 built, real end-to-end run still pending** (doc/DESIGN.md §14) — the
+mechanical pipeline (`cfm measure`) is unit-tested and has been verified end to end against this
+host's real SPEC CPU2026/wspy install (a real `--action=validate` run, single-pass `quick` profile).
+M1's rule-based screening/confirmation loop (§6 Phases 1-5, `cfm mine`) landed as a series of small
+merged PRs — every phase function and the CLI wiring itself are unit-tested against mocked backends,
+but **no real `cfm mine` run against actual SPEC/wspy has happened yet** (unlike M0's `cfm measure`,
+which earned "shipped and verified" only after a real run) — that's a manual, opt-in confirmation
+step per the exclusive-machine-access rule below, not yet done. Compiler-knowledge catalog wiring
+beyond M1's static-priors scope, cross-benchmark knowledge transfer, and the LLM driver are still
+ahead — M2-M3 (doc/DESIGN.md §13's layout table marks exactly what exists vs. what's still pending,
+module by module).
 
 ## Documentation map
 
@@ -233,15 +237,23 @@ python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
                                           # install; a real invocation launches an actual SPEC build+run
                                           # (minutes, real CPU/disk use) -- confirm with the user before
                                           # running this one, per the exclusive-machine-access rule.
+.venv/bin/cfm mine 706.stockfish_r --max-trials 20
+                                          # M1's full search loop -- same real-SPEC/wspy prerequisites as
+                                          # `measure` above, but many more trials (baseline alone is 3
+                                          # confirmation-grade deep-cpu builds+runs) -- same "confirm with
+                                          # the user first" rule applies, doubly so here; hasn't been run
+                                          # for real against this host's SPEC install yet (see Status
+                                          # above), only against mocked backends in tests/test_orchestrator.py.
 ```
 
 `tests/` has two tiers: pure-logic unit tests (config resolution, `.rsf`/trace-output parsing, `cfm.db`
-schema and accessors, SPEC config rendering, preflight's binary-existence check — no SPEC license or
-wspy checkout needed at all) and `tests/test_wspy_interface.py`'s contract tests (real
-`wspy`/`wspy-run`/`wspy-store`/`wspy-archetype` invocations against a toy C workload, ~25s total,
+schema and accessors, SPEC config rendering, preflight's binary-existence check, and the orchestrator's
+phase logic against mocked `WorkloadBackend`/`InstrumentationBackend` fakes — no SPEC license or wspy
+checkout needed at all) and `tests/test_wspy_interface.py`'s contract tests (real
+`wspy`/`wspy-run`/`wspy-store`/`wspy-archetype`/`wspy-summary` invocations against a toy C workload,
 skipped cleanly rather than failed when `vendor/wspy` isn't built). Neither tier touches a real
-`runcpu`/SPEC install — `cfm measure` above is the only thing that does, and it's manual/opt-in, never
-part of the automated suite.
+`runcpu`/SPEC install — `cfm measure`/`cfm mine` above are the only things that do, and both are
+manual/opt-in, never part of the automated suite.
 
 ## Architecture
 
@@ -251,11 +263,20 @@ part of the automated suite.
 `wspy-store`/`wspy-archetype` sequence over the result) → back to the SPEC Runner to parse the `.rsf`
 ratio → one row each in `cfm.db`'s `experiments`/`trials` tables (`db.py`), regardless of outcome.
 
+**Data flow (M1):** `cfm mine` (`cli.py`) → `orchestrator.run_baseline()` (Phase 1, 3×
+`run_one_trial()` at the `deep-cpu` profile) → `orchestrator.generate_candidates()` (Phase 2,
+`compilers/gcc.py` filtered by `benchmark_languages()`) → `orchestrator.screen_candidates()` (Phase 3,
+1× `run_one_trial()` per candidate at the `quick` profile, prunes clearly-worse) →
+`orchestrator.confirm_candidates()` (Phase 4, 3× `run_one_trial()` per survivor, `cfm/stats.py`'s CI
+accept/reject vs. baseline, `knowledge` table upsert) → `orchestrator.greedy_combine()` (Phase 5,
+cumulative re-confirmation plus a bounded random-pair tournament) → a plain JSON summary on stdout,
+every trial along the way still landing in `cfm.db` regardless of phase or outcome, same as M0.
+
 | File | Responsibility |
 |---|---|
-| `cfm/util.py` | `parse_kv_lines()` — shared `key=value`-per-line parser for both wspy's trace-style CLI output and SPEC's `.rsf` format. |
+| `cfm/util.py` | `parse_kv_lines()` — shared `key=value`-per-line parser for both wspy's trace-style CLI output and SPEC's `.rsf` format; `normalize_flag_base()`/`catalog_flag_base()` — shared flag-name normalization between `scripts/audit_flags_from_spec_results.py` and `compilers/gcc.py`. |
 | `cfm/config.py` | `CfmConfig.from_env()` — env-var-driven paths/hostname (`CFM_SPEC_DIR`, `CFM_WSPY_DIR`, ... — see the file for the full list and defaults), explicit kwargs > environment > built-in default, resolved at call time. |
-| `cfm/db.py` | Applies `schema/cfm_schema.sql` (idempotent) and provides typed `create_experiment`/`record_trial`/`get_experiment`/`list_trials`/`list_trials_by_phase`/`finish_experiment`/`record_hypothesis`/`upsert_knowledge` accessors. No ORM. |
+| `cfm/db.py` | Applies `schema/cfm_schema.sql` (idempotent) and provides typed `create_experiment`/`record_trial`/`update_trial_verdict`/`get_experiment`/`list_trials`/`list_trials_by_phase`/`finish_experiment`/`set_baseline_run_ref`/`record_hypothesis`/`upsert_knowledge` accessors. No ORM. |
 | `cfm/stats.py` | Confidence-interval statistics for Phase 4's confirmation stage — `confidence_interval()`/`non_overlapping()`, replicating `wspy-summary`'s own documented CI formula (mean, sample stddev, Student's t 95%) applied to `cfm.db`'s own `trials.ratio` values, since `wspy-summary` itself has no way to see SPEC's `ratio` field (doc/DESIGN.md §6 Phase 4). |
 | `cfm/compilers/base.py` | `CompilerBackend` interface + `FlagCandidate`/`ValidationResult` dataclasses (doc/DESIGN.md §4.3/§12). |
 | `cfm/compilers/gcc.py` | The only implementation: `candidate_flags_for_signature()` (M1: ignores its own `signature` arg, returns the whole applicable-language catalog uniformly), `validate_flagset()` (unknown-flag/conflict checks against `config/gcc_flag_catalog.seed.json`), `render_optimize_string()`, plus `benchmark_languages()` (reads a benchmark's language from SPEC's own `Spec/object.pm`). |
@@ -265,7 +286,7 @@ ratio → one row each in `cfm.db`'s `experiments`/`trials` tables (`db.py`), re
 | `cfm/instrumentation/wspy.py` | The only implementation: `preflight()` checks all six wspy binaries exist; `characterize()` runs `wspy-run <profile> -- <command>`, then resolves the *real* run identity from the run-index file (see Non-obvious traps — single-pass and the `deep-cpu` multi-pass profile both work), then `wspy-validate`/`wspy-store`/`wspy-archetype`. `check_regression()` wraps `wspy-summary --check-regression` as a secondary environment/counter-sanity guardrail (never the accept/reject decision — that's `cfm/stats.py`, over `cfm.db`'s own data). |
 | `cfm/agents/spec_agent.py` | `run_one_trial()` — the M0 pipeline glue described above. `workload`/`instrumentation` backends and `profile` are injectable/overridable per call (`orchestrator.py` needs a different wspy profile per phase, and its own tests inject fakes — no real SPEC/wspy calls); all default to the real M0 behavior when omitted. The only agent module that exists; `knowledge_agent`/`hypothesis_agent`/`report_agent` are M2-M3. |
 | `cfm/orchestrator.py` | Phase state machine (doc/DESIGN.md §5-6). `run_baseline()` (Phase 1, 3 repeated confirmation-grade trials + `cfm/stats.py`'s CI), `generate_candidates()` (Phase 2, trivial in M1 — no signature filtering), `screen_candidates()` (Phase 3, one cheap `quick`-profile trial per candidate, prunes only a clearly-worse point estimate), `confirm_candidates()` (Phase 4, re-confirms each survivor against the baseline's CI, `check_regression()` as a sanity-only guardrail on accept, `knowledge` table upsert per single flag), `greedy_combine()` (Phase 5, cumulative greedy walk re-confirmed against the *current* running set each step, plus a bounded random-pair tournament evaluated against baseline that can still replace the greedy winner). No `cfm mine` CLI wiring yet — that's still pending. |
-| `cfm/cli.py` | `cfm measure`/`cfm init-db`. Not `cfm mine` — that's the orchestrator's entry point, still pending. |
+| `cfm/cli.py` | `cfm measure`/`cfm init-db`/`cfm mine`. `mine` wires all five orchestrator phases in sequence, `--max-trials` best-effort-caps Phase 2's candidate list (the widest fan-out point — Phase 4/5's own trial count isn't separately capped yet), prints a plain JSON summary (winning flags, ratio, %gain) — no curated report yet, that's M3. |
 | `scripts/bootstrap_wspy.sh` | Initializes + builds the `vendor/wspy` submodule ("wspy dependency" above). |
 | `vendor/wspy` | Pinned wspy submodule — not part of this project's own code, never edited here. |
 
