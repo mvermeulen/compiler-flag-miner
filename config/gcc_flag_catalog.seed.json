@@ -1,0 +1,217 @@
+{
+  "schema_version": 1,
+  "source": "https://gcc.gnu.org/onlinedocs/gcc-16.2.0/gcc/Optimize-Options.html, cross-checked against common autotuning-literature flag lists",
+  "note": "Seed knowledge base for the Compiler Knowledge agent (doc/DESIGN.md sec. 4.3). Each entry is a static prior -- validated ahead of time so a proposed flag never wastes a build cycle on a typo or an inapplicable option. topdown_signals link an entry to wspy-archetype's resource_dominance/memory_attribution vocabulary (see wspy's doc/METRICS.md), used to rank candidates for a given baseline signature. risk tags: safe (no semantic change), needs_validation (SPEC --action=validate must pass on this exact trial, no exceptions), changes_fp_semantics (needs_validation plus explicit note in the report if accepted).",
+  "flags": [
+    {
+      "flag": "-flto",
+      "languages": ["c", "cxx", "fortran"],
+      "category": "ipa",
+      "risk": "needs_validation",
+      "requires": [],
+      "conflicts": [],
+      "notes": "Whole-program interprocedural optimization across translation units. Bigger, slower build (link-time codegen) -- run as a compounding multiplier (Phase 6), not in the cheap screening pass.",
+      "topdown_signals": ["frontend-bound"]
+    },
+    {
+      "flag": "-fprofile-generate",
+      "languages": ["c", "cxx", "fortran"],
+      "category": "pgo",
+      "risk": "needs_validation",
+      "requires": [],
+      "conflicts": ["-fprofile-use"],
+      "notes": "First half of PGO: instrument, run a representative training workload, then rebuild with -fprofile-use. Own two-step sub-flow (Phase 6), not a single trial.",
+      "topdown_signals": ["frontend-bound", "speculation-bound"]
+    },
+    {
+      "flag": "-fprofile-use",
+      "languages": ["c", "cxx", "fortran"],
+      "category": "pgo",
+      "risk": "needs_validation",
+      "requires": ["-fprofile-generate (prior training run)"],
+      "conflicts": ["-fprofile-generate"],
+      "notes": "Real branch probabilities/hot-path info instead of static heuristics -- historically one of the highest-value single flags for frontend/speculation-bound workloads. Flag PGO wins for a training-run-representativeness check before trusting a large delta at face value (doc/DESIGN.md sec. 15).",
+      "topdown_signals": ["frontend-bound", "speculation-bound"]
+    },
+    {
+      "flag": "-freorder-blocks-and-partition",
+      "languages": ["c", "cxx", "fortran"],
+      "category": "codegen-layout",
+      "risk": "safe",
+      "requires": [],
+      "conflicts": [],
+      "notes": "Splits hot/cold blocks into separate sections -- reduces icache footprint of the hot path.",
+      "topdown_signals": ["frontend-bound"]
+    },
+    {
+      "flag": "-freorder-functions",
+      "languages": ["c", "cxx", "fortran"],
+      "category": "codegen-layout",
+      "risk": "safe",
+      "requires": [],
+      "conflicts": [],
+      "notes": "Groups hot functions together in the binary layout; complements -freorder-blocks-and-partition.",
+      "topdown_signals": ["frontend-bound"]
+    },
+    {
+      "flag": "-fno-semantic-interposition",
+      "languages": ["c", "cxx"],
+      "category": "ipa",
+      "risk": "needs_validation",
+      "requires": [],
+      "conflicts": [],
+      "notes": "Lets the compiler assume non-interposable symbols even under -fPIC, unlocking inlining/devirtualization across translation units without full LTO. Can change behavior for code relying on symbol interposition (rare in SPEC-style benchmarks, still gated by validate).",
+      "topdown_signals": ["frontend-bound"]
+    },
+    {
+      "flag": "-mbranch-cost=N",
+      "languages": ["c", "cxx", "fortran"],
+      "category": "target-tuning",
+      "risk": "safe",
+      "requires": [],
+      "conflicts": [],
+      "notes": "Tunes the compiler's branch-vs-predicated-code cost model; worth a small sweep (2-5) on branch-mispredict-heavy workloads.",
+      "topdown_signals": ["speculation-bound"]
+    },
+    {
+      "flag": "-funroll-loops",
+      "languages": ["c", "cxx", "fortran"],
+      "category": "loop-transform",
+      "risk": "safe",
+      "requires": [],
+      "conflicts": [],
+      "notes": "Breaks loop-carried dependency chains, can help backend/retiring-bound loops. Reverse hypothesis on speculation-bound workloads: unrolling can worsen icache pressure and branch predictability -- worth trying OFF if currently on, not just ON if off.",
+      "topdown_signals": ["compute-bound", "backend-bound"]
+    },
+    {
+      "flag": "-fprefetch-loop-arrays",
+      "languages": ["c", "cxx", "fortran"],
+      "category": "memory",
+      "risk": "safe",
+      "requires": [],
+      "conflicts": [],
+      "notes": "Software prefetch insertion for array loop traversal. Pair with --param prefetch-latency=N sweeps.",
+      "topdown_signals": ["memory-bound-corroborated"]
+    },
+    {
+      "flag": "--param prefetch-latency=N",
+      "languages": ["c", "cxx", "fortran"],
+      "category": "memory",
+      "risk": "safe",
+      "requires": ["-fprefetch-loop-arrays"],
+      "conflicts": [],
+      "notes": "Tunes prefetch distance; sweep a small fixed set (e.g. 200, 300, 400) rather than searching open-ended.",
+      "topdown_signals": ["memory-bound-corroborated"]
+    },
+    {
+      "flag": "-mprefer-vector-width=256",
+      "languages": ["c", "cxx", "fortran"],
+      "category": "vectorization",
+      "risk": "safe",
+      "requires": [],
+      "conflicts": ["-mprefer-vector-width=512"],
+      "notes": "x86-64 only. Wider vectors move more data per cache-line touch but can also increase power/frequency throttling risk on some parts -- cross-check against wspy's --power reading if accepted.",
+      "topdown_signals": ["memory-bound-corroborated", "compute-bound"]
+    },
+    {
+      "flag": "-mprefer-vector-width=512",
+      "languages": ["c", "cxx", "fortran"],
+      "category": "vectorization",
+      "risk": "safe",
+      "requires": [],
+      "conflicts": ["-mprefer-vector-width=256"],
+      "notes": "Only meaningful if the detected target microarch has AVX-512; the Compiler Knowledge agent must check this against wspy's cpu_info-derived host detection before proposing it.",
+      "topdown_signals": ["memory-bound-corroborated", "compute-bound"]
+    },
+    {
+      "flag": "-march=<detected-uarch>",
+      "languages": ["c", "cxx", "fortran"],
+      "category": "target-tuning",
+      "risk": "needs_validation",
+      "requires": ["host microarch detected via wspy cpu_info.c vendor/model"],
+      "conflicts": [],
+      "notes": "Not an open-ended search -- resolved to a small fixed set (the detected host's own microarch, e.g. znver4/znver5) rather than trying every -march value GCC knows. Binary becomes non-portable off this microarch family; fine for a single-host mining run, worth flagging in the final report.",
+      "topdown_signals": ["compute-bound", "retiring-high-narrow-margin"]
+    },
+    {
+      "flag": "-Ofast",
+      "languages": ["c", "cxx", "fortran"],
+      "category": "fp-semantics",
+      "risk": "changes_fp_semantics",
+      "requires": [],
+      "conflicts": [],
+      "notes": "Implies -ffast-math and disregards strict IEEE/ISO compliance. Real, common wins on FP-heavy fprate/fpspeed benchmarks -- eligible, but never accepted without a clean --action=validate on that exact trial, and always called out explicitly in the final report if accepted.",
+      "topdown_signals": ["compute-bound"]
+    },
+    {
+      "flag": "-ffast-math",
+      "languages": ["c", "cxx", "fortran"],
+      "category": "fp-semantics",
+      "risk": "changes_fp_semantics",
+      "requires": [],
+      "conflicts": [],
+      "notes": "Bundles -fno-math-errno, -funsafe-math-optimizations, -ffinite-math-only, -fno-trapping-math, -fno-signed-zeros, -fassociative-math. Consider trying the sub-flags individually before the bundle on a benchmark sensitive to specific semantics (e.g. NaN/Inf handling).",
+      "topdown_signals": ["compute-bound"]
+    },
+    {
+      "flag": "-finline-limit=N",
+      "languages": ["c", "cxx", "fortran"],
+      "category": "ipa",
+      "risk": "safe",
+      "requires": [],
+      "conflicts": [],
+      "notes": "Raises the per-function inlining budget beyond -O3 defaults; can help frontend-bound workloads with many small hot functions, but trades off icache footprint -- watch for a regression on this same signal after acceptance.",
+      "topdown_signals": ["frontend-bound"]
+    },
+    {
+      "flag": "-fipa-pta",
+      "languages": ["c", "cxx"],
+      "category": "ipa",
+      "risk": "safe",
+      "requires": [],
+      "conflicts": [],
+      "notes": "Interprocedural points-to analysis; can unlock more aggressive alias-based optimization on pointer-heavy C/C++ code.",
+      "topdown_signals": ["backend-bound"]
+    },
+    {
+      "flag": "-fgraphite-identity",
+      "languages": ["c", "cxx", "fortran"],
+      "category": "loop-transform",
+      "risk": "safe",
+      "requires": ["GCC built with isl/Graphite support"],
+      "conflicts": [],
+      "notes": "Enables the Graphite loop-nest optimization framework's transform pipeline; check GCC was built with isl support before proposing (Compiler Knowledge agent validation step) -- silently a no-op otherwise.",
+      "topdown_signals": ["backend-bound", "memory-bound-corroborated"]
+    },
+    {
+      "flag": "-fstack-arrays",
+      "languages": ["fortran"],
+      "category": "gfortran-specific",
+      "risk": "needs_validation",
+      "requires": [],
+      "conflicts": [],
+      "notes": "gfortran: allocates local array temporaries on the stack instead of the heap when provably safe -- real win on array-heavy Fortran fprate/fpspeed benchmarks (roms_r, fotonik3d_r, cactus_r, ...), but raises stack usage; needs ulimit -s unlimited (already SPEC convention, see workload/cpu2017/run_test.sh).",
+      "topdown_signals": ["memory-bound-corroborated"]
+    },
+    {
+      "flag": "-frecursive",
+      "languages": ["fortran"],
+      "category": "gfortran-specific",
+      "risk": "needs_validation",
+      "requires": [],
+      "conflicts": [],
+      "notes": "Forces local variables to be stack-allocated (thread/recursion-safe) -- mostly a correctness flag, rarely a perf win by itself, included so the catalog covers it rather than the LLM re-proposing it every run.",
+      "topdown_signals": []
+    },
+    {
+      "flag": "-ffrontend-optimize",
+      "languages": ["fortran"],
+      "category": "gfortran-specific",
+      "risk": "safe",
+      "requires": [],
+      "conflicts": [],
+      "notes": "gfortran front-end-level simplifications (constant folding, redundant call elimination) ahead of the shared middle end.",
+      "topdown_signals": ["frontend-bound"]
+    }
+  ]
+}
