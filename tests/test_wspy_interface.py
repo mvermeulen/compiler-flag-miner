@@ -31,7 +31,7 @@ def _wspy_built() -> bool:
     wspy_dir = _wspy_dir()
     return all(
         (wspy_dir / binary).exists()
-        for binary in ("wspy", "wspy-run", "wspy-store", "wspy-validate", "wspy-archetype")
+        for binary in ("wspy", "wspy-run", "wspy-store", "wspy-validate", "wspy-archetype", "wspy-summary")
     )
 
 
@@ -67,11 +67,13 @@ def toy_binary(tmp_path_factory):
 
 
 @pytest.fixture(scope="module")
-def real_signature(tmp_path_factory, toy_binary):
+def real_run(tmp_path_factory, toy_binary):
     """One real wspy-run invocation, shared read-only by every test below. wspy
     imposes a ~2s minimum per invocation (its own pre-launch counter-arming window
     -- see wspy's topdown.c), so running this once per module rather than once per
-    assertion keeps this file's wall-clock cost bounded.
+    assertion keeps this file's wall-clock cost bounded. Yields (instrumentation,
+    signature) -- most tests only need the signature (see real_signature below),
+    but check_regression() needs the instrumentation instance too.
     """
     output_root = tmp_path_factory.mktemp("wspy_output")
     instrumentation = WspyInstrumentation(
@@ -80,7 +82,7 @@ def real_signature(tmp_path_factory, toy_binary):
         run_index_path=output_root / "cpu2026" / "run-index.jsonl",
     )
     assert instrumentation.preflight() == []
-    return instrumentation.characterize(
+    signature = instrumentation.characterize(
         command=[str(toy_binary)],
         suite="cfmtest",
         benchmark="toy_compute",
@@ -93,6 +95,28 @@ def real_signature(tmp_path_factory, toy_binary):
         profile="quick",
         output_root=output_root,
     )
+    return instrumentation, signature
+
+
+@pytest.fixture(scope="module")
+def real_signature(real_run):
+    return real_run[1]
+
+
+def test_check_regression_against_a_real_run_with_no_baseline_yet(real_run):
+    # Only one run exists in this module's store -- confirmed live that
+    # wspy-summary --check-regression reports the CSV header with zero data rows
+    # in that case (exit 0), not an error and not a "no-baseline" status per row.
+    # check_regression() returns [] either way (same as the "run not found" case),
+    # which is exactly right: there's nothing to report yet, not a failure. This
+    # test exists to confirm the real invocation itself works end to end (right
+    # binary, right flags) without raising -- the parsing logic and the
+    # baseline-exists case are covered by
+    # tests/test_instrumentation_wspy.py's fixture-based tests and cfm/stats.py's
+    # own unit tests (known hand-computed CI values) respectively.
+    instrumentation, signature = real_run
+    rows = instrumentation.check_regression(signature.wspy_run_ref)
+    assert rows == []
 
 
 def test_wspy_run_produces_a_traceable_run_ref(real_signature):

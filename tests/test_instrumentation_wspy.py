@@ -1,8 +1,12 @@
 import json
+import subprocess
+from pathlib import Path
 
 import pytest
 
 from cfm.instrumentation.wspy import WspyInstrumentation, _count_lines, _to_float
+
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def _make(tmp_path):
@@ -13,12 +17,12 @@ def _make(tmp_path):
 
 def test_preflight_reports_all_missing_binaries(tmp_path):
     problems = _make(tmp_path).preflight()
-    assert len(problems) == 5
+    assert len(problems) == 6  # wspy, wspy-run, wspy-store, wspy-validate, wspy-archetype, wspy-summary
     assert all("make" in p for p in problems)
 
 
 def test_preflight_passes_when_binaries_present(tmp_path):
-    for name in ("wspy", "wspy-run", "wspy-store", "wspy-validate", "wspy-archetype"):
+    for name in ("wspy", "wspy-run", "wspy-store", "wspy-validate", "wspy-archetype", "wspy-summary"):
         (tmp_path / name).write_text("#!/bin/sh\n")
     assert _make(tmp_path).preflight() == []
 
@@ -27,7 +31,7 @@ def test_preflight_reports_only_missing_binaries(tmp_path):
     (tmp_path / "wspy").write_text("#!/bin/sh\n")
     (tmp_path / "wspy-run").write_text("#!/bin/sh\n")
     problems = _make(tmp_path).preflight()
-    assert len(problems) == 3
+    assert len(problems) == 4
     assert not any("wspy-run not found" in p or p.startswith("wspy not found") for p in problems)
 
 
@@ -131,3 +135,40 @@ def test_resolve_run_identity_raises_on_unmapped_multi_pass_profile(tmp_path):
         f.write(json.dumps({"hostname": "h", "run_id": "run-b"}) + "\n")
     with pytest.raises(RuntimeError, match="deep-cpu-intel"):
         instrumentation._resolve_run_identity(tmp_path, "deep-cpu-intel", lines_before)
+
+
+def test_check_regression_parses_real_captured_csv(tmp_path, monkeypatch):
+    # tests/fixtures/wspy_summary_check_regression.sample.csv is a real captured
+    # `wspy-summary --check-regression ... --csv --quiet` excerpt against our own
+    # toy workload (this session, not a third party's data -- see the fixture's
+    # sibling .rsf fixture for why that distinction matters here).
+    instrumentation = _make(tmp_path)
+    captured_csv = (FIXTURES / "wspy_summary_check_regression.sample.csv").read_text()
+
+    def fake_run(argv, capture_output, text):
+        assert str(instrumentation.wspy_summary_bin) in argv
+        assert "--check-regression" in argv
+        assert "--quiet" in argv  # load-bearing: suppresses the trailing summary
+        return subprocess.CompletedProcess(argv, 0, stdout=captured_csv, stderr="")
+
+    monkeypatch.setattr("cfm.instrumentation.wspy.subprocess.run", fake_run)
+    rows = instrumentation.check_regression("host:run123")
+
+    assert len(rows) == 14
+    by_metric = {r["metric"]: r for r in rows}
+    assert by_metric["ipc"]["status"] == "within"
+    assert by_metric["nivcsw"]["baseline_verdict"] == "WARN:noisy"
+    assert by_metric["maxrss"]["status"] == "below"
+    assert by_metric["minflt"]["status"] == "above"
+
+
+def test_check_regression_returns_empty_list_when_run_not_found(tmp_path, monkeypatch):
+    instrumentation = _make(tmp_path)
+
+    def fake_run(argv, capture_output, text):
+        # confirmed live: "wspy-summary: no run found for ..." with exit 1, and no
+        # usable CSV rows on stdout either way.
+        return subprocess.CompletedProcess(argv, 1, stdout="", stderr="")
+
+    monkeypatch.setattr("cfm.instrumentation.wspy.subprocess.run", fake_run)
+    assert instrumentation.check_regression("host:no-such-run") == []
