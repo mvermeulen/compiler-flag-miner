@@ -7,6 +7,8 @@ logic lives here, only correct sequencing of wspy's own tools:
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import subprocess
 from pathlib import Path
@@ -42,6 +44,7 @@ class WspyInstrumentation(InstrumentationBackend):
         self.wspy_store_bin = self.wspy_dir / "wspy-store"
         self.wspy_validate_bin = self.wspy_dir / "wspy-validate"
         self.wspy_archetype_bin = self.wspy_dir / "wspy-archetype"
+        self.wspy_summary_bin = self.wspy_dir / "wspy-summary"
         self.store_db = Path(store_db)
         self.run_index_path = Path(run_index_path)
 
@@ -60,6 +63,7 @@ class WspyInstrumentation(InstrumentationBackend):
             ("wspy-store", self.wspy_store_bin),
             ("wspy-validate", self.wspy_validate_bin),
             ("wspy-archetype", self.wspy_archetype_bin),
+            ("wspy-summary", self.wspy_summary_bin),
         ):
             if not path.exists():
                 problems.append(f"{label} not found at {path} -- run `make` in {self.wspy_dir}")
@@ -220,6 +224,34 @@ class WspyInstrumentation(InstrumentationBackend):
             capture_output=True, text=True,
         )
         return parse_kv_lines(proc.stdout)
+
+    def check_regression(self, wspy_run_ref: str) -> list[dict]:
+        """Wraps ``wspy-summary --check-regression <ref> --csv --quiet`` -- a
+        secondary environment/counter-sanity guardrail for doc/DESIGN.md sec. 6
+        Phase 4's confirmation stage (mixed-env/mixed-pmu/noisy verdicts on wspy's
+        own tracked counters), never the accept/reject decision itself. That
+        decision is ``cfm/stats.py``'s job, computed directly over ``cfm.db``'s own
+        ``trials.ratio`` values -- ``wspy-summary`` has no way to see SPEC's
+        ``ratio`` field at all (it only knows about metrics ``wspy-store`` itself
+        ingested), confirmed live this session; see ``cfm/stats.py``'s module
+        docstring for the full reasoning. ``--quiet`` suppresses wspy-summary's
+        trailing human-readable summary line, which (confirmed live) is otherwise
+        interleaved into the same stdout stream as the CSV rows and would
+        otherwise get misparsed as a malformed extra CSV row.
+
+        Returns one dict per reported metric row (column names confirmed live
+        against real output: ``metric``/``target_value``/``baseline_n``/
+        ``baseline_mean``/``ci95_low``/``ci95_high``/``baseline_env_score``/
+        ``baseline_verdict``/``status``), or an empty list if the run isn't in the
+        store at all (``wspy-summary`` exits 1 with nothing useful on stdout in
+        that case) -- degrades rather than raises, same posture as ``_archetype()``.
+        """
+        proc = subprocess.run(
+            [str(self.wspy_summary_bin), "--db", str(self.store_db),
+             "--check-regression", wspy_run_ref, "--csv", "--quiet"],
+            capture_output=True, text=True,
+        )
+        return list(csv.DictReader(io.StringIO(proc.stdout)))
 
 
 def _count_lines(path: Path) -> int:

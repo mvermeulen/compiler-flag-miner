@@ -202,6 +202,21 @@ Full branch/PR discipline, same shape as wspy's:
   `printf`-ing the accumulated value, same as wspy's own toy suite in `doc/NEW_WORKLOAD_COOKBOOK.md`
   already does for exactly this reason. Worth remembering for any future hand-written toy/benchmark
   workload, not just this one.
+- **SQLite's (standard SQL's) `UNIQUE` constraint never treats two `NULL`s as conflicting --
+  `INSERT ... ON CONFLICT(...)` silently stops upserting once a scoping column can be `NULL`.**
+  `cfm.db`'s `knowledge` table (§7/§8) is scoped `UNIQUE(cluster_key, compiler, compiler_version,
+  target_arch, flag)`, and both `compiler_version`/`target_arch` are nullable columns (a host/GCC
+  detection that hasn't run yet, or a caller that hasn't wired it through). `db.py`'s first
+  `upsert_knowledge()` used `INSERT ... ON CONFLICT(...) DO UPDATE` — works fine once every scoping
+  column is non-`NULL`, but with `compiler_version`/`target_arch` both `NULL` (a real M1 call shape:
+  no host/GCC detection wired in yet), SQLite's own unique index never considers two `NULL`-valued
+  rows a conflict, so `ON CONFLICT` never fires and every call silently `INSERT`s a fresh row instead
+  of accumulating into the existing one — no error, just quietly wrong `n_trials`/`mean_delta_pct`
+  from the second call onward. Fixed by looking the existing row up first with SQL `IS` (which *is*
+  `NULL`-safe, unlike `=`) and updating it **by id** instead of relying on `ON CONFLICT` at all. Caught
+  by `test_upsert_knowledge_null_compiler_version_and_target_arch_still_upserts`, not by inspection --
+  worth remembering for any future `UNIQUE`-scoped upsert where one of the scoping columns can be
+  `NULL`, not just this table.
 
 ## Build & test
 
@@ -240,11 +255,14 @@ ratio → one row each in `cfm.db`'s `experiments`/`trials` tables (`db.py`), re
 |---|---|
 | `cfm/util.py` | `parse_kv_lines()` — shared `key=value`-per-line parser for both wspy's trace-style CLI output and SPEC's `.rsf` format. |
 | `cfm/config.py` | `CfmConfig.from_env()` — env-var-driven paths/hostname (`CFM_SPEC_DIR`, `CFM_WSPY_DIR`, ... — see the file for the full list and defaults), explicit kwargs > environment > built-in default, resolved at call time. |
-| `cfm/db.py` | Applies `schema/cfm_schema.sql` (idempotent) and provides typed `create_experiment`/`record_trial`/`get_experiment`/`list_trials`/`finish_experiment` accessors. No ORM. |
+| `cfm/db.py` | Applies `schema/cfm_schema.sql` (idempotent) and provides typed `create_experiment`/`record_trial`/`get_experiment`/`list_trials`/`list_trials_by_phase`/`finish_experiment`/`record_hypothesis`/`upsert_knowledge` accessors. No ORM. |
+| `cfm/stats.py` | Confidence-interval statistics for Phase 4's confirmation stage — `confidence_interval()`/`non_overlapping()`, replicating `wspy-summary`'s own documented CI formula (mean, sample stddev, Student's t 95%) applied to `cfm.db`'s own `trials.ratio` values, since `wspy-summary` itself has no way to see SPEC's `ratio` field (doc/DESIGN.md §6 Phase 4). |
+| `cfm/compilers/base.py` | `CompilerBackend` interface + `FlagCandidate`/`ValidationResult` dataclasses (doc/DESIGN.md §4.3/§12). |
+| `cfm/compilers/gcc.py` | The only implementation: `candidate_flags_for_signature()` (M1: ignores its own `signature` arg, returns the whole applicable-language catalog uniformly), `validate_flagset()` (unknown-flag/conflict checks against `config/gcc_flag_catalog.seed.json`), `render_optimize_string()`, plus `benchmark_languages()` (reads a benchmark's language from SPEC's own `Spec/object.pm`). |
 | `cfm/workloads/base.py` | `WorkloadBackend` interface + `BuildResult`/`RunResult` dataclasses (doc/DESIGN.md §4.1/§12). |
 | `cfm/workloads/spec_cpu2026.py` | The only implementation: renders a per-trial SPEC config via `include:` + a `<bench>=peak:` override section, drives `runcpu --action=build`/`--action=validate` through a `shrc`-sourcing `bash -c` wrapper (see Non-obvious traps above), parses the resulting `.rsf` file. |
 | `cfm/instrumentation/base.py` | `InstrumentationBackend` interface + `RunSignature` dataclass (doc/DESIGN.md §4.2/§12). |
-| `cfm/instrumentation/wspy.py` | The only implementation: `preflight()` checks all five wspy binaries exist; `characterize()` runs `wspy-run <profile> -- <command>`, then resolves the *real* run identity from the run-index file (see Non-obvious traps), then `wspy-validate`/`wspy-store`/`wspy-archetype`. Raises `RuntimeError` on a multi-pass profile (e.g. `deep-cpu`) — not supported yet, see the same section. |
+| `cfm/instrumentation/wspy.py` | The only implementation: `preflight()` checks all six wspy binaries exist; `characterize()` runs `wspy-run <profile> -- <command>`, then resolves the *real* run identity from the run-index file (see Non-obvious traps — single-pass and the `deep-cpu` multi-pass profile both work), then `wspy-validate`/`wspy-store`/`wspy-archetype`. `check_regression()` wraps `wspy-summary --check-regression` as a secondary environment/counter-sanity guardrail (never the accept/reject decision — that's `cfm/stats.py`, over `cfm.db`'s own data). |
 | `cfm/agents/spec_agent.py` | `run_one_trial()` — the M0 pipeline glue described above. The only agent module that exists; `knowledge_agent`/`hypothesis_agent`/`report_agent` are M2-M3. |
 | `cfm/cli.py` | `cfm measure`/`cfm init-db`. Not `cfm mine` — that's the orchestrator's entry point, M1. |
 | `scripts/bootstrap_wspy.sh` | Initializes + builds the `vendor/wspy` submodule ("wspy dependency" above). |

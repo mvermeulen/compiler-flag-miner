@@ -1,0 +1,15 @@
+metric,target_value,baseline_n,baseline_mean,ci95_low,ci95_high,baseline_env_score,baseline_verdict,status
+counters_measured,3,3,3,3,3,1,PASS,within
+counters_requested,3,3,3,3,3,1,PASS,within
+elapsed,0.171,3,0.174333,0.168081,0.180585,1,PASS,within
+inblock,0,3,0,0,0,1,PASS,within
+ipc,1,3,0.996667,0.982323,1.01101,1,PASS,within
+majflt,0,3,0,0,0,1,PASS,within
+maxrss,1408,3,1412,1412,1412,1,PASS,below
+minflt,79,3,78,78,78,1,PASS,above
+nivcsw,7,3,8,-6.90603,22.906,1,WARN:noisy,within
+nswap,0,3,0,0,0,1,PASS,within
+nvcsw,1,3,1,1,1,1,PASS,within
+oublock,0,3,0,0,0,1,PASS,within
+stime,0.001,3,0.002,-0.000484338,0.00448434,1,WARN:noisy,within
+utime,0.169,3,0.171667,0.166495,0.176838,1,PASS,within
