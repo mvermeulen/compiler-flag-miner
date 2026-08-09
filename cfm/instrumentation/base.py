@@ -41,3 +41,14 @@ class InstrumentationBackend:
         responsibility lives here rather than on the workload backend.
         """
         raise NotImplementedError
+
+    def check_regression(self, wspy_run_ref: str) -> list[dict]:
+        """Optional secondary environment/counter-sanity guardrail for
+        doc/DESIGN.md sec. 6 Phase 4's confirmation stage (``wspy.py``'s
+        implementation wraps ``wspy-summary --check-regression``) -- never the
+        accept/reject decision itself, which is computed directly over
+        ``cfm.db``'s own ``trials.ratio`` (``cfm/stats.py``). Defaults to "nothing
+        to report" so a backend with no equivalent tool (e.g. a future bare
+        ``perf stat`` fallback, sec. 12) doesn't need to implement this at all.
+        """
+        return []

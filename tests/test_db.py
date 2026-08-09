@@ -38,6 +38,23 @@ def test_schema_experiment_trial_roundtrip(tmp_path):
         conn.close()
 
 
+def test_update_trial_verdict_sets_verdict_delta_and_ci_overlap(tmp_path):
+    conn = db.connect(tmp_path / "cfm.db")
+    try:
+        exp_id = db.create_experiment(conn, benchmark="x", hostname="h", compiler="gcc")
+        trial_id = db.record_trial(
+            conn, experiment_id=exp_id, phase="confirmation", flags=["-flto"],
+            optimize_string="-flto", build_status="ok", ratio=105.0,
+        )
+        db.update_trial_verdict(conn, trial_id, verdict="accept", delta_vs_baseline_pct=5.0, ci_overlap=False)
+        row = db.list_trials(conn, exp_id)[0]
+        assert row["verdict"] == "accept"
+        assert row["delta_vs_baseline_pct"] == 5.0
+        assert row["ci_overlap"] == 0
+    finally:
+        conn.close()
+
+
 def test_set_baseline_run_ref_does_not_touch_status_or_finished_at(tmp_path):
     conn = db.connect(tmp_path / "cfm.db")
     try:

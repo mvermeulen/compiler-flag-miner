@@ -1,15 +1,16 @@
 """Deterministic phase state machine -- doc/DESIGN.md sec. 5-6.
 
 M1 scope (doc/DESIGN.md sec. 14): Phases 1 (baseline), 2 (candidate generation --
-trivial, no signature-based filtering yet), and 3 (screening) only. Phase 4
-(confirmation)/5 (greedy combination) land in a follow-up PR; Phase 0 (preflight)/
-6 (LTO/PGO/microarch multipliers)/7 (finalize+report) are M1-adjacent or later
-milestones, not this module's concern yet. No `cfm mine` CLI wiring here either --
-that's PR 6.
+trivial, no signature-based filtering yet), 3 (screening), 4 (confirmation), and 5
+(greedy combination). Phase 0 (preflight)/6 (LTO/PGO/microarch multipliers)/7
+(finalize+report) are M1-adjacent or later milestones, not this module's concern
+yet. No `cfm mine` CLI wiring here either -- that's PR 6.
 """
 
 from __future__ import annotations
 
+import itertools
+import random
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -19,15 +20,17 @@ from .compilers.base import FlagCandidate
 from .compilers.gcc import GccCompiler, benchmark_languages
 from .config import CfmConfig
 from .instrumentation.base import InstrumentationBackend
-from .stats import ConfidenceInterval, confidence_interval
+from .stats import ConfidenceInterval, confidence_interval, non_overlapping
 from .workloads.base import WorkloadBackend
 
-# Repeated-measurement counts, doc/DESIGN.md sec. 6: Phase 1 (baseline) and Phase 4
-# (confirmation) both need >=3 confirmation-grade repetitions (wspy-summary's own
-# "thin" threshold -- cfm/stats.py's ConfidenceInterval.verdict is "WARN:thin"
-# below it). Phase 3 (screening) is deliberately one cheap run each -- "exists to
-# prune, not conclude" (doc/DESIGN.md sec. 6 Phase 3).
-BASELINE_REPETITIONS = 3
+# Repeated-measurement count, doc/DESIGN.md sec. 6: Phase 1 (baseline) and Phase 4
+# (confirmation)/5 (combination) all need >=3 confirmation-grade repetitions
+# (wspy-summary's own "thin" threshold -- cfm/stats.py's
+# ConfidenceInterval.verdict is "WARN:thin" below it) of the *same* flagset, each
+# its own full SPEC build/run/measure cycle. Phase 3 (screening) is deliberately
+# one cheap run each -- "exists to prune, not conclude" (doc/DESIGN.md sec. 6
+# Phase 3).
+CONFIRMATION_REPETITIONS = 3
 SCREENING_ITERATIONS = 1
 CONFIRMATION_PROFILE = "deep-cpu"  # needs PR 1's multi-pass identity fix
 SCREENING_PROFILE = "quick"
@@ -39,6 +42,11 @@ SCREENING_PROFILE = "quick"
 # -- so a marginal or noisy-but-plausible result still reaches Phase 4 rather than
 # being pruned on a single noisy measurement.
 SCREENING_PRUNE_THRESHOLD_PCT = 5.0
+
+# Phase 5's random-pair tournament is bounded to at most this many trials
+# regardless of how many flags survived confirmation, "so it doesn't blow the
+# budget" (doc/DESIGN.md sec. 6 Phase 5).
+MAX_PAIR_TOURNAMENT_TRIALS = 10
 
 
 @dataclass
@@ -83,10 +91,10 @@ def run_baseline(
     instrumentation: Optional[InstrumentationBackend] = None,
 ) -> BaselineResult:
     """doc/DESIGN.md sec. 6 Phase 1: build+run the starting configuration at
-    confirmation-grade repetition (``BASELINE_REPETITIONS`` separate trials, each
-    its own full SPEC build/run/measure cycle, ``deep-cpu`` profile -- PR 1's fix
-    is what makes this profile usable at all), establishing the running baseline
-    every subsequent trial compares against.
+    confirmation-grade repetition (``CONFIRMATION_REPETITIONS`` separate trials,
+    each its own full SPEC build/run/measure cycle, ``deep-cpu`` profile -- PR 1's
+    fix is what makes this profile usable at all), establishing the running
+    baseline every subsequent trial compares against.
     """
     experiment_id: Optional[int] = None
     trial_ids: list[int] = []
@@ -94,7 +102,7 @@ def run_baseline(
     resource_dominances: list[Optional[str]] = []
     wspy_run_refs: list[str] = []
 
-    for _ in range(BASELINE_REPETITIONS):
+    for _ in range(CONFIRMATION_REPETITIONS):
         result = run_one_trial(
             cfg, benchmark=benchmark, flags=base_flags, phase="confirmation",
             profile=CONFIRMATION_PROFILE, experiment_id=experiment_id,
@@ -111,7 +119,7 @@ def run_baseline(
     if not ratios:
         raise RuntimeError(
             f"baseline for {benchmark!r} produced no valid ratio across "
-            f"{BASELINE_REPETITIONS} repetitions -- see trials {trial_ids} in cfm.db"
+            f"{CONFIRMATION_REPETITIONS} repetitions -- see trials {trial_ids} in cfm.db"
         )
 
     distinct = {rd for rd in resource_dominances if rd is not None}
@@ -208,3 +216,248 @@ def screen_candidates(
         conn.close()
 
     return outcomes
+
+
+@dataclass
+class ConfirmationOutcome:
+    """One Phase 4/5 result: ``flags`` is the exact flagset re-confirmed (a single
+    candidate's flag for Phase 4, a cumulative or pair set for Phase 5). ``ci`` is
+    ``None`` iff every repetition failed to produce a usable ratio -- a real,
+    persisted negative result (each repetition's own trial row already recorded
+    why), rejected outright since there's nothing to compute a CI from.
+    """
+
+    flags: list[str]
+    trial_ids: list[int]
+    ratios: list[float]
+    ci: Optional[ConfidenceInterval]
+    delta_vs_baseline_pct: Optional[float]
+    accepted: bool
+    reason: str
+
+
+def _summarize_regression(rows: list[dict]) -> str:
+    if not rows:
+        return "check_regression: no baseline history yet (or run not found)"
+    flagged = [r for r in rows if r["status"] in ("above", "below") or r["baseline_verdict"].startswith("WARN")]
+    if not flagged:
+        return f"check_regression: {len(rows)} metric(s) checked, all within baseline range"
+    parts = [f"{r['metric']}={r['status']}/{r['baseline_verdict']}" for r in flagged]
+    return f"check_regression: {len(flagged)}/{len(rows)} metric(s) flagged: {', '.join(parts)}"
+
+
+def _confirm_flagset(
+    cfg: CfmConfig,
+    *,
+    experiment_id: int,
+    benchmark: str,
+    baseline: BaselineResult,
+    flags: list[str],
+    phase: str,
+    compare_ci: ConfidenceInterval,
+    parent_trial_id: Optional[int] = None,
+    workload: Optional[WorkloadBackend] = None,
+    instrumentation: Optional[InstrumentationBackend] = None,
+) -> ConfirmationOutcome:
+    """Shared confirmation-grade measurement + accept/reject machinery for both
+    Phase 4 (doc/DESIGN.md sec. 6, one candidate flag re-run against the
+    *baseline*) and Phase 5 (a cumulative or pair flagset re-run against the
+    *current running set* -- ``compare_ci`` is which of those two this call means,
+    letting Phase 5 re-use this unchanged rather than duplicating it).
+    """
+    trial_results = []
+    for _ in range(CONFIRMATION_REPETITIONS):
+        trial_results.append(run_one_trial(
+            cfg, benchmark=benchmark, flags=flags, phase=phase,
+            profile=CONFIRMATION_PROFILE, experiment_id=experiment_id,
+            parent_trial_id=parent_trial_id, workload=workload, instrumentation=instrumentation,
+        ))
+
+    trial_ids = [r["trial_id"] for r in trial_results]
+    ratios = [r["ratio"] for r in trial_results if r.get("ratio") is not None]
+
+    if not ratios:
+        ci = None
+        delta_pct = None
+        accepted = False
+        build_statuses = [r["build_status"] for r in trial_results]
+        reason = (
+            f"no usable ratio across {CONFIRMATION_REPETITIONS} repetitions "
+            f"(build_status={build_statuses})"
+        )
+    else:
+        ci = confidence_interval(ratios)
+        delta_pct = (ci.mean - compare_ci.mean) / compare_ci.mean * 100.0
+        accepted = non_overlapping(compare_ci, ci) and ci.mean > compare_ci.mean
+        reason = (
+            f"{phase} mean {ci.mean:.6g} (n={ci.n}, 95% CI [{ci.low:.6g}, {ci.high:.6g}]) vs "
+            f"comparison mean {compare_ci.mean:.6g} (95% CI [{compare_ci.low:.6g}, "
+            f"{compare_ci.high:.6g}]) -- {'accept' if accepted else 'reject'} ({delta_pct:+.2f}%)"
+        )
+
+    verdict = "accept" if accepted else "reject"
+    ci_overlap = None if ci is None else not non_overlapping(compare_ci, ci)
+
+    conn = db.connect(cfg.db_path)
+    try:
+        for result in trial_results:
+            db.update_trial_verdict(
+                conn, result["trial_id"], verdict=verdict,
+                delta_vs_baseline_pct=delta_pct, ci_overlap=ci_overlap,
+            )
+            db.record_hypothesis(conn, trial_id=result["trial_id"], proposed_by="rule", rationale=reason)
+
+        # check_regression() is a secondary environment/counter-sanity guardrail,
+        # only worth spending on a flagset we're actually about to accept --
+        # doc/DESIGN.md sec. 6 Phase 4, cfm/instrumentation/wspy.py's own docstring
+        # for why it's never the accept/reject decision itself.
+        if accepted and instrumentation is not None:
+            for result in trial_results:
+                if result.get("wspy_run_ref"):
+                    regression_rows = instrumentation.check_regression(result["wspy_run_ref"])
+                    db.record_hypothesis(
+                        conn, trial_id=result["trial_id"], proposed_by="rule",
+                        rationale=_summarize_regression(regression_rows),
+                    )
+
+        # Cross-benchmark knowledge transfer (doc/DESIGN.md sec. 8) is keyed by a
+        # single flag -- only meaningful for Phase 4's one-flag-at-a-time
+        # confirmations, not Phase 5's multi-flag cumulative/pair sets, and only
+        # when there's a real numeric delta to aggregate (a total-failure
+        # confirmation is still persisted above, as trials + hypotheses, just not
+        # folded into this numeric aggregate). compiler_version/target_arch are
+        # both None -- no host/GCC detection wired in yet (CLAUDE.md's traps log).
+        if len(flags) == 1 and ratios:
+            db.upsert_knowledge(
+                conn, cluster_key=baseline.resource_dominance or "unknown", compiler="gcc",
+                compiler_version=None, target_arch=None, flag=flags[0], accepted=accepted,
+                delta_pct=delta_pct, last_benchmark=benchmark,
+            )
+    finally:
+        conn.close()
+
+    return ConfirmationOutcome(
+        flags=flags, trial_ids=trial_ids, ratios=ratios, ci=ci,
+        delta_vs_baseline_pct=delta_pct, accepted=accepted, reason=reason,
+    )
+
+
+def confirm_candidates(
+    cfg: CfmConfig,
+    *,
+    experiment_id: int,
+    benchmark: str,
+    baseline: BaselineResult,
+    screened: list[ScreeningOutcome],
+    workload: Optional[WorkloadBackend] = None,
+    instrumentation: Optional[InstrumentationBackend] = None,
+) -> list[ConfirmationOutcome]:
+    """doc/DESIGN.md sec. 6 Phase 4: each Phase 3 survivor re-run at
+    ``CONFIRMATION_REPETITIONS``, ``deep-cpu`` profile, compared against the
+    *baseline*'s CI -- accept iff non-overlapping and better. ``screened`` is
+    Phase 3's full output list (not pre-filtered) so a caller can just chain
+    ``screen_candidates()``'s return value straight in.
+    """
+    return [
+        _confirm_flagset(
+            cfg, experiment_id=experiment_id, benchmark=benchmark, baseline=baseline,
+            flags=[outcome.candidate.flag], phase="confirmation", compare_ci=baseline.ci,
+            workload=workload, instrumentation=instrumentation,
+        )
+        for outcome in screened
+        if outcome.survived
+    ]
+
+
+@dataclass
+class CombinationResult:
+    """Phase 5's output: ``winning_flags``/``winning_ci`` is the final peak
+    flagset for this experiment (never worse than the baseline -- greedy/pair
+    additions are only kept when they clear the statistical bar). ``steps`` is
+    every cumulative-set confirmation tried during the greedy walk, in order;
+    ``pair_trials`` is the random-pair tournament's own trials -- both kept for
+    traceability even though only the winning path matters for the final config.
+    """
+
+    winning_flags: list[str]
+    winning_ci: ConfidenceInterval
+    steps: list[ConfirmationOutcome] = field(default_factory=list)
+    pair_trials: list[ConfirmationOutcome] = field(default_factory=list)
+
+
+def greedy_combine(
+    cfg: CfmConfig,
+    *,
+    experiment_id: int,
+    benchmark: str,
+    baseline: BaselineResult,
+    confirmed: list[ConfirmationOutcome],
+    workload: Optional[WorkloadBackend] = None,
+    instrumentation: Optional[InstrumentationBackend] = None,
+    max_pair_trials: int = MAX_PAIR_TOURNAMENT_TRIALS,
+    rng: Optional[random.Random] = None,
+) -> CombinationResult:
+    """doc/DESIGN.md sec. 6 Phase 5: confirmed-positive flags (``confirmed``,
+    typically ``confirm_candidates()``'s own output) combined greedily by observed
+    lift, each cumulative step re-confirmed against the *current running set* (not
+    the original baseline -- interaction effects aren't assumed additive), stopping
+    when the next addition doesn't clear the bar. A small random-pair tournament
+    over the same accepted set catches synergy the greedy order might miss,
+    bounded to ``max_pair_trials`` "so it doesn't blow the budget."
+    """
+    rng = rng or random.Random()
+    accepted = sorted(
+        (c for c in confirmed if c.accepted), key=lambda c: c.delta_vs_baseline_pct, reverse=True,
+    )
+
+    current_flags: list[str] = list(baseline.flags)
+    current_ci = baseline.ci
+    parent_trial_id: Optional[int] = None
+    steps: list[ConfirmationOutcome] = []
+
+    for candidate in accepted:
+        flag = candidate.flags[0]
+        if flag in current_flags:
+            continue
+        trial_flags = current_flags + [flag]
+        step = _confirm_flagset(
+            cfg, experiment_id=experiment_id, benchmark=benchmark, baseline=baseline,
+            flags=trial_flags, phase="combination", compare_ci=current_ci,
+            parent_trial_id=parent_trial_id, workload=workload, instrumentation=instrumentation,
+        )
+        steps.append(step)
+        if step.accepted:
+            current_flags = trial_flags
+            current_ci = step.ci
+            parent_trial_id = step.trial_ids[0]
+
+    # Each pair is evaluated standalone against the *baseline* (not fused with
+    # whatever the greedy walk already accumulated) -- the whole point is to catch
+    # a synergistic pair the greedy one-at-a-time walk would never have tried
+    # together on its own (e.g. two flags each individually rejected that only
+    # help in combination), not to re-explore what greedy already covered.
+    pair_trials: list[ConfirmationOutcome] = []
+    candidate_flags = [c.flags[0] for c in accepted]
+    pairs = list(itertools.combinations(candidate_flags, 2))
+    rng.shuffle(pairs)
+    for a, b in pairs[:max_pair_trials]:
+        pair_trials.append(_confirm_flagset(
+            cfg, experiment_id=experiment_id, benchmark=benchmark, baseline=baseline,
+            flags=sorted({a, b}), phase="combination", compare_ci=baseline.ci,
+            workload=workload, instrumentation=instrumentation,
+        ))
+
+    # A pair trial replaces the greedy winner only if it clears the *same* bar
+    # each greedy step already had to clear -- non-overlapping CI and a higher
+    # mean against the current running set, not just "beats baseline" (which
+    # `trial.accepted` alone would only mean). "Catches synergy the greedy order
+    # might miss" only has teeth if a winning pair can actually win (doc/DESIGN.md
+    # sec. 6 Phase 5).
+    for trial in pair_trials:
+        if trial.ci is not None and trial.ci.mean > current_ci.mean and non_overlapping(current_ci, trial.ci):
+            current_flags = trial.flags
+            current_ci = trial.ci
+
+    return CombinationResult(
+        winning_flags=current_flags, winning_ci=current_ci, steps=steps, pair_trials=pair_trials,
+    )

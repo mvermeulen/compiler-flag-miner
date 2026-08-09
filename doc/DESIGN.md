@@ -519,10 +519,12 @@ compiler-flag-miner/
                                    NOT `cfm mine`; the search-driving orchestrator
                                    command doesn't exist until PR 6 of M1's own
                                    build-out
-    orchestrator.py                [M1] phase state machine (§5-6) -- Phases 1
-                                   (baseline)/2 (candidate generation, trivial)/3
-                                   (screening) built; Phase 4 (confirmation)/5
-                                   (greedy combination) still pending, next PR
+    orchestrator.py                [M1] phase state machine (§5-6) -- Phases 1-5
+                                   (baseline/candidate generation/screening/
+                                   confirmation/greedy combination) all built; no
+                                   `cfm mine` CLI wiring yet (next PR), so the
+                                   full loop isn't runnable end to end as a real
+                                   command until that lands
     compilers/{base,gcc}.py        [M1] Compiler Knowledge agent (§4.3) -- built ahead of M2
                                    on purpose: candidate_flags_for_signature() ignores its
                                    own signature argument in M1 ("static catalog priors
