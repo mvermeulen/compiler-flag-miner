@@ -11,3 +11,7 @@ venv/
 # anything under results/, which can contain SPEC-derived build/run output).
 cfm.db
 results/
+
+# scripts/audit_flags_from_spec_results.py's fetch cache -- other parties' published
+# SPEC config files, same SPEC-license rule as above; only its derived report is ours.
+.cache/
