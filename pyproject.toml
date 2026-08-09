@@ -1,0 +1,22 @@
+[project]
+name = "compiler-flag-miner"
+version = "0.1.0"
+description = "Agentic system for mining compiler flags for peak performance (M0: mechanical pipeline only -- see doc/DESIGN.md)."
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+cfm = "cfm.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["cfm*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

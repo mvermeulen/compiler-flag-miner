@@ -132,10 +132,14 @@ of an existing one — see below) for a candidate flag set, running `--action=bu
   already have working `gcc_O3` base+peak build scaffolding on this host (`source.json`,
   `build.gcc_O3.log`) spanning intrate and fprate — real, already-proven `runcpu` mechanics to build
   the SPEC Runner agent against immediately, no new SPEC-side plumbing required to start.
-- **Interface** (`workloads/base.py`, §12): `generate_config(bench, tune, flags) -> path`,
-  `build(bench, tune, config) -> BuildResult`, `run(bench, tune, config, wspy_profile) -> RunResult`,
-  `parse_result(...) -> {ratio, seconds, status}`. This is the seam a future `workloads/spec_cpu2017.py`
-  or `workloads/phoronix.py` implements identically.
+- **Interface** (`workloads/base.py`, §12, implemented): `generate_config(bench, tune, flags) ->
+  Path`, `build(bench, tune, config_path) -> BuildResult`, `run_command(bench, tune, config_path,
+  iterations) -> argv`, `parse_result(bench, tune, raw_output) -> RunResult`. Note the one refinement
+  from earlier drafts: `run_command` returns the argv for the measured run rather than executing it
+  (originally sketched as `run(...) -> RunResult` directly) — this class never launches the measured
+  run itself, since wrapping it in `wspy-run` is the whole reason it happens under the Instrumentation
+  agent's control (§4.2) instead. This is the seam a future `workloads/spec_cpu2017.py` or
+  `workloads/phoronix.py` implements identically.
 
 ### 4.2 Instrumentation agent (wspy)
 
@@ -153,11 +157,29 @@ the rest of the system consumes:
   `wspy-archetype --run <host:run_id>` (get `resource_dominance`/`memory_attribution` — the "signature"
   the Compiler Knowledge and Hypothesis agents key off), `wspy-summary --run-id ... --check-regression`
   style comparison against the running baseline for the statistical accept/reject call.
-- **Interface** (`instrumentation/base.py`): `characterize(bench, tune, config, profile) ->
-  RunSignature` where `RunSignature` bundles the wspy run id, the archetype scorecard, and the metric
-  table wspy-summary would report — the one object every other agent reasons about, so a future
-  non-wspy instrumentation backend (e.g. raw `perf stat` on a host without wspy) only needs to produce
-  the same `RunSignature` shape.
+- **Interface** (`instrumentation/base.py`, implemented): `characterize(command, suite, benchmark,
+  run_id, profile, output_root) -> RunSignature` — this is the method that actually shells out to
+  `wspy-run <profile> -- <command>` (the `command` argv comes from the SPEC Runner agent's
+  `run_command()`, §4.1) — where `RunSignature` bundles the wspy run id, the archetype scorecard, and
+  the metric table wspy-summary would report — the one object every other agent reasons about, so a
+  future non-wspy instrumentation backend (e.g. raw `perf stat` on a host without wspy) only needs to
+  produce the same `RunSignature` shape. `preflight()` checks all five wspy binaries exist before any
+  subprocess call, failing fast and specifically (mirroring `wspy --preflight`'s own posture) rather
+  than surfacing a missing binary as an opaque subprocess error mid-pipeline.
+- **`deep-cpu` (multi-pass) confirmation-stage support is not built yet.** `characterize()` currently
+  raises `RuntimeError` on any profile that makes `wspy-run` launch more than one underlying `wspy`
+  process (`deep-cpu` included) — each pass gets its own independently-generated `run_id`
+  (CLAUDE.md's "wspy dependency" traps log has the full story), and which pass's `run_id` should
+  represent "the" run for `wspy-archetype` purposes isn't resolved yet. Single-pass profiles (`quick`,
+  M0's only exercised profile) work end to end. Resolving this is part of wiring Phase 4's confirmation
+  stage for M1, not a pre-existing gap in the design above — just not yet implemented.
+- **wspy dependency**: `vendor/wspy` is a git submodule pinned to a specific, tested commit (not a live
+  checkout this project tracks automatically), with `tests/test_wspy_interface.py` as a contract-test
+  suite run against it — real `wspy`/`wspy-run`/`wspy-store`/`wspy-archetype` invocations against a toy
+  workload, asserting the exact output shapes this section's code depends on. See CLAUDE.md's "wspy
+  dependency" section for the bootstrap/update workflow; this is the concrete implementation of
+  principle 2's "every trial is falsifiable" applied one level down, to the instrumentation layer
+  itself rather than just to a flag trial's result.
 
 ### 4.3 Compiler Knowledge agent (GCC/GFortran)
 
@@ -461,7 +483,9 @@ prior knowledge-base entries were reused vs. newly discovered here.
 | Instrumentation | `instrumentation/base.py` | `instrumentation/wspy.py` | a `perf stat`-only fallback for hosts without a wspy build, same `RunSignature` output shape |
 | LLM | `llm/driver.py` | one OpenAI-chat-compatible client, pointed at Ollama or `llama-server` | vLLM, LM Studio, or a hosted API — `base_url`/`model` change only |
 
-## 13. Proposed repository layout
+## 13. Repository layout
+
+Marked per-item with what's actually implemented (M0) vs. still pending (a later milestone, §14):
 
 ```
 compiler-flag-miner/
@@ -469,28 +493,62 @@ compiler-flag-miner/
     prompt.txt                    (existing)
     DESIGN.md                     (this document)
   config/
-    gcc_flag_catalog.seed.json    (seed knowledge base -- see companion artifact)
+    gcc_flag_catalog.seed.json    (seed knowledge base; not yet read by any code -- M2)
   schema/
-    cfm_schema.sql                (DDL from §7 -- see companion artifact)
-  cfm/                            (python package, not yet scaffolded -- see §14 M0)
-    orchestrator.py                phase state machine (§5-6)
-    db.py                          cfm.db schema + typed accessors
-    compilers/{base,gcc}.py
-    workloads/{base,spec_cpu2026}.py
-    instrumentation/{base,wspy}.py
-    llm/driver.py, llm/prompts/
-    agents/{spec_agent,wspy_agent,knowledge_agent,hypothesis_agent,report_agent}.py
-    cli.py                         `cfm mine <benchmark> ...` entry point
-  tests/
+    cfm_schema.sql                (DDL from §7)
+  vendor/
+    wspy                          [M0] git submodule, pinned commit -- see CLAUDE.md's
+                                   "wspy dependency" section for the bootstrap/update workflow
+  scripts/
+    bootstrap_wspy.sh             [M0] git submodule update --init + make -C vendor/wspy
+  cfm/                            (python package)
+    util.py                       [M0] shared helpers (parse_kv_lines, ...)
+    config.py                     [M0] CfmConfig, env-var-driven
+    db.py                         [M0] cfm.db schema application + typed accessors
+    workloads/{base,spec_cpu2026}.py     [M0] SPEC Runner agent (§4.1)
+    instrumentation/{base,wspy}.py       [M0] Instrumentation agent (§4.2)
+    agents/spec_agent.py          [M0] run_one_trial(): the M0 pipeline glue
+    cli.py                        [M0] `cfm measure <benchmark> --flags "..."` --
+                                   NOT `cfm mine`; the search-driving orchestrator
+                                   command doesn't exist until M1
+    orchestrator.py                [M1] phase state machine (§5-6)
+    compilers/{base,gcc}.py        [M2] Compiler Knowledge agent (§4.3)
+    agents/{knowledge_agent,hypothesis_agent}.py   [M2/M4]
+    llm/driver.py, llm/prompts/    [M3] local LLM driver (§4.5, §9)
+    agents/report_agent.py         [M3] Report agent (§10)
+  tests/                           [M0] pure-logic unit tests, plus
+                                   test_wspy_interface.py's contract tests (real
+                                   wspy/wspy-run/wspy-store/wspy-archetype calls
+                                   against a toy workload, skip cleanly if
+                                   vendor/wspy isn't built) -- neither tier shells
+                                   out to a real runcpu/SPEC install; a real
+                                   end-to-end smoke run against this host's SPEC
+                                   install is a separate, manual, opt-in step
+  pyproject.toml                   [M0] stdlib-only, `pip install -e .` gives `cfm`
 ```
 
 ## 14. Phased build plan
 
-- **M0 — mechanical pipeline, no search, no LLM.** Given one fixed, hand-chosen flag set, generate a
-  real peak config, build, run under `wspy-run`, and get one validated, wspy-measured ratio for
-  `706.stockfish_r`. Proves the SPEC Runner + Instrumentation agents' plumbing end to end. Low risk —
-  the `runcpu` mechanics for this exact benchmark are already proven on this host (existing
-  `gcc_O3/{base,peak}` scaffolding).
+- **M0 — mechanical pipeline, no search, no LLM. Shipped and verified end to end against a real SPEC
+  run** (`cfm measure <benchmark> --flags "..."`, not the eventual `cfm mine` search command — that's
+  M1). Given one fixed, hand-chosen flag set, generate a real peak config, build, run under `wspy-run`,
+  and get one validated, wspy-measured ratio for `706.stockfish_r`. Proves the SPEC Runner +
+  Instrumentation agents' plumbing end to end — literally: a real `--action=validate --iterations 3`
+  run (`-O3 -march=native -flto`, 14m25s wall-clock) completed with `spec_validated: true`,
+  `wspy_validated: true`, and a real extracted ratio (`151.206688`, median across 3 iterations). Getting
+  there caught and fixed real bugs on both sides of the pipeline rather than leaving them for a future
+  session to hit blind — full detail in CLAUDE.md's Non-obvious traps log:
+  - **Instrumentation side**, caught by `tests/test_wspy_interface.py` (real `vendor/wspy` submodule +
+    a toy workload, not just unit tests): a manifest-schema mismatch in `_validate()`, `wspy`'s silent
+    no-op on a missing `--run-index` parent directory, and a `wspy-run --run-id`-vs-wspy's-own-
+    generated-`run_id` identity mismatch.
+  - **SPEC Runner side**, only caught by the real run itself: `.rsf` has no non-iteration-indexed
+    rollup field (every value lives under a per-`NNN`-iteration block — fixed by reporting the median
+    across iterations) and uses `"key: value"`, not `"key=value"` (the hand-written unit-test fixtures
+    used `=` too, so they'd passed against the same wrong assumption — only a fixture copied from a real
+    captured `.rsf` excerpt caught it, now `tests/fixtures/706.stockfish_r.peak.sample.rsf`). The
+    `ratio` field name itself was right the whole time; both bugs were structural, not a wrong guess.
+  Single-pass profiles (`quick`) only; `deep-cpu`/multi-pass support is explicitly deferred, see §4.2.
 - **M1 — rule-based screening/confirmation loop (§6 Phases 1-5), no LLM.** Static catalog priors only;
   first fully-automated "peak beats base" result, backed by wspy-summary's own statistical bar.
 - **M2 — signature-aware candidate filtering.** Wire in `wspy-archetype`'s `resource_dominance`/

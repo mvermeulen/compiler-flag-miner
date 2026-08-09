@@ -1,0 +1,26 @@
+# Real excerpt (not hand-written) from a genuine SPEC CPU2026 --action=validate
+# --iterations 3 run of 706.stockfish_r on this host, captured 2026-08-09 --
+# CPU2026.003.intrate.refrate.rsf. Trimmed to the fields cfm/workloads/spec_cpu2026.py
+# actually reads, plus a base-tune sibling line to confirm peak/base scoping doesn't
+# cross-contaminate. Exists so a future change to the parsing logic is checked
+# against real captured SPEC output, not another hand-written guess at the format --
+# see CLAUDE.md's Non-obvious traps log for why that distinction mattered here.
+spec.cpu2026.results.706_stockfish_r.peak.000.basepeak: 1
+spec.cpu2026.results.706_stockfish_r.peak.000.benchmark: 706.stockfish_r
+spec.cpu2026.results.706_stockfish_r.peak.000.copies: 32
+spec.cpu2026.results.706_stockfish_r.peak.000.ratio: 127.632384
+spec.cpu2026.results.706_stockfish_r.peak.000.ratio_avg: 128.391036376213
+spec.cpu2026.results.706_stockfish_r.peak.000.reported_time: 315.907284
+spec.cpu2026.results.706_stockfish_r.peak.001.basepeak: 1
+spec.cpu2026.results.706_stockfish_r.peak.001.benchmark: 706.stockfish_r
+spec.cpu2026.results.706_stockfish_r.peak.001.copies: 32
+spec.cpu2026.results.706_stockfish_r.peak.001.ratio: 151.71024
+spec.cpu2026.results.706_stockfish_r.peak.001.ratio_avg: 152.520766307751
+spec.cpu2026.results.706_stockfish_r.peak.001.reported_time: 265.769781
+spec.cpu2026.results.706_stockfish_r.peak.002.basepeak: 1
+spec.cpu2026.results.706_stockfish_r.peak.002.benchmark: 706.stockfish_r
+spec.cpu2026.results.706_stockfish_r.peak.002.copies: 32
+spec.cpu2026.results.706_stockfish_r.peak.002.ratio: 151.206688
+spec.cpu2026.results.706_stockfish_r.peak.002.ratio_avg: 151.994413419324
+spec.cpu2026.results.706_stockfish_r.peak.002.reported_time: 266.654868
+spec.cpu2026.results.706_stockfish_r.base.000.ratio: 999.0
