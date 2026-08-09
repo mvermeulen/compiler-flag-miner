@@ -166,6 +166,20 @@ the rest of the system consumes:
   produce the same `RunSignature` shape. `preflight()` checks all five wspy binaries exist before any
   subprocess call, failing fast and specifically (mirroring `wspy --preflight`'s own posture) rather
   than surfacing a missing binary as an opaque subprocess error mid-pipeline.
+- **`deep-cpu` (multi-pass) confirmation-stage support is not built yet.** `characterize()` currently
+  raises `RuntimeError` on any profile that makes `wspy-run` launch more than one underlying `wspy`
+  process (`deep-cpu` included) — each pass gets its own independently-generated `run_id`
+  (CLAUDE.md's "wspy dependency" traps log has the full story), and which pass's `run_id` should
+  represent "the" run for `wspy-archetype` purposes isn't resolved yet. Single-pass profiles (`quick`,
+  M0's only exercised profile) work end to end. Resolving this is part of wiring Phase 4's confirmation
+  stage for M1, not a pre-existing gap in the design above — just not yet implemented.
+- **wspy dependency**: `vendor/wspy` is a git submodule pinned to a specific, tested commit (not a live
+  checkout this project tracks automatically), with `tests/test_wspy_interface.py` as a contract-test
+  suite run against it — real `wspy`/`wspy-run`/`wspy-store`/`wspy-archetype` invocations against a toy
+  workload, asserting the exact output shapes this section's code depends on. See CLAUDE.md's "wspy
+  dependency" section for the bootstrap/update workflow; this is the concrete implementation of
+  principle 2's "every trial is falsifiable" applied one level down, to the instrumentation layer
+  itself rather than just to a flag trial's result.
 
 ### 4.3 Compiler Knowledge agent (GCC/GFortran)
 
@@ -482,6 +496,11 @@ compiler-flag-miner/
     gcc_flag_catalog.seed.json    (seed knowledge base; not yet read by any code -- M2)
   schema/
     cfm_schema.sql                (DDL from §7)
+  vendor/
+    wspy                          [M0] git submodule, pinned commit -- see CLAUDE.md's
+                                   "wspy dependency" section for the bootstrap/update workflow
+  scripts/
+    bootstrap_wspy.sh             [M0] git submodule update --init + make -C vendor/wspy
   cfm/                            (python package)
     util.py                       [M0] shared helpers (parse_kv_lines, ...)
     config.py                     [M0] CfmConfig, env-var-driven
@@ -497,8 +516,12 @@ compiler-flag-miner/
     agents/{knowledge_agent,hypothesis_agent}.py   [M2/M4]
     llm/driver.py, llm/prompts/    [M3] local LLM driver (§4.5, §9)
     agents/report_agent.py         [M3] Report agent (§10)
-  tests/                           [M0] pure-logic unit tests only -- nothing that
-                                   shells out to a real runcpu/wspy binary; a real
+  tests/                           [M0] pure-logic unit tests, plus
+                                   test_wspy_interface.py's contract tests (real
+                                   wspy/wspy-run/wspy-store/wspy-archetype calls
+                                   against a toy workload, skip cleanly if
+                                   vendor/wspy isn't built) -- neither tier shells
+                                   out to a real runcpu/SPEC install; a real
                                    end-to-end smoke run against this host's SPEC
                                    install is a separate, manual, opt-in step
   pyproject.toml                   [M0] stdlib-only, `pip install -e .` gives `cfm`
@@ -515,7 +538,14 @@ compiler-flag-miner/
   end-to-end run needs `make` run in the wspy checkout first (`instrumentation/wspy.py`'s `preflight()`
   checks for this and fails fast/specifically rather than mid-pipeline) and hasn't been exercised
   against the live install yet — the `.rsf` ratio-field-name guess in
-  `workloads/spec_cpu2026.py`'s `CANDIDATE_RATIO_FIELDS` is unconfirmed until it has.
+  `workloads/spec_cpu2026.py`'s `CANDIDATE_RATIO_FIELDS` is unconfirmed until it has. The
+  Instrumentation agent side of the pipeline *has* been exercised end to end, against a real, built
+  `vendor/wspy` submodule and a toy workload (`tests/test_wspy_interface.py`) rather than only unit
+  tests — this caught and fixed three real integration bugs before they could surface against a real
+  SPEC run (a manifest-schema mismatch in `_validate()`, `wspy`'s silent no-op on a missing
+  `--run-index` parent directory, and a `wspy-run --run-id`-vs-wspy's-own-generated-`run_id` identity
+  mismatch — full detail in CLAUDE.md's Non-obvious traps log). Single-pass profiles (`quick`) only;
+  `deep-cpu`/multi-pass support is explicitly deferred, see §4.2.
 - **M1 — rule-based screening/confirmation loop (§6 Phases 1-5), no LLM.** Static catalog priors only;
   first fully-automated "peak beats base" result, backed by wspy-summary's own statistical bar.
 - **M2 — signature-aware candidate filtering.** Wire in `wspy-archetype`'s `resource_dominance`/

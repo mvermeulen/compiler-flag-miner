@@ -1,0 +1,3 @@
+[submodule "vendor/wspy"]
+	path = vendor/wspy
+	url = https://github.com/mvermeulen/wspy.git

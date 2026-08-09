@@ -14,6 +14,18 @@ def test_from_env_defaults(monkeypatch):
     assert cfg.spec_config == "gcc_O3.cfg"
     assert cfg.wspy_profile == "quick"
     assert cfg.hostname
+    # Default wspy_dir is the pinned vendor/wspy submodule, resolved relative to the
+    # repo root -- not the caller's cwd -- so `cfm` behaves the same regardless of
+    # where it's invoked from.
+    assert cfg.wspy_dir.name == "wspy"
+    assert cfg.wspy_dir.parent.name == "vendor"
+    assert (cfg.wspy_dir.parent.parent / "schema" / "cfm_schema.sql").exists()
+
+
+def test_wspy_dir_env_override_wins_over_vendored_default(monkeypatch):
+    monkeypatch.setenv("CFM_WSPY_DIR", "/tmp/some-other-wspy-checkout")
+    cfg = CfmConfig.from_env()
+    assert cfg.wspy_dir == Path("/tmp/some-other-wspy-checkout")
 
 
 def test_from_env_reads_environment(monkeypatch):

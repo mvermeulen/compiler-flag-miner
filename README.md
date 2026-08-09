@@ -6,10 +6,17 @@ deterministic Python state machine with a local LLM (llama.cpp or Ollama) doing 
 structured-output reasoning at specific decision points -- never freely driving the tool loop.
 
 Status: **M0 shipped** -- the mechanical pipeline (`cfm measure`: generate a SPEC config for one
-hand-chosen flag set, build, run under wspy instrumentation, record the result) exists and is
-unit-tested, not yet exercised against a live SPEC/wspy install. No search loop, LLM, or
-cross-benchmark knowledge transfer yet -- see `doc/DESIGN.md` §14 for the M0-M6 plan and §13 for
-exactly what's implemented vs. pending.
+hand-chosen flag set, build, run under wspy instrumentation, record the result) exists, is
+unit-tested, and has been exercised end to end against a real, built wspy (a toy workload, not yet a
+real SPEC run). No search loop, LLM, or cross-benchmark knowledge transfer yet -- see `doc/DESIGN.md`
+§14 for the M0-M6 plan and §13 for exactly what's implemented vs. pending.
+
+```
+git clone --recurse-submodules <this repo>   # or: git submodule update --init --recursive
+./scripts/bootstrap_wspy.sh                  # builds vendor/wspy (the pinned submodule)
+python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
+.venv/bin/pytest -q                          # unit tests + wspy contract tests
+```
 
 - `doc/prompt.txt` -- the original design brief.
 - `doc/DESIGN.md` -- the architecture: agents, control flow, data model, cross-benchmark knowledge

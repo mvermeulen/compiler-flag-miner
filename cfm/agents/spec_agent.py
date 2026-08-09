@@ -47,7 +47,6 @@ def run_one_trial(
         cfg.wspy_dir,
         store_db=cfg.output_root / "store.db",
         run_index_path=run_index_path,
-        hostname=cfg.hostname,
     )
 
     problems = instrumentation.preflight()

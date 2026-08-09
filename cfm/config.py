@@ -14,6 +14,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+# vendor/wspy is a git submodule (CLAUDE.md's "wspy dependency" section) pinned to a
+# specific, tested wspy commit -- the default `wspy_dir`, resolved relative to this
+# package's own location (not the caller's cwd) the same way db.py locates
+# schema/cfm_schema.sql. CFM_WSPY_DIR still overrides this, e.g. to point at a live
+# ~/source/wspy working tree while co-developing a wspy change against cfm before
+# it's pinned -- see CLAUDE.md for when that's appropriate vs. bumping the pin.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_VENDORED_WSPY_DIR = _REPO_ROOT / "vendor" / "wspy"
+
 
 def _env_path(name: str, default: Path) -> Path:
     value = os.environ.get(name)
@@ -56,7 +65,7 @@ class CfmConfig:
         return cls(
             spec_dir=Path(spec_dir) if spec_dir else _env_path("CFM_SPEC_DIR", Path.home() / "cpu2026"),
             spec_config=spec_config or _env_str("CFM_SPEC_CONFIG", "gcc_O3.cfg"),
-            wspy_dir=Path(wspy_dir) if wspy_dir else _env_path("CFM_WSPY_DIR", Path.home() / "source" / "wspy"),
+            wspy_dir=Path(wspy_dir) if wspy_dir else _env_path("CFM_WSPY_DIR", _VENDORED_WSPY_DIR),
             output_root=Path(output_root) if output_root else _env_path("CFM_OUTPUT_ROOT", Path("results")),
             db_path=Path(db_path) if db_path else _env_path("CFM_DB", Path("cfm.db")),
             wspy_profile=wspy_profile or _env_str("CFM_WSPY_PROFILE", "quick"),

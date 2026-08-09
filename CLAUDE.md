@@ -18,9 +18,38 @@ pending, module by module).
   covers *design*.
 - `config/gcc_flag_catalog.seed.json` — seed GCC/GFortran flag knowledge base.
 - `schema/cfm_schema.sql` — `cfm.db` schema, kept separate from wspy's own `store.db`.
+- `vendor/wspy` — the pinned wspy submodule (see "wspy dependency" below).
 - `git log`/`git blame` for history — same convention wspy's `CLAUDE.md` uses; this file covers
   current practice only, not why a decision was made (that's `doc/DESIGN.md` §15, or git history for
   anything DESIGN.md itself doesn't capture).
+
+## wspy dependency
+
+`vendor/wspy` is a **git submodule** pinned to a specific, tested wspy commit — not a live checkout
+this project tracks automatically. This exists because cfm's `instrumentation/wspy.py` depends on
+wspy's exact CLI output *shape* (manifest field names, the run-index record schema, `wspy-archetype`'s
+key=value output), and wspy is under active, independent development; pinning means a wspy change
+never silently changes cfm's behavior mid-session, and an update is a deliberate, reviewable step.
+
+- **Bootstrapping a fresh clone**: `./scripts/bootstrap_wspy.sh` — runs `git submodule update --init
+  --recursive` then `make -C vendor/wspy` (checks for `gcc` and `sqlite3.h`/`libsqlite3-dev` first,
+  with an actionable error if either's missing, rather than a raw compiler failure). Idempotent, safe
+  to re-run after a submodule bump.
+- **`cfm/config.py`'s default `wspy_dir`** resolves to `vendor/wspy` relative to the package's own
+  location (matching `db.py`'s existing trick for finding `schema/cfm_schema.sql`), not the caller's
+  cwd. `CFM_WSPY_DIR` still overrides this — point it at a live `~/source/wspy` working tree when
+  actively co-developing a wspy change against cfm, before that change is ready to pin.
+- **Bumping the pin** (an "orderly update," not an automatic one): on its own `feature/<slug>` branch —
+  `cd vendor/wspy && git fetch && git checkout <new-ref> && cd ../.. && git add vendor/wspy` — then
+  `make -C vendor/wspy` (rebuilding is not automatic) and `.venv/bin/pytest -q`, confirming
+  `tests/test_wspy_interface.py` still passes before opening the PR. Those contract tests exist
+  specifically to catch a wspy update silently changing an output shape cfm's parsers depend on — a
+  bump that changes their result is real signal, not a flaky test to retry past.
+- **`tests/test_wspy_interface.py`** is the interface-test suite the submodule pin exists to be checked
+  against: real `wspy`/`wspy-run`/`wspy-store`/`wspy-archetype` invocations against a tiny toy C
+  workload (compiled on the fly), asserting the exact manifest/run-index/archetype-output shapes
+  `cfm/instrumentation/wspy.py` depends on. Skips cleanly (not a failure) when `vendor/wspy` hasn't
+  been built yet, so `pytest -q` still passes on a fresh clone before `bootstrap_wspy.sh` has run.
 
 ## Development workflow
 
@@ -91,27 +120,74 @@ Full branch/PR discipline, same shape as wspy's:
   wrapped as `bash -c 'cd $SPECDIR && source shrc && ulimit -s unlimited && exec runcpu ...'` — don't
   "simplify" this back to a bare `subprocess.run(["runcpu", ...])`, it will fail to find `runcpu` (and
   worse, may silently find a *different* stale `runcpu` on `PATH`) without the sourced environment.
+- **`wspy-run`'s run-directory `manifest.json` and a per-pass `run.manifest.json` are two different,
+  incompatible schemas.** The former (`layout_version`) is `wspy-run`'s own directory index, listing
+  each pass and *its* manifest filename via `passes[].manifest`; the latter is the real wspy manifest
+  `wspy-validate` understands. An earlier version of `_validate()` globbed `*manifest*.json` and fed
+  both to `wspy-validate`, which always reported `FAIL` on the run-level one (`no schema_version field
+  -- doesn't look like a wspy manifest`) and made every run look unvalidated regardless of the actual
+  counter collection's health. Fixed by reading `manifest.json`'s own `passes[].manifest` list instead
+  of globbing — caught by `tests/test_wspy_interface.py`, a real contract test against the built
+  submodule, not by inspection. See `doc/ARTIFACT_CONTRACT.md`'s "Unified output layout" in `vendor/wspy`.
+- **`wspy` doesn't create `--run-index`'s (or `--manifest`'s) parent directory.** It just prints
+  `warning: unable to open run index file: <path>` to stderr and silently drops the record — no
+  nonzero exit, no obvious failure at the call site. The actual symptom shows up two steps downstream:
+  `wspy-store` reports `0 record(s)` ingested, and `wspy-archetype --run <host:id>` reports "no run
+  found," neither of which mentions the real cause. `characterize()` now `mkdir -p`s both
+  `run_index_path.parent` and `store_db.parent` (sqlite3 has the identical behavior) before invoking
+  `wspy-run`.
+- **`wspy-run --run-id` names the output *directory*, not the run identity `wspy-store`/`wspy-archetype`
+  key on.** Each underlying `wspy` process (one per profile "pass") generates its own, unrelated
+  `run_id` (`<start-time-to-millisecond>-<pid>`, `doc/ARTIFACT_CONTRACT.md`) and writes *that* to
+  `--run-index` — not the `--run-id` string `wspy-run` was called with. `characterize()` originally
+  built `wspy_run_ref` from the caller-supplied `run_id` directly, which meant `wspy-archetype --run
+  <hostname>:<run_id>` could never find anything (`wspy-archetype: no run found for ...`) even on a
+  perfectly healthy run. Fixed via `_resolve_run_identity()`, which diffs the run-index file's line
+  count before/after the `wspy-run` call and reads the real `(hostname, run_id)` back off the
+  newly-appended record — and raises loudly (rather than guessing) if a multi-pass profile appended
+  more than one new line, since M0 doesn't yet know which pass's `run_id` should represent "the" run.
+- **`wspy-store` only parses metric *values* out of CSV output — human-readable text enriches the
+  manifest fields but carries zero `run_features`.** Passing `--counters=topdown` without `--csv`
+  still measures and reports the data (visible in the human-readable printout), but
+  `wspy-store`'s own summary line says `0 metric-set(s) ingested, 1 skipped`, and every
+  `run_features` row lands `coverage=unavailable` — so `wspy-archetype` correctly, silently reports
+  `resource_dominance=unknown` even though the counters were genuinely measured. Not a cfm bug once
+  understood (`quick`, cfm's own screening-tier profile, is deliberately non-CSV and IPC/system-only —
+  see `doc/DESIGN.md` §6 Phase 3, it isn't meant to characterize anything), but a real trap for hand-
+  rolled `wspy` invocations (as in `tests/test_wspy_interface.py`'s direct-CLI contract test) or any
+  future profile addition that wants `resource_dominance` populated: it must include `--csv`.
+- **A toy C workload with no observable result gets its entire loop dead-code-eliminated at `-O2`.**
+  `tests/test_wspy_interface.py`'s first toy binary (`return (int)(a & 0)`, discarding the loop's only
+  effect) ran in `elapsed 0.002` — gcc had removed the loop entirely, so every topdown-dependent
+  assertion downstream was silently measuring process-startup noise, not real counter data. Fixed by
+  `printf`-ing the accumulated value, same as wspy's own toy suite in `doc/NEW_WORKLOAD_COOKBOOK.md`
+  already does for exactly this reason. Worth remembering for any future hand-written toy/benchmark
+  workload, not just this one.
 
 ## Build & test
 
 ```
+git submodule update --init --recursive  # or ./scripts/bootstrap_wspy.sh (also builds it, see below)
+./scripts/bootstrap_wspy.sh               # builds vendor/wspy -- checks for gcc/libsqlite3-dev first
 python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
-.venv/bin/pytest -q                      # unit tests only -- no real SPEC/wspy calls, see below
+.venv/bin/pytest -q                      # unit tests + wspy contract tests (skip cleanly if
+                                          # vendor/wspy isn't built yet) -- no real runcpu/SPEC calls
 .venv/bin/cfm init-db --db /tmp/x.db     # sanity-checks schema application, no SPEC/wspy needed
 .venv/bin/cfm measure 706.stockfish_r --flags "-O3 -march=native -flto"
-                                          # the real thing -- needs `make` run in the wspy checkout
-                                          # first (`preflight()` says so explicitly if it isn't) and a
-                                          # working SPEC CPU2026 install; a real invocation launches an
-                                          # actual SPEC build+run (minutes, real CPU/disk use) --
-                                          # confirm with the user before running this one, per the
-                                          # exclusive-machine-access rule above.
+                                          # the real thing -- needs vendor/wspy built (preflight() says
+                                          # so explicitly if it isn't) and a working SPEC CPU2026
+                                          # install; a real invocation launches an actual SPEC build+run
+                                          # (minutes, real CPU/disk use) -- confirm with the user before
+                                          # running this one, per the exclusive-machine-access rule.
 ```
 
-`tests/` covers pure logic only (config resolution, `.rsf`/trace-output parsing, `cfm.db` schema and
-accessors, SPEC config rendering, preflight's binary-existence check) — nothing that shells out to a
-real `runcpu` or `wspy` binary, so the suite runs identically on a host with no SPEC license or wspy
-checkout at all. A real end-to-end run is the manual, opt-in `cfm measure` invocation above, not part
-of the automated test suite.
+`tests/` has two tiers: pure-logic unit tests (config resolution, `.rsf`/trace-output parsing, `cfm.db`
+schema and accessors, SPEC config rendering, preflight's binary-existence check — no SPEC license or
+wspy checkout needed at all) and `tests/test_wspy_interface.py`'s contract tests (real
+`wspy`/`wspy-run`/`wspy-store`/`wspy-archetype` invocations against a toy C workload, ~25s total,
+skipped cleanly rather than failed when `vendor/wspy` isn't built). Neither tier touches a real
+`runcpu`/SPEC install — `cfm measure` above is the only thing that does, and it's manual/opt-in, never
+part of the automated suite.
 
 ## Architecture
 
@@ -129,9 +205,11 @@ ratio → one row each in `cfm.db`'s `experiments`/`trials` tables (`db.py`), re
 | `cfm/workloads/base.py` | `WorkloadBackend` interface + `BuildResult`/`RunResult` dataclasses (doc/DESIGN.md §4.1/§12). |
 | `cfm/workloads/spec_cpu2026.py` | The only implementation: renders a per-trial SPEC config via `include:` + a `<bench>=peak:` override section, drives `runcpu --action=build`/`--action=validate` through a `shrc`-sourcing `bash -c` wrapper (see Non-obvious traps above), parses the resulting `.rsf` file. |
 | `cfm/instrumentation/base.py` | `InstrumentationBackend` interface + `RunSignature` dataclass (doc/DESIGN.md §4.2/§12). |
-| `cfm/instrumentation/wspy.py` | The only implementation: `preflight()` checks all five wspy binaries exist; `characterize()` runs `wspy-run <profile> -- <command>`, then `wspy-validate`/`wspy-store`/`wspy-archetype`. |
+| `cfm/instrumentation/wspy.py` | The only implementation: `preflight()` checks all five wspy binaries exist; `characterize()` runs `wspy-run <profile> -- <command>`, then resolves the *real* run identity from the run-index file (see Non-obvious traps), then `wspy-validate`/`wspy-store`/`wspy-archetype`. Raises `RuntimeError` on a multi-pass profile (e.g. `deep-cpu`) — not supported yet, see the same section. |
 | `cfm/agents/spec_agent.py` | `run_one_trial()` — the M0 pipeline glue described above. The only agent module that exists; `knowledge_agent`/`hypothesis_agent`/`report_agent` are M2-M3. |
 | `cfm/cli.py` | `cfm measure`/`cfm init-db`. Not `cfm mine` — that's the orchestrator's entry point, M1. |
+| `scripts/bootstrap_wspy.sh` | Initializes + builds the `vendor/wspy` submodule ("wspy dependency" above). |
+| `vendor/wspy` | Pinned wspy submodule — not part of this project's own code, never edited here. |
 
 ## Common edits
 
