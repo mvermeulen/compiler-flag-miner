@@ -653,12 +653,19 @@ compiler-flag-miner/
        feature work or a departure from cfm's "only integrate via stable wspy CLIs, never import wspy's
        internal Python" posture. When no reference-matrix entry exists yet for a (benchmark, base-
        config) combination, fall back to *one* local `deep-cpu` run (shape needs one measurement, not a
-       3-rep CI) — and **contribute it back** via `wspy-publish`, following the corpus's own existing
-       contribution conventions exactly (a real machine slug per `doc/REPORT_HIERARCHY.md`, and the
+       3-rep CI) at **`--iterations 1`, not 3** — the user's own `wspy-publish` contribution runs
+       already use `--iterations 1` throughout, since the real repetition/robustness for
+       *characterization* purposes comes from `deep-cpu`'s own ~8-way pass-level multiplexing, not from
+       stacking SPEC's own iteration count on top of it (confirmed with the user 2026-08-10; M1's
+       current `run_baseline()`/confirmation code defaults to `iterations=3` even under `deep-cpu`,
+       which this corrects for the characterization path specifically — a further ~3x reduction on top
+       of item 2's own headline saving, e.g. the `counters` pass alone drops from ~121 min to ~40 min).
+       **Contribute the result back** via `wspy-publish`, following the corpus's own existing
+       contribution conventions exactly (a real machine slug per `doc/REPORT_HIERARCHY.md`, the
        architecture-appropriate standard profile — e.g. `zen4plus-deep` for a Zen4/5 AMD host, not a
-       blind `deep-cpu` — matching how every other real contribution to this corpus is characterized,
-       so the seeded data is comparable, not a one-off oddball). This is a rare, one-time-per-
-       (benchmark, config) cost, not a per-trial one.
+       blind `deep-cpu` — and now `--iterations 1` too, matching how every other real contribution to
+       this corpus is collected, not a one-off oddball). This is a rare, one-time-per-(benchmark,
+       config) cost, not a per-trial one.
      - **Calibration** (the actual ratio, on *this* host, under *this* flag set): always measured
        locally — cross-machine numbers are never substituted for it (SOC/frequency/config differences
        mean they're not assumed comparable) — but using the `quick` profile (already Phase 3
@@ -671,11 +678,11 @@ compiler-flag-miner/
      minutes, not hours); a Phase 4/5 candidate's confirmation drops the same way. §15 records the
      non-comparability decision explicitly.
   3. **Adaptive trial-count strategy, biased toward cheap rejection over expensive precision.**
-     Confirmed live from this same real run: two baseline repetitions at the *same* flags produced
-     ratios of 105.03 and 127.65 — a ~21% spread — a concrete, unplanned demonstration of exactly how
-     noisy a single real measurement can be, and why the design below leans conservative rather than
-     trying to resolve small effects precisely. Per the user's own framing (2026-08-10): the first cut
-     is about *direction* ("will this flag significantly improve peak performance or not?"), and the
+     (Two baseline repetitions from this same live run measured 105.03 and 127.65 — a ~21% spread —
+     but this machine was *not* under exclusive use for that window per CLAUDE.md's own rule, so it's
+     confounded, not a clean measurement of intrinsic run-to-run noise; noted for completeness, not
+     cited as evidence below.) Per the user's own framing (2026-08-10): the first cut is about
+     *direction* ("will this flag significantly improve peak performance or not?"), and the
      risk of a false accept (noise misread as a real win, permanently polluting the peak config and the
      cross-benchmark `knowledge` table for a flag whose category isn't even mechanically relevant to
      this workload — e.g. an FP/vector-tuning flag being "confirmed" as helpful on a workload with
