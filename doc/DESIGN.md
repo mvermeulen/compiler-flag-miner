@@ -634,44 +634,76 @@ compiler-flag-miner/
      "FP-dense") start as an explicitly-labeled uncalibrated heuristic (same posture `wspy-archetype`'s
      own thresholds already take toward *their* hand-picked numbers), refined once real data exists —
      see item 2.
-  2. **Leverage the external reference-matrix corpus (`mvermeulen.org/workload`) rather than
-     re-collecting it.** This is real, already-running infrastructure: `wspy-publish` posts run data
-     from a distributed set of machines over time, and `scripts/publish_reference_matrix.py`
-     (wspy's own repo) aggregates it per `(suite, benchmark, machine)` cell via
-     `wspy-testpoint aggregate --suite --benchmark --machine --db <db> [--report-root <path>] --csv`
-     — an **already-existing, already-working stable CLI** in the currently-pinned wspy build
-     (confirmed live), so this is a `WspyInstrumentation`-style shell-out addition, not new wspy
-     feature work or a departure from cfm's established "only integrate via stable wspy CLIs, never
-     import wspy's internal Python" posture. Two real uses, given the explicit non-comparability
-     caveat below:
-     - **Hypothesis aid**: before spending a real trial, check whether this benchmark's reference-
-       matrix history (on this exact machine, or the closest available one) already suggests a
-       flag/signature combination is directionally promising — informing Phase 2 candidate
-       generation/ranking, never substituting for a real measurement.
-     - **Adaptive trial cost** (item 3 below): the reference matrix's own historical spread
-       (`stddev`/`cv_percent` across its many prior repetitions) is a real, data-backed noise-floor
-       estimate for deciding "is one quick run's result already unambiguous, or genuinely too close to
-       call" — better than a guessed threshold.
-     Cross-machine comparability is **not** assumed (SOC/frequency/config can differ) — this is "the
-     shape of the data," a prior to inform search direction, never a substitute for a real, validated
-     measurement on the actual host being optimized (§15's decision makes this explicit). Local-`--db`
-     access (cfm's own accumulating `results/store.db`, growing as it mines more benchmarks — zero new
-     dependencies) is the near-term path; a `vendor/workload`-style pinned clone of the actual
-     report-root repository (richer, real cross-machine data, but a new vendored dependency mirroring
-     `vendor/wspy`'s own submodule-pinning discipline) is a real but heavier follow-on, not needed to
-     start.
-  3. **Adaptive/sequential trial-count strategy for Phase 3/4/5.** Today's fixed "always 3 confirmation-
-     grade repetitions" is the direct cause of the multi-hour-per-trial cost observed live. Proposed:
-     run one rep first; if the observed delta is unambiguous against the relevant comparison point's
-     own noise floor (informed by item 2's historical spread when available, a conservative fallback
-     threshold otherwise) — either a clear win, a clear loss, or an outright build/validate failure —
-     decide immediately rather than spending the other repetitions confirming what's already obvious;
-     escalate to the full repetition count only when the single-run result is genuinely close to the
-     noise floor (the PDF's own framing: "already have our answer before doing a more in-depth
-     comparison trying to figure out whether something is a 0.8% increase or a 0.8% decrease"). Phase 1
-     (baseline) is the yardstick every other trial compares against and likely keeps its full repetition
-     count regardless; Phase 4 (confirmation)/5 (combination), one decision per candidate/step, are
-     where this pays off most.
+  2. **Split "characterization" (shape) from "calibration" (the actual number) — leverage the external
+     reference-matrix corpus (`mvermeulen.org/workload`) for the former, always measure the latter
+     locally.** Confirmed live (2026-08-09) exactly where deep-cpu's cost actually goes, from a real
+     706.stockfish_r trial's own manifest timestamps: of ~2.6 hours total, the `counters` pass alone
+     (deep-cpu's `--passes=...` sweep, multiplexed into 8 separate sub-executions to fit 10 requested
+     counter groups into 6 hardware PMU slots, each sub-execution its own full `--iterations 3` SPEC
+     run) is ~121 of those ~155 minutes — **~78% of the cost, for exactly the topdown/cache/float data
+     that makes up "shape."** That's precisely what `706.stockfish_r`'s own reference-matrix page
+     already publishes (backend-bound 41%, frontend 29.7%, AVX-128-dominant/negligible-AVX-512 vector
+     density) — reusing it instead of re-deriving it locally removes the dominant cost, provided shape
+     is stable enough across similar machines to trust (this project's own working assumption, not
+     proven universally).
+     - **Characterization** (topdown shape, FP/vector density, ...): sourced from
+       `wspy-testpoint aggregate --suite --benchmark --machine --db <db> [--report-root <path>] --csv`
+       — an **already-existing, already-working stable CLI** in the currently-pinned wspy build
+       (confirmed live), so this is a `WspyInstrumentation`-style shell-out addition, not new wspy
+       feature work or a departure from cfm's "only integrate via stable wspy CLIs, never import wspy's
+       internal Python" posture. When no reference-matrix entry exists yet for a (benchmark, base-
+       config) combination, fall back to *one* local `deep-cpu` run (shape needs one measurement, not a
+       3-rep CI) — and **contribute it back** via `wspy-publish`, following the corpus's own existing
+       contribution conventions exactly (a real machine slug per `doc/REPORT_HIERARCHY.md`, and the
+       architecture-appropriate standard profile — e.g. `zen4plus-deep` for a Zen4/5 AMD host, not a
+       blind `deep-cpu` — matching how every other real contribution to this corpus is characterized,
+       so the seeded data is comparable, not a one-off oddball). This is a rare, one-time-per-
+       (benchmark, config) cost, not a per-trial one.
+     - **Calibration** (the actual ratio, on *this* host, under *this* flag set): always measured
+       locally — cross-machine numbers are never substituted for it (SOC/frequency/config differences
+       mean they're not assumed comparable) — but using the `quick` profile (already Phase 3
+       screening's own profile: ipc + system metrics, cheap, and specifically well-suited to a single
+       run — confirmed with the user) instead of `deep-cpu`, since shape no longer needs to come from
+       this measurement at all. Every *routine* calibration run (baseline reps, confirmation/combination
+       checks) stays local-only, never published — only the rare characterization fallback above is a
+       publishing event.
+     Net effect: baseline (3 reps) drops from ~7.8 hours to roughly 3× `quick`'s own cost (tens of
+     minutes, not hours); a Phase 4/5 candidate's confirmation drops the same way. §15 records the
+     non-comparability decision explicitly.
+  3. **Adaptive trial-count strategy, biased toward cheap rejection over expensive precision.**
+     Confirmed live from this same real run: two baseline repetitions at the *same* flags produced
+     ratios of 105.03 and 127.65 — a ~21% spread — a concrete, unplanned demonstration of exactly how
+     noisy a single real measurement can be, and why the design below leans conservative rather than
+     trying to resolve small effects precisely. Per the user's own framing (2026-08-10): the first cut
+     is about *direction* ("will this flag significantly improve peak performance or not?"), and the
+     risk of a false accept (noise misread as a real win, permanently polluting the peak config and the
+     cross-benchmark `knowledge` table for a flag whose category isn't even mechanically relevant to
+     this workload — e.g. an FP/vector-tuning flag being "confirmed" as helpful on a workload with
+     near-zero measured FP density) is worse than a false reject (missing a small real win). Concretely:
+     - Phase 3 screening (unchanged, already 1 `quick`-profile run) plus Phase 2 candidate generation
+       itself de-prioritizing/excluding a flag category whose relevant signal is essentially absent in
+       the workload's own characterized shape (item 1's new signature fields) is the *first*, cheapest
+       line of defense — better to never spend a trial on a mechanically-implausible flag than to
+       correctly reject it later at real cost.
+     - Phase 4/5 confirmation uses a small, fixed number of `quick`-profile reps (not `deep-cpu`'s 3)
+       and an **asymmetric accept bar**: require a clearly large, unambiguous improvement to accept
+       (statistical *and* practical significance — non-overlapping CI is necessary but not sufficient;
+       a technically-non-overlapping but small delta, the "is this 0.8% up or 0.8% down" case, defaults
+       to **reject**, not to spending more reps trying to resolve it). No further escalation attempted
+       for an individual flag that misses this bar — deliberately not symmetric with the accept path.
+     - Combining several individually-modest flags is already Phase 5's job (greedy combination already
+       re-measures the *cumulative* set's own effect, judged against the same bar, rather than needing
+       each increment individually resolved to high precision) — this is the answer to "what if several
+       ~0.5% effects together are real," not a separate mechanism.
+     - A flag-category-vs-shape mismatch tightening the accept bar further (not just Phase 2 filtering)
+       is a real, sound refinement (bigger prior against an implausible category needs more evidence to
+       overcome) but explicitly deferred past this first cut, per the user's own stated preference for
+       starting simple.
+     The reference matrix's own historical spread (`stddev`/`cv_percent` across its many prior
+     repetitions) is a real, data-backed noise-floor estimate for calibrating "clearly large" above, once
+     available for a given benchmark — a fixed conservative fallback threshold otherwise. Phase 1
+     (baseline) still gets 3 reps regardless (it's the yardstick everything else compares against, not a
+     flag being screened) — now at `quick`'s cost, not `deep-cpu`'s.
 - **M3 — local LLM integration**, default Ollama (§9 all four jobs, §15) plus the Report agent's
   narrative section. The LLM's structured context for jobs 1/2 (§9) includes whatever deterministic
   signature fields M2.5 adds (FP density, page-fault rate, ...) as pre-classified labels, not raw
@@ -749,3 +781,15 @@ code was written so M0-M4 have no ambiguity to stall on.
   `results/store.db` (zero new dependencies, grows organically as cfm mines more benchmarks) is the
   near-term path; a `vendor/workload`-style pinned clone of the real report-root repository (richer,
   genuine cross-machine data via `--report-root`) is real future work, not needed to start M2.5.
+- **A false accept is worse than a false reject (2026-08-10, user decision).** M2.5's adaptive
+  trial-count design (§14) is deliberately asymmetric, not a textbook symmetric hypothesis test: a
+  flag needs a clearly large, unambiguous improvement to be *accepted* (statistical *and* practical
+  significance, not just a non-overlapping CI on a small delta), but any candidate that misses that bar
+  is rejected outright, with no extra reps spent trying to rescue an ambiguous result. Rationale: an
+  incorrectly-accepted flag doesn't just cost this benchmark's peak config — it pollutes the
+  cross-benchmark `knowledge` table (§8) other benchmarks inherit from, and the failure mode is sharpest
+  exactly where a flag's catalog category has little mechanical relevance to the workload's own
+  characterized shape (an FP/vector-tuning flag "confirmed" on a near-zero-FP-density benchmark, on
+  noise alone). A missed small-but-real win is comparatively cheap — recoverable later (a future M2.5
+  refinement, or Phase 5's own combination search catching it alongside other flags), an incorrectly
+  accepted one is not.
