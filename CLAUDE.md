@@ -236,7 +236,8 @@ Full branch/PR discipline, same shape as wspy's:
   `wspy-testpoint aggregate --csv` as the intended reference-matrix characterization source — **before
   wiring that in, confirm live whether `collect_archetype_scorecards()`'s `"counters"` preference
   actually returns a populated scorecard for a `deep-cpu`-shaped run**, rather than assuming the fix in
-  #194 sidesteps the pass-selection issue just because it fixed the identity-resolution one.
+  #194 sidesteps the pass-selection issue just because it fixed the identity-resolution one. Filed
+  upstream as [wspy#270](https://github.com/mvermeulen/wspy/issues/270).
 
 ## Build & test
 
