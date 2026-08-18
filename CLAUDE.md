@@ -221,6 +221,22 @@ Full branch/PR discipline, same shape as wspy's:
   by `test_upsert_knowledge_null_compiler_version_and_target_arch_still_upserts`, not by inspection --
   worth remembering for any future `UNIQUE`-scoped upsert where one of the scoping columns can be
   `NULL`, not just this table.
+- **Watch item, not yet confirmed against cfm's own code: wspy PR #194's `wspy-testpoint`
+  `collect_archetype_scorecards()` may hit the same "wrong pass" bug as the `deep-cpu`/`amdtopdown`
+  entry above.** Reviewing wspy's open/recent PRs (2026-08-18) for M2.5 relevance: `wspy-testpoint`'s
+  `aggregate`/`render` resolves a multi-pass run's real per-pass store `run_id`s (a genuine, separate
+  fix — the run *directory* name isn't the store's `run_id`, mirrored by cfm's own
+  `_resolve_run_identity()`/`_resolve_multi_pass_identity()` trap above), then picks one representative
+  pass for `wspy-archetype --run` (which takes exactly one) by **preferring the `"counters"`
+  configuration**. That's the exact pass this project's own `deep-cpu` entry above found comes back
+  `resource_dominance=unknown, confidence=insufficient-data` — `counters` runs via wspy's native
+  multipass execution with no `--csv`, so it carries zero `run_features`; it's the plain `amdtopdown`
+  pass whose scorecard is actually populated. cfm doesn't call `wspy-testpoint` today so this hasn't
+  bitten anything here yet, but `doc/DESIGN.md` §14/§15's M2.5 plan names
+  `wspy-testpoint aggregate --csv` as the intended reference-matrix characterization source — **before
+  wiring that in, confirm live whether `collect_archetype_scorecards()`'s `"counters"` preference
+  actually returns a populated scorecard for a `deep-cpu`-shaped run**, rather than assuming the fix in
+  #194 sidesteps the pass-selection issue just because it fixed the identity-resolution one.
 
 ## Build & test
 
