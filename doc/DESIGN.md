@@ -228,13 +228,20 @@ counters that just aren't wired into this table yet:
     but isn't yet promoted into `run_features` — `wspy-archetype`'s own maintainers already flagged
     this exact gap in `archetype.c`'s own header comment ("a new axis, e.g. floating-point density once
     `--float` has real cross-workload validation") as a deliberately deferred extension, not an
-    oversight.
+    oversight. **Update 2026-08-18: no longer a gap** — wspy's PR #269 promoted this to a real
+    `vectorization_density` axis once the reference-matrix corpus supplied the cross-workload
+    validation the maintainers were waiting for (§14 M2.5 item 1, §15).
   - **Page-fault rate** — unlike `float`, wspy's `fault_rate` ((minflt+majflt)/elapsed) is *already* a
     promoted `[feature]` reaching `run_features` today (confirmed against `doc/METRICS.md`) — purely a
     cfm-side gap (never added to this catalog's signal vocabulary), no wspy-side work needed to use it.
+    **Update 2026-08-18:** wspy's PR #268 went further and added an `allocation_pressure`
+    `wspy-archetype` axis derived from this same `fault_rate` field — the remaining cfm-side gap is
+    now just referencing the axis in this catalog, not deriving anything from the raw feature.
   - Other PDF-suggested axes (`backend_memory` vs. `backend_cpu` split, `icache`/`opcache`/`dTLB` miss
     rates, IBS DRAM-bound rate) are a mix of already-`[feature]` and `[raw]`-only — each needs the same
-    live check before assuming either way, not a blanket assumption.
+    live check before assuming either way, not a blanket assumption. (PRs #266/#267/#272 added
+    `frontend_latency_pct`/`frontend_bandwidth_pct` and `on_cpu`/`core_utilization` natively in the same
+    upstream range, 2026-08-18 — not on this bulleted list originally, but the same kind of gap closing.)
 
 See §14's M2.5 for the concrete plan (new `RunSignature` fields, expanded catalog `topdown_signals`
 vocabulary, and how this relates to the external reference-matrix corpus) and §15 for the resolved
@@ -623,17 +630,22 @@ compiler-flag-miner/
   sweep in one pass, so wspy internally re-executes the workload several times per pass; invisible
   against a toy sub-second probe, very real against a multi-minute real benchmark). Three concrete
   pieces of work, sequenced by dependency:
-  1. **New `RunSignature` fields, sourced without waiting on wspy upstream.** Add fields like
-     `fp_op_density_pct` (from wspy's `float` metric — `[raw]` today, reachable via a
-     `wspy-summary --metric float` call the same way `check_regression()` already reaches
-     `wspy-summary`, independent of `wspy-archetype`'s own axis set) and wire in `fault_rate` (already
-     a promoted `[feature]`, purely a catalog/cfm-side gap today). Expand
-     `config/gcc_flag_catalog.seed.json`'s `topdown_signals` vocabulary and §4.3's table to reference
-     these — e.g. re-key `-mprefer-vector-width=256/512` off real FP/vector density instead of the
-     current too-coarse `memory-bound-corroborated`/`compute-bound` pair. Thresholds (what counts as
-     "FP-dense") start as an explicitly-labeled uncalibrated heuristic (same posture `wspy-archetype`'s
-     own thresholds already take toward *their* hand-picked numbers), refined once real data exists —
-     see item 2.
+  1. **New `RunSignature` fields — now largely a native `wspy-archetype` read, not a cfm-side
+     computation (updated 2026-08-18, post wspy pin bump `1c192a7`→`3839815`).** The original plan here
+     was to reach `fp_op_density_pct` via a `wspy-summary --metric float` shell-out and hand-roll an
+     explicitly-uncalibrated threshold, since `float_pct` wasn't a promoted `wspy-archetype` axis yet
+     (see the wspy#227 entry in §15). That's superseded: wspy's own PR #269 added a `vectorization_density`
+     axis (low/moderate/high) from `float_pct` directly to `wspy-archetype`'s scorecard, with thresholds
+     fit against the CPU2026 reference-matrix corpus (147 runs, 3 machines) — closing wspy#227 upstream
+     instead of cfm needing to contribute it later. PR #268 likewise adds `allocation_pressure` from
+     `fault_rate` natively. So this item is now: read `vectorization_density`/`allocation_pressure`
+     (plus PRs #266/#267/#272's `frontend_latency_pct`/`frontend_bandwidth_pct`/`on_cpu`/
+     `core_utilization`) straight off the scorecard `RunSignature` already parses, no new shell-out or
+     threshold logic needed. Expand `config/gcc_flag_catalog.seed.json`'s `topdown_signals` vocabulary
+     and §4.3's table to reference these — e.g. re-key `-mprefer-vector-width=256/512` off
+     `vectorization_density` instead of the current too-coarse `memory-bound-corroborated`/
+     `compute-bound` pair. See CLAUDE.md's "Non-obvious traps" (the wspy#270-superseded entries) for the
+     confirming pin-bump detail.
   2. **Split "characterization" (shape) from "calibration" (the actual number) — leverage the external
      reference-matrix corpus (`mvermeulen.org/workload`) for the former, always measure the latter
      locally.** Confirmed live (2026-08-09) exactly where deep-cpu's cost actually goes, from a real
@@ -760,17 +772,21 @@ code was written so M0-M4 have no ambiguity to stall on.
   real, already-published example to match. The `llm/driver.py` interface (§4.5) supports `llama-server`
   identically via the same OpenAI-chat-compatible client; adding it as a second `--llm` target later is
   a config change, not new code, so it's not blocked on this decision — just not the M3 default.
-- **New signature axes are computed cfm-side first, not blocked on a wspy upstream change.** `float`
-  (FP-op density) isn't promoted into wspy's own `run_features`/`wspy-archetype` axis set yet — its own
-  maintainers are deliberately waiting for "real cross-workload validation" before picking thresholds.
-  Rather than block M2.5 on that upstream work, cfm reads the underlying `[raw]` metric directly (a
-  `wspy-summary`-style shell-out, same pattern `check_regression()` already uses) and does its own
-  threshold classification, explicitly labeled uncalibrated. Once cfm's own mining (and the external
-  reference-matrix corpus, which already has more cross-workload history than cfm alone will generate
-  for a while) produces real threshold data, contributing a `float_pct`/vectorization-density axis
-  upstream to wspy becomes a real, well-grounded proposal instead of a guess — tracked as
-  [wspy#227](https://github.com/mvermeulen/wspy/issues/227), filed 2026-08-09, rather than left to
-  fall out of this document.
+- **Resolved 2026-08-18, superseding the original "computed cfm-side first" decision below: wspy
+  promoted `float_pct`/vectorization-density into `wspy-archetype` itself, closing wspy#227
+  upstream — no cfm-side threshold work needed.** The decision as originally written (kept for
+  history): `float` (FP-op density) wasn't promoted into wspy's own `run_features`/`wspy-archetype`
+  axis set at the time, its maintainers deliberately waiting for "real cross-workload validation"
+  before picking thresholds, so cfm planned to read the underlying `[raw]` metric directly (a
+  `wspy-summary`-style shell-out) and do its own explicitly-uncalibrated threshold classification,
+  contributing a real axis upstream later once cfm's own mining produced enough data to ground one —
+  tracked as [wspy#227](https://github.com/mvermeulen/wspy/issues/227), filed 2026-08-09. That
+  cross-workload validation arrived from the external reference-matrix corpus instead (147 SPEC
+  CPU2026 runs, 3 machines), and wspy's own PR #269 added a `vectorization_density` axis
+  (low/moderate/high, thresholds fit against that corpus) directly to `wspy-archetype`'s scorecard,
+  closing wspy#227 upstream — bumped into cfm via the `1c192a7`→`3839815` pin update. §14's M2.5
+  item 1 now reads this axis directly rather than computing it; the same bump's PR #268 similarly
+  natively adds `allocation_pressure` (from `fault_rate`).
 - **External reference-matrix data is a hypothesis aid, never a substitute measurement.** SOC/frequency/
   configuration differences across the machines `mvermeulen.org/workload`'s corpus spans mean a cross-
   machine number is *not* assumed comparable to a trial on the actual host being optimized — it
