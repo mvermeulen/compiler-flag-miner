@@ -82,7 +82,7 @@ def test_resolve_run_identity_raises_when_nothing_new_was_written(tmp_path):
 def test_resolve_run_identity_picks_the_designated_pass_for_a_known_multi_pass_profile(tmp_path):
     # Mirrors a real deep-cpu run's shape (confirmed live, see _ARCHETYPE_PASS_NAME's
     # comment in cfm/instrumentation/wspy.py): 3 new run-index records, only one of
-    # which shares its start_time with the "amdtopdown" pass's own per-pass manifest.
+    # which shares its start_time with the "counters" pass's own per-pass manifest.
     instrumentation = _make(tmp_path)
     rundir = tmp_path / "cpu2026" / "706.stockfish_r" / "run1"
     rundir.mkdir(parents=True)
@@ -121,7 +121,7 @@ def test_resolve_run_identity_picks_the_designated_pass_for_a_known_multi_pass_p
 
     hostname, run_id = instrumentation._resolve_run_identity(rundir, "deep-cpu", lines_before)
     assert hostname == "h"
-    assert run_id == "20260809T164214.157-3"  # the amdtopdown pass's run, not systemtime/counters
+    assert run_id == "20260809T164154.507-2"  # the counters pass's run, not systemtime/amdtopdown
 
 
 def test_resolve_run_identity_raises_on_unmapped_multi_pass_profile(tmp_path):

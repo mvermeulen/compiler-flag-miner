@@ -164,11 +164,11 @@ def test_characterize_succeeds_on_deep_cpu_with_a_populated_scorecard(tmp_path_f
     # "deep-cpu" profile -- M0 didn't support that (_resolve_run_identity() raised
     # rather than guess which of deep-cpu's 3 underlying wspy runs was "the" run);
     # M1 resolves it via _ARCHETYPE_PASS_NAME (see that constant's comment in
-    # cfm/instrumentation/wspy.py for the live-confirmed reasoning: it's the
-    # "amdtopdown" pass, not the "counters" multipass sweep one might expect from
-    # wspy-run --help's own description). This is what confirms the real fix works
-    # end to end against a real multi-pass wspy-run invocation, not just the
-    # synthetic fixture in tests/test_instrumentation_wspy.py.
+    # cfm/instrumentation/wspy.py for the live-confirmed reasoning, updated post
+    # wspy#274/#275/#276: it's the "counters" pass now, not "amdtopdown" as it was
+    # before that pin bump). This is what confirms the real fix works end to end
+    # against a real multi-pass wspy-run invocation, not just the synthetic fixture
+    # in tests/test_instrumentation_wspy.py.
     output_root = tmp_path_factory.mktemp("wspy_output_multipass")
     instrumentation = WspyInstrumentation(
         _wspy_dir(),
@@ -189,15 +189,15 @@ def test_characterize_succeeds_on_deep_cpu_with_a_populated_scorecard(tmp_path_f
     assert run_id  # non-empty, and (per the fix) not "multipass-run" itself
 
     # vectorization_density/allocation_pressure (RunSignature's own new fields, doc/DESIGN.md sec. 14
-    # M2.5 item 1) are dedicated fields now, but confirmed live (2026-08-18) still "unknown" here --
-    # NOT a plumbing gap in this project, a real one in deep-cpu.conf itself: its "counters" pass
-    # carries float/fault_rate in its --passes sweep but with no --csv (same non-CSV trap as the
-    # amdtopdown-vs-counters pass-selection issue above), so wspy-store never ingests them into
-    # run_features regardless of which pass wspy-archetype reads from. See CLAUDE.md's "Non-obvious
-    # traps" for the full writeup. This assertion exists so a future deep-cpu.conf fix (upstream) makes
-    # this test fail loudly with a real value instead of the gap silently going unnoticed.
-    assert signature.vectorization_density == "unknown"
-    assert signature.allocation_pressure == "unknown"
+    # M2.5 item 1) read "unknown" here through the wspy `3839815` pin -- not a plumbing gap in this
+    # project, a real one in deep-cpu.conf itself (its "counters" pass carried float/fault_rate in its
+    # --passes sweep but with no --csv, so wspy-store never ingested them into run_features regardless
+    # of which pass wspy-archetype read from). Fixed upstream by wspy#275 (adds --csv to that pass,
+    # closing wspy#274) plus wspy#276 (a zero-guard fix so the pass's l3miss column stops emitting
+    # -nan% and failing wspy-validate) -- confirmed live (2026-08-19) past both, real values now, not
+    # "unknown". See CLAUDE.md's "Non-obvious traps" for the full writeup.
+    assert signature.vectorization_density in ("low", "moderate", "high")
+    assert signature.allocation_pressure in ("low", "moderate", "high")
 
 
 def test_wspy_archetype_reports_a_populated_scorecard_with_topdown_data(tmp_path_factory, toy_binary):
