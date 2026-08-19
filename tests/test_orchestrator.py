@@ -47,12 +47,16 @@ class ScriptedBackends(WorkloadBackend, InstrumentationBackend):
         ratio_sequences: dict[tuple, list],
         resource_dominance: str = "memory-bound",
         resource_dominance_sequence: list = None,
+        vectorization_density: str = None,
+        allocation_pressure: str = None,
         build_fails_for: frozenset = frozenset(),
         regression_rows: list = None,
     ):
         self._queues = {k: deque(v) for k, v in ratio_sequences.items()}
         self.resource_dominance = resource_dominance
         self._rd_sequence = deque(resource_dominance_sequence) if resource_dominance_sequence else None
+        self.vectorization_density = vectorization_density
+        self.allocation_pressure = allocation_pressure
         self.build_fails_for = build_fails_for
         self._current_flags = None
         self.regression_rows = regression_rows if regression_rows is not None else []
@@ -92,7 +96,10 @@ class ScriptedBackends(WorkloadBackend, InstrumentationBackend):
         return RunSignature(
             wspy_run_ref=f"fakehost:{run_id}", validated=True,
             resource_dominance=rd, resource_dominance_pct=80.0,
-            memory_attribution="corroborated", metrics={}, raw_output="",
+            memory_attribution="corroborated",
+            vectorization_density=self.vectorization_density,
+            allocation_pressure=self.allocation_pressure,
+            metrics={}, raw_output="",
         )
 
     def check_regression(self, wspy_run_ref):
@@ -111,7 +118,13 @@ def _cfg(tmp_path):
 
 def test_run_baseline_computes_ci_over_repeated_trials(tmp_path):
     cfg = _cfg(tmp_path)
-    backends = ScriptedBackends(ratio_sequences={("-O3",): [100.0, 102.0, 98.0]})
+    # First pop is the one characterization-grade (deep-cpu) trial -- a deliberately
+    # off-value (999.0) to prove it's excluded from the CI sample; the remaining
+    # three are the calibration-grade (quick) trials that actually feed the CI.
+    backends = ScriptedBackends(
+        ratio_sequences={("-O3",): [999.0, 100.0, 102.0, 98.0]},
+        vectorization_density="low", allocation_pressure="moderate",
+    )
 
     result = run_baseline(
         cfg, benchmark="fake_r", base_flags=["-O3"],
@@ -124,7 +137,9 @@ def test_run_baseline_computes_ci_over_repeated_trials(tmp_path):
     assert result.ci.mean == pytest.approx(100.0)
     assert result.ci.verdict == "PASS"
     assert result.resource_dominance == "memory-bound"
-    assert len(result.trial_ids) == 3
+    assert result.vectorization_density == "low"
+    assert result.allocation_pressure == "moderate"
+    assert len(result.trial_ids) == 4  # 1 characterization + 3 calibration
 
     conn = db.connect(cfg.db_path)
     try:
@@ -133,19 +148,9 @@ def test_run_baseline_computes_ci_over_repeated_trials(tmp_path):
         assert exp["baseline_run_ref"].startswith("fakehost:")
         assert exp["status"] == "running"  # set_baseline_run_ref must not finish it
         trials = db.list_trials_by_phase(conn, result.experiment_id, "confirmation")
-        assert len(trials) == 3
+        assert len(trials) == 4
     finally:
         conn.close()
-
-
-def test_run_baseline_warns_on_disagreeing_resource_dominance(tmp_path, capsys):
-    cfg = _cfg(tmp_path)
-    backends = ScriptedBackends(
-        ratio_sequences={("-O3",): [100.0, 100.0, 100.0]},
-        resource_dominance_sequence=["memory-bound", "compute-bound", "memory-bound"],
-    )
-    run_baseline(cfg, benchmark="fake_r", base_flags=["-O3"], workload=backends, instrumentation=backends)
-    assert "disagreed" in capsys.readouterr().out
 
 
 def test_run_baseline_raises_when_every_repetition_fails_to_build(tmp_path):
@@ -159,11 +164,14 @@ def test_run_baseline_raises_when_every_repetition_fails_to_build(tmp_path):
 
 # -- screen_candidates ----------------------------------------------------------
 
-def _baseline(mean_ratio=100.0):
+def _baseline(mean_ratio=100.0, resource_dominance="memory-bound",
+              vectorization_density=None, allocation_pressure=None):
     ci = confidence_interval([mean_ratio, mean_ratio, mean_ratio])
     return BaselineResult(
         experiment_id=1, flags=["-O3"], ratios=[mean_ratio] * 3, ci=ci,
-        resource_dominance="memory-bound", trial_ids=[1, 2, 3],
+        resource_dominance=resource_dominance,
+        vectorization_density=vectorization_density, allocation_pressure=allocation_pressure,
+        trial_ids=[1, 2, 3],
     )
 
 
@@ -539,7 +547,7 @@ def test_full_pipeline_surfaces_a_genuinely_better_flag(tmp_path):
     # screening run and Phase 4's 3 confirmation reps, consumed in call order, so
     # its queue needs 1 (screening) + 3 (confirmation) = 4 entries queued up front.
     backends = ScriptedBackends(ratio_sequences={
-        ("-O3",): [100.0, 100.0, 100.0],                     # baseline, 3 reps
+        ("-O3",): [100.0, 100.0, 100.0, 100.0],              # baseline: 1 characterization + 3 calibration
         ("-good-flag",): [110.0, 111.0, 111.0, 111.0],       # 1 screening + 3 confirmation
         ("-bad-flag",): [80.0],                              # 1 screening only (pruned)
         ("-O3", "-good-flag"): [112.0, 112.0, 112.0],        # Phase 5's greedy step
@@ -572,7 +580,7 @@ def test_full_pipeline_reports_baseline_when_nothing_helps(tmp_path):
     cfg = _cfg(tmp_path)
     candidates = [_candidate("-bad-flag-1"), _candidate("-bad-flag-2")]
     backends = ScriptedBackends(ratio_sequences={
-        ("-O3",): [100.0, 100.0, 100.0],
+        ("-O3",): [100.0, 100.0, 100.0, 100.0],  # 1 characterization + 3 calibration
         ("-bad-flag-1",): [70.0],
         ("-bad-flag-2",): [60.0],
     })

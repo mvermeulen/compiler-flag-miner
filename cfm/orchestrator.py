@@ -30,9 +30,33 @@ from .workloads.base import WorkloadBackend
 # its own full SPEC build/run/measure cycle. Phase 3 (screening) is deliberately
 # one cheap run each -- "exists to prune, not conclude" (doc/DESIGN.md sec. 6
 # Phase 3).
+#
+# doc/DESIGN.md sec. 14 M2.5 item 2: "characterization" (workload shape --
+# resource_dominance/vectorization_density/allocation_pressure) and "calibration"
+# (the actual ratio) are split into two different wspy profiles/costs, since a
+# confirmation-grade deep-cpu trial against a real SPEC benchmark measured in the
+# hours on this host (PMU multiplexing -- 6 counter slots can't fit deep-cpu's
+# full sweep in one pass) while shape only needs measuring once per baseline, not
+# once per repetition. CHARACTERIZATION_* is spent exactly once per baseline
+# (_characterize_baseline() below); CALIBRATION_* is what CONFIRMATION_REPETITIONS
+# now actually repeats, for baseline (Phase 1) and every Phase 4/5 re-confirmation
+# alike -- cheap enough that repeating it CONFIRMATION_REPETITIONS times for a CI
+# is affordable where deep-cpu wasn't.
 CONFIRMATION_REPETITIONS = 3
 SCREENING_ITERATIONS = 1
-CONFIRMATION_PROFILE = "deep-cpu"  # needs PR 1's multi-pass identity fix
+CHARACTERIZATION_PROFILE = "deep-cpu"  # needs PR 1's multi-pass identity fix
+CHARACTERIZATION_ITERATIONS = 1  # shape needs one measurement, not a 3-rep CI --
+# the real repetition/robustness for characterization purposes comes from
+# deep-cpu's own ~8-way pass-level multiplexing, not from stacking SPEC's own
+# iteration count on top of it (confirmed with the user, doc/DESIGN.md sec. 14).
+CALIBRATION_PROFILE = "quick"  # same underlying wspy profile as screening's own
+# SCREENING_PROFILE -- named separately since the two are semantically distinct
+# (screening prunes, calibration measures the number everything else compares
+# against), not because they differ mechanically.
+CALIBRATION_ITERATIONS = 1  # mirrors SCREENING_ITERATIONS's own reasoning: the
+# robustness calibration wants comes from CONFIRMATION_REPETITIONS independent
+# quick-profile trials feeding one CI, not from stacking SPEC's own within-trial
+# iteration count on top of that too.
 SCREENING_PROFILE = "quick"
 
 # Phase 3's prune bar: a candidate whose single screening run's point-estimate
@@ -52,8 +76,11 @@ MAX_PAIR_TOURNAMENT_TRIALS = 10
 @dataclass
 class BaselineResult:
     """Phase 1's output: the running baseline every subsequent trial is compared
-    against, plus the resource_dominance signature Phase 2 keys off (M2; M1 accepts
-    it but doesn't filter on it -- see compilers/base.py's module docstring).
+    against, plus the characterized shape (resource_dominance/vectorization_density/
+    allocation_pressure) Phase 2 filters on (doc/DESIGN.md sec. 14 M2.5 item 3) and
+    knowledge-transfer upserts key off. ``ci`` is computed only over calibration-
+    grade (quick-profile) ratios -- doc/DESIGN.md sec. 14 M2.5 item 2's
+    characterization/calibration split, see ``_characterize_baseline()``.
     """
 
     experiment_id: int
@@ -61,6 +88,8 @@ class BaselineResult:
     ratios: list[float]
     ci: ConfidenceInterval
     resource_dominance: Optional[str]
+    vectorization_density: Optional[str] = None
+    allocation_pressure: Optional[str] = None
     trial_ids: list[int] = field(default_factory=list)
 
 
@@ -82,6 +111,33 @@ class ScreeningOutcome:
     reason: str
 
 
+def _characterize_baseline(
+    cfg: CfmConfig,
+    *,
+    benchmark: str,
+    base_flags: list[str],
+    workload: Optional[WorkloadBackend],
+    instrumentation: Optional[InstrumentationBackend],
+) -> dict:
+    """doc/DESIGN.md sec. 14 M2.5 item 2: exactly one characterization-grade trial
+    (``deep-cpu``, ``CHARACTERIZATION_ITERATIONS`` -- shape needs one measurement,
+    not a repetition-based CI) to capture the baseline's ``RunSignature`` fields.
+    Deliberately its own function, not inlined into ``run_baseline()``: today this
+    is a single local trial (the DESIGN.md-documented fallback for "no
+    reference-matrix entry exists yet for this benchmark"), but a future version
+    that tries the external reference-matrix corpus first -- shape is expected to
+    be portable across similarly-behaved machines even though the ratio never is,
+    see this PR's own notes -- only ever needs to replace this one function's
+    body; ``run_baseline()`` and everything downstream only consume the resulting
+    shape fields, never how they were obtained.
+    """
+    return run_one_trial(
+        cfg, benchmark=benchmark, flags=base_flags, phase="confirmation",
+        profile=CHARACTERIZATION_PROFILE, iterations=CHARACTERIZATION_ITERATIONS,
+        experiment_id=None, workload=workload, instrumentation=instrumentation,
+    )
+
+
 def run_baseline(
     cfg: CfmConfig,
     *,
@@ -90,60 +146,62 @@ def run_baseline(
     workload: Optional[WorkloadBackend] = None,
     instrumentation: Optional[InstrumentationBackend] = None,
 ) -> BaselineResult:
-    """doc/DESIGN.md sec. 6 Phase 1: build+run the starting configuration at
-    confirmation-grade repetition (``CONFIRMATION_REPETITIONS`` separate trials,
-    each its own full SPEC build/run/measure cycle, ``deep-cpu`` profile -- PR 1's
-    fix is what makes this profile usable at all), establishing the running
-    baseline every subsequent trial compares against.
+    """doc/DESIGN.md sec. 6 Phase 1, sec. 14 M2.5 item 2: one characterization-grade
+    trial (``_characterize_baseline()``, shape only -- its ratio is *not* part of
+    the CI sample, so a deep-cpu-profile measurement never mixes with quick-profile
+    ones in the same statistic) followed by ``CONFIRMATION_REPETITIONS``
+    calibration-grade trials (``quick`` profile, cheap enough to repeat for a real
+    CI where ``deep-cpu`` wasn't) establishing the running baseline every
+    subsequent trial compares against.
     """
-    experiment_id: Optional[int] = None
-    trial_ids: list[int] = []
-    ratios: list[float] = []
-    resource_dominances: list[Optional[str]] = []
-    wspy_run_refs: list[str] = []
+    char_result = _characterize_baseline(
+        cfg, benchmark=benchmark, base_flags=base_flags,
+        workload=workload, instrumentation=instrumentation,
+    )
+    experiment_id = char_result["experiment_id"]
+    resource_dominance = char_result.get("resource_dominance")
+    vectorization_density = char_result.get("vectorization_density")
+    allocation_pressure = char_result.get("allocation_pressure")
+    trial_ids: list[int] = [char_result["trial_id"]]
 
+    ratios: list[float] = []
+    wspy_run_refs: list[str] = []
     for _ in range(CONFIRMATION_REPETITIONS):
         result = run_one_trial(
             cfg, benchmark=benchmark, flags=base_flags, phase="confirmation",
-            profile=CONFIRMATION_PROFILE, experiment_id=experiment_id,
-            workload=workload, instrumentation=instrumentation,
+            profile=CALIBRATION_PROFILE, iterations=CALIBRATION_ITERATIONS,
+            experiment_id=experiment_id, workload=workload, instrumentation=instrumentation,
         )
-        experiment_id = result["experiment_id"]
         trial_ids.append(result["trial_id"])
         if result.get("ratio") is not None:
             ratios.append(result["ratio"])
         if result.get("wspy_run_ref"):
             wspy_run_refs.append(result["wspy_run_ref"])
-        resource_dominances.append(result.get("resource_dominance"))
 
     if not ratios:
         raise RuntimeError(
             f"baseline for {benchmark!r} produced no valid ratio across "
-            f"{CONFIRMATION_REPETITIONS} repetitions -- see trials {trial_ids} in cfm.db"
-        )
-
-    distinct = {rd for rd in resource_dominances if rd is not None}
-    if len(distinct) > 1:
-        # A real "worth knowing" signal (the host/measurement may be noisy enough
-        # to flip the topdown classification between repetitions), not fatal --
-        # degrade, don't fail, same posture as elsewhere in this codebase (e.g.
-        # instrumentation/wspy.py's check_regression()).
-        print(
-            f"warning: baseline resource_dominance disagreed across repetitions "
-            f"for {benchmark!r}: {resource_dominances}"
+            f"{CONFIRMATION_REPETITIONS} calibration repetitions -- see trials "
+            f"{trial_ids} in cfm.db"
         )
 
     ci = confidence_interval(ratios)
     conn = db.connect(cfg.db_path)
     try:
         if wspy_run_refs:
+            # The first *calibration* trial's ref, not the characterization
+            # trial's -- everything else this experiment measures/compares is a
+            # calibration-profile (quick) run too, so this stays apples-to-apples
+            # for whatever wspy-summary --check-regression does with it.
             db.set_baseline_run_ref(conn, experiment_id, wspy_run_refs[0])
     finally:
         conn.close()
 
     return BaselineResult(
         experiment_id=experiment_id, flags=base_flags, ratios=ratios, ci=ci,
-        resource_dominance=resource_dominances[0] if resource_dominances else None,
+        resource_dominance=resource_dominance,
+        vectorization_density=vectorization_density,
+        allocation_pressure=allocation_pressure,
         trial_ids=trial_ids,
     )
 
@@ -269,7 +327,8 @@ def _confirm_flagset(
     for _ in range(CONFIRMATION_REPETITIONS):
         trial_results.append(run_one_trial(
             cfg, benchmark=benchmark, flags=flags, phase=phase,
-            profile=CONFIRMATION_PROFILE, experiment_id=experiment_id,
+            profile=CALIBRATION_PROFILE, iterations=CALIBRATION_ITERATIONS,
+            experiment_id=experiment_id,
             parent_trial_id=parent_trial_id, workload=workload, instrumentation=instrumentation,
         ))
 
@@ -353,8 +412,9 @@ def confirm_candidates(
     instrumentation: Optional[InstrumentationBackend] = None,
 ) -> list[ConfirmationOutcome]:
     """doc/DESIGN.md sec. 6 Phase 4: each Phase 3 survivor re-run at
-    ``CONFIRMATION_REPETITIONS``, ``deep-cpu`` profile, compared against the
-    *baseline*'s CI -- accept iff non-overlapping and better. ``screened`` is
+    ``CONFIRMATION_REPETITIONS``, ``CALIBRATION_PROFILE`` (``quick`` -- sec. 14
+    M2.5 item 2, shape doesn't need re-deriving per candidate), compared against
+    the *baseline*'s CI -- accept iff non-overlapping and better. ``screened`` is
     Phase 3's full output list (not pre-filtered) so a caller can just chain
     ``screen_candidates()``'s return value straight in.
     """
