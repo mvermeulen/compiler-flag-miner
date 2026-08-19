@@ -652,9 +652,10 @@ compiler-flag-miner/
      `topdown_signals` entry. Live-confirmed the same session, though: neither field actually resolves
      to a real value from cfm's own `deep-cpu` profile today — a separate, real `deep-cpu.conf` gap
      (its `counters` pass carries `float`/`fault_rate` but with no `--csv`, so `wspy-store` never
-     ingests them), not fixed by the pin bump and not this item's own scope. See CLAUDE.md's matching
-     trap entry. So this item's plumbing is in place, but a real value for it is still blocked on
-     either a wspy-side `deep-cpu.conf` fix or item 2 below's reference-matrix read.
+     ingests them), not fixed by the pin bump and not this item's own scope. Filed upstream as
+     [wspy#274](https://github.com/mvermeulen/wspy/issues/274). See CLAUDE.md's matching trap entry.
+     So this item's plumbing is in place, but a real value for it is still blocked on either that
+     wspy-side `deep-cpu.conf` fix landing or item 2 below's reference-matrix read.
   2. **Split "characterization" (shape) from "calibration" (the actual number) — leverage the external
      reference-matrix corpus (`mvermeulen.org/workload`) for the former, always measure the latter
      locally.** Confirmed live (2026-08-09) exactly where deep-cpu's cost actually goes, from a real

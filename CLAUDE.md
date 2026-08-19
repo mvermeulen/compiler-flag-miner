@@ -266,8 +266,9 @@ Full branch/PR discipline, same shape as wspy's:
   of `deep-cpu`'s other two passes (`systemtime`, `amdtopdown`) collects `float`/`fault_rate` either, so
   there is currently no `deep-cpu` pass with real data for these two axes to read from at all. Not a cfm
   bug — a real gap in the `deep-cpu` profile definition itself (wspy-side: `counters` needs `--csv`
-  added, or a fourth pass needs adding) — worth filing upstream (same pattern as wspy#227/wspy#270)
-  before M2 starts relying on these axes being populated from a `deep-cpu` trial. Until then, treat
+  added, or a fourth pass needs adding) — filed upstream as
+  [wspy#274](https://github.com/mvermeulen/wspy/issues/274), same pattern as wspy#227/wspy#270, before
+  M2 starts relying on these axes being populated from a `deep-cpu` trial. Until then, treat
   `config/gcc_flag_catalog.seed.json`'s new `vectorization-density-high`-gated entries
   (`-mprefer-vector-width=256/512`) as correctly *keyed* but not yet *reachable* from cfm's own
   characterization path — M2.5 item 2's `wspy-testpoint aggregate` reference-matrix read is the
