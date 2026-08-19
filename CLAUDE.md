@@ -273,6 +273,27 @@ Full branch/PR discipline, same shape as wspy's:
   (`-mprefer-vector-width=256/512`) as correctly *keyed* but not yet *reachable* from cfm's own
   characterization path — M2.5 item 2's `wspy-testpoint aggregate` reference-matrix read is the
   nearer-term way to get a real value for them, not a `deep-cpu` fix.
+- **wspy#274 was fixed upstream (wspy#275), but the pin bump past it is blocked on a new bug wspy#275
+  itself surfaced — confirmed live 2026-08-19, not yet resolved.** wspy#275 gives the `deep-cpu`
+  `counters` pass real `--csv` output (closing #274, see the entry above), which is exactly what M2.5
+  item 1's `vectorization_density`/`allocation_pressure`/`core_utilization` axes need — but turning
+  `--csv` on for that pass also makes `wspy-validate` run its per-column sanity check against it for
+  the first time, and that check now correctly catches a real, pre-existing bug: `topdown.c`'s
+  `print_l3cache()` divides `l3_miss / l3_access * 100.0` with no zero-guard, and on this host
+  `l3_lookup_state.all_coherent_accesses_to_l3`/`l3_lookup_state.l3_miss` are both unavailable
+  (`/sys/devices/amd_l3/type not found`), so the CSV `l3miss` column comes out `-nan%` and
+  `wspy-validate` FAILs the whole `counters` manifest (`sanity: row 1 column 'l3miss' = -nan% is not a
+  finite number`) even though the other 57/57 counters in the same pass measured fine. Caught by
+  `tests/test_wspy_interface.py::test_characterize_succeeds_on_deep_cpu_with_a_populated_scorecard`
+  going from pass to fail (`signature.validated` False where it was True) on a trial pin bump to
+  `aaf4392` (past #275) — a real bump-time regression, not a flaky retry, per the "Bumping the pin"
+  discipline above. Filed upstream as
+  [wspy#276](https://github.com/mvermeulen/wspy/issues/276). **The pin stays at `3839815` (pre-#275,
+  post-#273) until wspy#276 is fixed** — `vectorization_density`/`allocation_pressure`/
+  `core_utilization` remain `unknown` under `deep-cpu` in the meantime (same standing gap wspy#274/#275
+  were meant to close), and a `feature/bump-wspy-pin-text-out-csv-fix` branch exists locally with the
+  bump to `aaf4392` staged but deliberately not merged — re-attempt the bump once wspy#276 lands, don't
+  just retry the same commit expecting a different result.
 
 ## Build & test
 
