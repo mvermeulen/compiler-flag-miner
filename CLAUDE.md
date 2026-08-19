@@ -221,23 +221,35 @@ Full branch/PR discipline, same shape as wspy's:
   by `test_upsert_knowledge_null_compiler_version_and_target_arch_still_upserts`, not by inspection --
   worth remembering for any future `UNIQUE`-scoped upsert where one of the scoping columns can be
   `NULL`, not just this table.
-- **Watch item, not yet confirmed against cfm's own code: wspy PR #194's `wspy-testpoint`
-  `collect_archetype_scorecards()` may hit the same "wrong pass" bug as the `deep-cpu`/`amdtopdown`
-  entry above.** Reviewing wspy's open/recent PRs (2026-08-18) for M2.5 relevance: `wspy-testpoint`'s
-  `aggregate`/`render` resolves a multi-pass run's real per-pass store `run_id`s (a genuine, separate
-  fix — the run *directory* name isn't the store's `run_id`, mirrored by cfm's own
-  `_resolve_run_identity()`/`_resolve_multi_pass_identity()` trap above), then picks one representative
-  pass for `wspy-archetype --run` (which takes exactly one) by **preferring the `"counters"`
-  configuration**. That's the exact pass this project's own `deep-cpu` entry above found comes back
-  `resource_dominance=unknown, confidence=insufficient-data` — `counters` runs via wspy's native
-  multipass execution with no `--csv`, so it carries zero `run_features`; it's the plain `amdtopdown`
-  pass whose scorecard is actually populated. cfm doesn't call `wspy-testpoint` today so this hasn't
-  bitten anything here yet, but `doc/DESIGN.md` §14/§15's M2.5 plan names
-  `wspy-testpoint aggregate --csv` as the intended reference-matrix characterization source — **before
-  wiring that in, confirm live whether `collect_archetype_scorecards()`'s `"counters"` preference
-  actually returns a populated scorecard for a `deep-cpu`-shaped run**, rather than assuming the fix in
-  #194 sidesteps the pass-selection issue just because it fixed the identity-resolution one. Filed
-  upstream as [wspy#270](https://github.com/mvermeulen/wspy/issues/270).
+- **Resolved 2026-08-18: wspy#270's watch item — `wspy-testpoint`'s "wrong pass" bug is fixed
+  upstream, confirmed by the pin bump.** The watch item below (originally filed against PR #194) asked
+  to confirm live, before wiring in `wspy-testpoint aggregate --csv` for M2.5, whether
+  `collect_archetype_scorecards()`'s `"counters"`-name preference would hit the same empty-CSV trap as
+  the `deep-cpu`/`amdtopdown` entry above. It would have — but wspy's own PR #271 (`joblib.py:
+  pick_counters_pass_id() prefers a pass with real run_features data`, closing wspy#270) fixed exactly
+  this, citing the identical number this project's own trap entry does (`resource_dominance=
+  memory-bound` at 89.80% on the real `amdtopdown` pass vs. `unknown`/`insufficient-data` on the
+  empty-CSV `counters` pass for the same collection), and PR #273 refined the tie-break to the
+  *richest* pass by measured-row count rather than just "first with any data." Both fixes reach
+  `wspy-testpoint`'s `collect_archetype_scorecards()`, not just the web UI's own archetype badge.
+  `vendor/wspy` was bumped past both (`1c192a7` → `3839815`, `feature/bump-wspy-pin-archetype-axes`);
+  `tests/test_wspy_interface.py`'s live `deep-cpu` contract test
+  (`test_characterize_succeeds_on_deep_cpu_with_a_populated_scorecard`) still passes against the new
+  build, confirming cfm's own direct `wspy-archetype --run` path (`_resolve_multi_pass_identity()`
+  above) is unaffected — cfm doesn't call `wspy-testpoint` yet, so the `collect_archetype_scorecards()`
+  half of this is confirmed by upstream's own commit evidence and test suite (`testpoint_smoke.sh`),
+  not yet independently exercised by a cfm-side test; that's real verification for M2.5 item 2 to pick
+  up once `wspy-testpoint aggregate --csv` actually gets wired in here, not before.
+- **Superseded by the same bump: several M2.5-item-1 signature axes now ship natively in
+  `wspy-archetype` instead of needing cfm-side computation.** The same 113-commit range (past
+  `1c192a7`) that closed wspy#270 also closed [wspy#227](https://github.com/mvermeulen/wspy/issues/227)
+  — `vectorization_density` (from `float_pct`, PR #269) with low/moderate/high thresholds fit against
+  the CPU2026 reference-matrix corpus (147 runs, 3 machines), not a cfm-side single-host guess — plus
+  `allocation_pressure` (from `fault_rate`, PR #268) and `frontend_latency_pct`/`frontend_bandwidth_pct`/
+  `on_cpu`/`core_utilization` (PRs #266/#267/#272) as further native `run_features`/scorecard axes.
+  `doc/DESIGN.md` §14's M2.5 item 1 and §15's wspy#227 entry described cfm computing these itself
+  (a `wspy-summary --metric float` shell-out, explicitly labeled uncalibrated) — that plan predates
+  this bump and needs updating to read the axes directly off `wspy-archetype`'s scorecard instead.
 
 ## Build & test
 
