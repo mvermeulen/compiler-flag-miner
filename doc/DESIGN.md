@@ -762,6 +762,21 @@ compiler-flag-miner/
      available for a given benchmark — a fixed conservative fallback threshold otherwise. Phase 1
      (baseline) still gets 3 reps regardless (it's the yardstick everything else compares against, not a
      flag being screened) — now at `quick`'s cost, not `deep-cpu`'s.
+     **Done** (`feature/adaptive-accept-bar`, 2026-08-19): `orchestrator.py`'s `generate_candidates()`
+     now runs `_filter_implausible_candidates()` (new) over item 2's baseline shape fields
+     (`resource_dominance`/`vectorization_density`) — a candidate is excluded only when *every one* of
+     its `topdown_signals` is confidently contradicted (never on `None`/`"unknown"` — absence of
+     information never excludes), keyed off the seed catalog's real vocabulary
+     (`frontend-bound`/`speculation-bound`/`compute-bound`/`backend-bound` against `resource_dominance`
+     directly, `memory-bound-corroborated` against `resource_dominance == "memory-bound"`,
+     `vectorization-density-high` against `vectorization_density == "low"`;
+     `retiring-high-narrow-margin` is never excluded on this signal, per this table's own "low priority,
+     not exclude" framing — a real verdict on it needs a "margin" field this doesn't have, left to M2's
+     ranking pass). `_confirm_flagset()`'s accept condition (shared Phase 4/5) is now `non_overlapping(...)
+     and delta_pct >= MIN_PRACTICAL_SIGNIFICANCE_PCT` (a new constant, `1.0` — the documented fixed
+     fallback, since the reference-matrix stddev/cv% source isn't wired in under item 2's shipped scope),
+     subsuming the old `ci.mean > compare_ci.mean` check. No escalation path added for a rejected
+     candidate, matching this item's deliberately asymmetric design.
 - **M3 — local LLM integration**, default Ollama (§9 all four jobs, §15) plus the Report agent's
   narrative section. The LLM's structured context for jobs 1/2 (§9) includes whatever deterministic
   signature fields M2.5 adds (FP density, page-fault rate, ...) as pre-classified labels, not raw
