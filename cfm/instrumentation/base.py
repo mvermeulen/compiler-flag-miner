@@ -25,6 +25,20 @@ class RunSignature:
     resource_dominance: Optional[str] = None
     resource_dominance_pct: Optional[float] = None
     memory_attribution: Optional[str] = None
+    # vectorization_density/allocation_pressure (doc/DESIGN.md sec. 14 M2.5 item 1): native
+    # wspy-archetype scorecard axes (wspy PRs #269/#268, closing wspy#227) -- "low"/"moderate"/"high",
+    # or "unknown" when the underlying float_pct/fault_rate data wasn't measured for the pass
+    # wspy-archetype scored. As of the wspy pin bump that added these (2026-08-18), a real `deep-cpu`
+    # run still reports both as "unknown" -- deep-cpu.conf's `counters` pass carries float/fault_rate
+    # in its --passes sweep but without --csv (same non-CSV trap as CLAUDE.md's `deep-cpu`/`amdtopdown`
+    # entry), so wspy-store never ingests them into run_features regardless of the pass-selection fix;
+    # confirmed live, see CLAUDE.md's "Non-obvious traps" (filed upstream as wspy#274). Populated here
+    # anyway (not deferred until that gap closes) since any other characterization path -- a future
+    # `wspy-testpoint aggregate`
+    # reference-matrix read (M2.5 item 2), or a hand-run `wspy --counters=float --csv` probe -- can
+    # already produce a real value for the same field.
+    vectorization_density: Optional[str] = None
+    allocation_pressure: Optional[str] = None
     metrics: dict = field(default_factory=dict)
     raw_output: str = ""
 

@@ -105,6 +105,8 @@ class WspyInstrumentation(InstrumentationBackend):
             resource_dominance=scorecard.get("resource_dominance"),
             resource_dominance_pct=_to_float(scorecard.get("resource_dominance_pct")),
             memory_attribution=scorecard.get("memory_attribution"),
+            vectorization_density=scorecard.get("vectorization_density"),
+            allocation_pressure=scorecard.get("allocation_pressure"),
             metrics=scorecard,
             raw_output=raw,
         )
