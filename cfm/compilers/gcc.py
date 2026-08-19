@@ -2,7 +2,9 @@
 
 Loads config/gcc_flag_catalog.seed.json as its flag catalog. M1 scope: candidates
 are the whole applicable-language catalog, uniformly (no resource_dominance-based
-filtering yet -- that's M2, see compilers/base.py's module docstring).
+filtering yet -- that's M2, see compilers/base.py's module docstring), minus any
+entry whose flag is still an unresolved template placeholder rather than a
+concrete flag (see ``_resolve_flag_or_none()``).
 """
 
 from __future__ import annotations
@@ -25,6 +27,33 @@ _DEFAULT_CATALOG_PATH = Path(__file__).resolve().parent.parent.parent / "config"
 # ever uses these 4 values): '"C"'->c, 'CXX'->cxx, 'CXX,C'->[cxx,c], 'F'->fortran.
 _BENCHLANG_RE = re.compile(r"\$benchlang\s*=\s*'([^']+)'")
 _BENCHLANG_TO_CATALOG = {"C": "c", "CXX": "cxx", "F": "fortran"}
+
+# A handful of config/gcc_flag_catalog.seed.json entries carry an unresolved
+# template rather than a concrete, directly-buildable flag (e.g. `-march=
+# <detected-uarch>`, `-mbranch-cost=N`) -- confirmed live: tried as literal text,
+# GCC just rejects them outright (a wasted, uninformative build failure for every
+# such candidate, not a real test of the flag). `-march=<detected-uarch>` has one
+# safe, well-grounded resolution (GCC's own `-march=native` -- the exact flag M0's
+# real verified run already used, CLAUDE.md's Status section) so it's substituted
+# here rather than shelled out to wspy's cpu_info for the same answer. The
+# remaining `=N`-style numeric-parameter placeholders (`-mbranch-cost=N`,
+# `--param prefetch-latency=N`) have no single principled default value the
+# catalog specifies, so those candidates are skipped entirely rather than
+# fabricating one -- a real, tracked M1 gap (real parameter-sweep resolution is
+# future work), not silently guessed at here.
+_PLACEHOLDER_SUBSTITUTIONS = {"-march=<detected-uarch>": "-march=native"}
+_UNRESOLVED_PLACEHOLDER_RE = re.compile(r"<[^>]+>|=N$")
+
+
+def _resolve_flag_or_none(raw_flag: str) -> Optional[str]:
+    flag = _PLACEHOLDER_SUBSTITUTIONS.get(raw_flag, raw_flag)
+    if _UNRESOLVED_PLACEHOLDER_RE.search(flag):
+        print(
+            f"info: skipping catalog entry {raw_flag!r} -- unresolved template placeholder, "
+            "not a concrete flag (see cfm/compilers/gcc.py's _PLACEHOLDER_SUBSTITUTIONS)"
+        )
+        return None
+    return flag
 
 
 def benchmark_languages(spec_dir, bench: str) -> list[str]:
@@ -74,9 +103,15 @@ class GccCompiler(CompilerBackend):
         # M1-scope choice, not an oversight.
         del signature
         wanted = set(languages)
-        return [
-            FlagCandidate(
-                flag=entry["flag"],
+        candidates = []
+        for entry in self._flags():
+            if not (wanted & set(entry["languages"])):
+                continue
+            flag = _resolve_flag_or_none(entry["flag"])
+            if flag is None:
+                continue
+            candidates.append(FlagCandidate(
+                flag=flag,
                 category=entry["category"],
                 risk=entry["risk"],
                 languages=entry["languages"],
@@ -84,10 +119,8 @@ class GccCompiler(CompilerBackend):
                 conflicts=entry.get("conflicts", []),
                 notes=entry.get("notes", ""),
                 topdown_signals=entry.get("topdown_signals", []),
-            )
-            for entry in self._flags()
-            if wanted & set(entry["languages"])
-        ]
+            ))
+        return candidates
 
     def validate_flagset(
         self, flags: list[str], gcc_version: Optional[str] = None, target: Optional[str] = None,
