@@ -55,7 +55,8 @@ def run_one_trial(
     ``cfm measure`` (``cli.py``) and every M0 caller keep working unchanged, since
     both default to ``None``. ``profile`` overrides ``cfg.wspy_profile`` for this
     one call -- the orchestrator needs a different wspy profile per phase (``quick``
-    for screening, ``deep-cpu`` for baseline/confirmation, doc/DESIGN.md sec. 6),
+    for screening and calibration, ``deep-cpu`` for baseline's one-off
+    characterization rep, doc/DESIGN.md sec. 6 and sec. 14 M2.5 item 2),
     which a single fixed ``cfg.wspy_profile`` can't express across calls sharing one
     ``CfmConfig``. ``parent_trial_id`` is passed straight through to
     ``db.record_trial()`` -- doc/DESIGN.md sec. 6 Phase 5's greedy-combination
@@ -116,7 +117,10 @@ def run_one_trial(
             "experiment_id": experiment_id, "trial_id": trial_id,
             "build_status": build_status, "wspy_run_ref": signature.wspy_run_ref,
             "wspy_validated": signature.validated, "spec_validated": run_result.validated,
-            "resource_dominance": signature.resource_dominance, "ratio": run_result.ratio,
+            "resource_dominance": signature.resource_dominance,
+            "vectorization_density": signature.vectorization_density,
+            "allocation_pressure": signature.allocation_pressure,
+            "ratio": run_result.ratio,
         }
     finally:
         conn.close()

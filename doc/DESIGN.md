@@ -705,6 +705,29 @@ compiler-flag-miner/
      Net effect: baseline (3 reps) drops from ~7.8 hours to roughly 3× `quick`'s own cost (tens of
      minutes, not hours); a Phase 4/5 candidate's confirmation drops the same way. §15 records the
      non-comparability decision explicitly.
+     **Done, minimal scope** (`feature/characterization-calibration-split`, 2026-08-19):
+     `orchestrator.py`'s `run_baseline()` now spends exactly one `deep-cpu --iterations 1`
+     characterization trial (`_characterize_baseline()`) plus `CONFIRMATION_REPETITIONS` `quick`-profile
+     calibration trials (`CALIBRATION_PROFILE`/`CALIBRATION_ITERATIONS`, also `--iterations 1` — the
+     user confirmed extending the fallback's own `--iterations 1` reasoning to *routine* calibration
+     reps too, not just the rare fallback case, since `CONFIRMATION_REPETITIONS`'s own cross-trial CI is
+     what supplies the robustness now); `_confirm_flagset()` (shared by Phase 4/5) does the same. The
+     characterization trial's ratio is recorded as a real trial row but excluded from the CI sample, so
+     a deep-cpu-profile measurement never mixes with quick-profile ones in one statistic.
+     **Deliberately not implemented here**: the `wspy-testpoint aggregate`-against-the-reference-matrix
+     half of this item's original text. Checked live against the actual `wspy-testpoint` CLI
+     (`cmd_characterize`/`cmd_aggregate`/`cmd_render`, all gated by `load_stats_pool_present()`) — none
+     of them can actually read an*other* already-published machine's data with zero local setup; each
+     requires *this* `--machine` slug's own `runs.json` (and local store presence) to exist first, so
+     "already-existing, already-working stable CLI" undersold the real integration cost. This host also
+     has no registered machine slug and no report-root clone yet. So `_characterize_baseline()` today is
+     exactly the one-local-rep fallback path, nothing more — but it's a deliberately isolated function
+     specifically so a later "try the reference matrix first" version (the user's own framing, 2026-08-19:
+     the mining host and the reference-matrix host needn't be the same machine, since shape is expected
+     to be portable across similarly-behaved machines even though the ratio never is) is a drop-in
+     replacement for just that function's body, not a rewrite of `run_baseline()` or anything downstream
+     — real fast-follow work (report-root git clone, either markdown-parsing or extending
+     `collect_wordpress_archetype_scorecards()`'s own WordPress-recovery approach), not a cheap wire-up.
   3. **Adaptive trial-count strategy, biased toward cheap rejection over expensive precision.**
      (Two baseline repetitions from this same live run measured 105.03 and 127.65 — a ~21% spread —
      but this machine was *not* under exclusive use for that window per CLAUDE.md's own rule, so it's
