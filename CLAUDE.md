@@ -286,7 +286,8 @@ Full branch/PR discipline, same shape as wspy's:
      `resource_dominance` itself agreeing between the two passes (`memory-bound`, ~86.6%) — `"counters"`
      is strictly the richer pass now that it validates. `config/gcc_flag_catalog.seed.json`'s
      `vectorization-density-high`-gated entries (`-mprefer-vector-width=256/512`) are now actually
-     *reachable* from a real `deep-cpu` trial, not just correctly keyed.
+     *reachable* from a real `deep-cpu` trial, not just correctly keyed. **PR #14 merged (`72065b6`,
+     2026-08-19)** with this fix and the resulting doc updates.
 
 ## Build & test
 
