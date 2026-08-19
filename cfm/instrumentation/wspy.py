@@ -22,17 +22,31 @@ from .base import InstrumentationBackend, RunSignature
 # multi-pass profile whose wspy-run invocation launches more than one wspy process. Not
 # guessable from the profile's documentation alone -- confirmed live against a real
 # `deep-cpu` run (doc/DESIGN.md sec. 4.2, CLAUDE.md's Non-obvious traps log has the full
-# story): the natural first guess is deep-cpu's "counters" pass (wspy-run --help
-# describes it as "used for topdown characterization"), but that pass has no --csv (it's
-# wspy's native --passes= multipass sweep, human-readable output only), so wspy-store
-# can't ingest its metric values at all -- its own wspy-archetype scorecard comes back
-# resource_dominance=unknown, confidence=insufficient-data. It's deep-cpu's "amdtopdown"
-# pass (--csv --counters=topdown, a plain non-multiplexed topdown-percentages pass) whose
-# scorecard is actually populated. Only deep-cpu is mapped -- any other multi-pass
-# profile (deep-cpu-intel, deep-gpu, zen4plus-deep, a comma-composed profile list) raises
-# rather than guessing, same posture as the single-new-line check this replaces.
+# story).
+#
+# This was "amdtopdown" (--csv --counters=topdown, a plain non-multiplexed
+# topdown-percentages pass) through the wspy `1c192a7`/`3839815` pins: deep-cpu's
+# "counters" pass -- wspy-run --help's own "used for topdown characterization" --
+# carried no --csv back then (wspy's native --passes= multipass sweep, human-readable
+# output only), so wspy-store couldn't ingest its metric values at all and its own
+# wspy-archetype scorecard came back resource_dominance=unknown,
+# confidence=insufficient-data.
+#
+# Updated (pin bump past wspy#274/#275/#276, `bc65f57`): profiles/deep-cpu.conf now runs
+# "counters" with --csv (closing wspy#274/#275), and wspy#276's zero-guard fix stopped
+# that pass's l3miss column emitting -nan% and failing wspy-validate. Confirmed live
+# (2026-08-19) against a real deep-cpu run: querying wspy-archetype on "counters"'s own
+# run_id now yields vectorization_density/allocation_pressure/core_utilization as real
+# values (e.g. "low"/"low"/"low" on a toy scalar workload, vs. "unknown" from
+# "amdtopdown") with confidence=high (vs. "low" from "amdtopdown", which only ever
+# carried topdown+branch data) -- resource_dominance itself agrees between the two
+# passes (memory-bound, ~86.6%). "counters" is the objectively richer pass now that it
+# validates, so it replaces "amdtopdown" here. Only deep-cpu is mapped -- any other
+# multi-pass profile (deep-cpu-intel, deep-gpu, zen4plus-deep, a comma-composed profile
+# list) raises rather than guessing, same posture as the single-new-line check this
+# replaces.
 _ARCHETYPE_PASS_NAME = {
-    "deep-cpu": "amdtopdown",
+    "deep-cpu": "counters",
 }
 
 

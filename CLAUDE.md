@@ -250,29 +250,43 @@ Full branch/PR discipline, same shape as wspy's:
   `doc/DESIGN.md` §14's M2.5 item 1 and §15's wspy#227 entry described cfm computing these itself
   (a `wspy-summary --metric float` shell-out, explicitly labeled uncalibrated) — that plan predates
   this bump and needs updating to read the axes directly off `wspy-archetype`'s scorecard instead.
-- **`vectorization_density`/`allocation_pressure`/`core_utilization` still read `"unknown"` under cfm's
-  own `deep-cpu` profile today, confirmed live (2026-08-18) — a real, separate gap from wspy#270's
-  pass-selection bug, not fixed by the pin bump above.** `RunSignature` now carries dedicated
-  `vectorization_density`/`allocation_pressure` fields (`cfm/instrumentation/base.py`, populated in
-  `wspy.py`'s `characterize()`), so the plumbing to *use* these axes exists — but running the real
-  `deep-cpu` profile against a real workload (`WspyInstrumentation.characterize(..., profile="deep-cpu",
-  ...)`) still comes back `vectorization_density=unknown, allocation_pressure=unknown,
-  confidence=low, confidence_reasons=...missing-vectorization_density-data...`. Root cause:
-  `profiles/deep-cpu.conf`'s `counters` pass *does* include `float`/`fault_rate`'s source counter groups
-  in its `--passes=...` sweep, but — same as the `deep-cpu`/`amdtopdown` `wspy-store`-CSV-only trap
-  earlier in this list — that pass runs with no `--csv` ("matching the five passes it replaces", the
-  profile's own comment), so `wspy-store` never ingests it into `run_features` regardless of which pass
-  `wspy-archetype` ends up reading from. wspy#270's fix picks the *richest available* pass, but neither
-  of `deep-cpu`'s other two passes (`systemtime`, `amdtopdown`) collects `float`/`fault_rate` either, so
-  there is currently no `deep-cpu` pass with real data for these two axes to read from at all. Not a cfm
-  bug — a real gap in the `deep-cpu` profile definition itself (wspy-side: `counters` needs `--csv`
-  added, or a fourth pass needs adding) — filed upstream as
-  [wspy#274](https://github.com/mvermeulen/wspy/issues/274), same pattern as wspy#227/wspy#270, before
-  M2 starts relying on these axes being populated from a `deep-cpu` trial. Until then, treat
-  `config/gcc_flag_catalog.seed.json`'s new `vectorization-density-high`-gated entries
-  (`-mprefer-vector-width=256/512`) as correctly *keyed* but not yet *reachable* from cfm's own
-  characterization path — M2.5 item 2's `wspy-testpoint aggregate` reference-matrix read is the
-  nearer-term way to get a real value for them, not a `deep-cpu` fix.
+- **Resolved 2026-08-19: `vectorization_density`/`allocation_pressure`/`core_utilization` read
+  `"unknown"` under cfm's own `deep-cpu` profile through a three-issue upstream chain
+  (wspy#274 → #275 → #276) — now fixed, confirmed live, pin bumped past all three
+  (`3839815` → `bc65f57`).** Timeline, in case this class of "pass fixed upstream, pin bump still
+  blocked" recurs:
+  1. **wspy#274** (root cause, filed 2026-08-18): `profiles/deep-cpu.conf`'s `counters` pass *does*
+     include `float`/`fault_rate`'s source counter groups in its `--passes=...` sweep, but ran with no
+     `--csv`, so `wspy-store` never ingested it into `run_features` regardless of which pass
+     `wspy-archetype` read from — neither of `deep-cpu`'s other two passes (`systemtime`, `amdtopdown`)
+     collects `float`/`fault_rate` either, so there was no `deep-cpu` pass with real data for these axes
+     at all.
+  2. **wspy#275** closed #274 (adds `--csv` to the `counters` pass), confirmed live to do exactly that —
+     but turning `--csv` on for that pass also made `wspy-validate` run its per-column sanity check
+     against it for the first time, surfacing a new, previously-latent bug:
+  3. **wspy#276** (filed 2026-08-19): `topdown.c`'s `print_l3cache()` divides `l3_miss / l3_access *
+     100.0` with no zero-guard; on this host `l3_lookup_state.*` counters are unavailable
+     (`/sys/devices/amd_l3/type not found`), so both are `0` and the CSV `l3miss` column came out
+     `-nan%`, failing the whole `counters` manifest (`wspy-validate` correctly rejecting a non-finite
+     CSV value) even though the other 57/57 counters in the same pass measured fine. Caught by
+     `tests/test_wspy_interface.py::test_characterize_succeeds_on_deep_cpu_with_a_populated_scorecard`
+     going from pass to fail (`signature.validated` False where it was True) on a trial pin bump to
+     `aaf4392` (past #275) — real bump-time signal per the "Bumping the pin" discipline above, not a
+     flaky retry. `feature/bump-wspy-pin-text-out-csv-fix` (PR #14) was left open, unmerged, blocked on
+     this.
+  4. wspy#276 closed same-day (PR #277: a shared `safe_div()` helper applied to every `topdown.c`
+     miss/access-style division with the same unguarded shape, not just `print_l3cache()`, plus a
+     regression test). Bumped the pin past it (`bc65f57`); `test_characterize_succeeds_...` passes
+     again, and — the actual payoff — **`_ARCHETYPE_PASS_NAME["deep-cpu"]` now points at `"counters"`
+     instead of `"amdtopdown"`** (`cfm/instrumentation/wspy.py`; the earlier `"amdtopdown"` choice was
+     only ever a workaround for `"counters"` having no usable CSV — see the wspy#270-superseded entry
+     below). Confirmed live: querying `wspy-archetype` on `"counters"`'s own run_id yields
+     `vectorization_density=low, allocation_pressure=low, core_utilization=low, confidence=high` on a
+     toy scalar workload (vs. `unknown`/`unknown`/`unknown`/`low` from `"amdtopdown"`), with
+     `resource_dominance` itself agreeing between the two passes (`memory-bound`, ~86.6%) — `"counters"`
+     is strictly the richer pass now that it validates. `config/gcc_flag_catalog.seed.json`'s
+     `vectorization-density-high`-gated entries (`-mprefer-vector-width=256/512`) are now actually
+     *reachable* from a real `deep-cpu` trial, not just correctly keyed.
 
 ## Build & test
 

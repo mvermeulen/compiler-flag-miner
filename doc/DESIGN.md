@@ -169,10 +169,11 @@ the rest of the system consumes:
 - **`deep-cpu` (multi-pass) confirmation-stage support is built (M1).** `characterize()` resolves
   which of `deep-cpu`'s 3 underlying `wspy` processes (`systemtime`/`counters`/`amdtopdown`, each with
   its own independently-generated `run_id`) actually carries the CSV topdown data
-  `wspy-archetype`'s `resource_dominance` scoring reads — confirmed live to be `amdtopdown`, not the
-  `counters` pass wspy's own docs might suggest at first read (CLAUDE.md's "wspy dependency" traps log
-  has the full story, including the wrong initial guess). Single-pass profiles (`quick`) and the
-  `deep-cpu` multi-pass profile both work end to end; any other multi-pass profile
+  `wspy-archetype`'s `resource_dominance` scoring reads — confirmed live to be `counters` (updated post
+  wspy#274/#275/#276, pin `bc65f57`; it was `amdtopdown` through the earlier `1c192a7`/`3839815` pins,
+  before `counters` had `--csv` output at all — CLAUDE.md's "wspy dependency" traps log has the full
+  story, including the wrong initial guess). Single-pass profiles (`quick`) and the `deep-cpu`
+  multi-pass profile both work end to end; any other multi-pass profile
   (`deep-cpu-intel`/`deep-gpu`/`zen4plus-deep`/a comma-composed list) still raises rather than
   guessing, since none of those are exercised by this project yet.
 - **wspy dependency**: `vendor/wspy` is a git submodule pinned to a specific, tested commit (not a live
@@ -649,13 +650,18 @@ compiler-flag-miner/
      confirming pin-bump detail. **Done** (`feature/vectorization-density-signal`): `RunSignature` now
      carries dedicated `vectorization_density`/`allocation_pressure` fields, and
      `-mprefer-vector-width=256/512` are re-keyed onto a new `vectorization-density-high`
-     `topdown_signals` entry. Live-confirmed the same session, though: neither field actually resolves
-     to a real value from cfm's own `deep-cpu` profile today — a separate, real `deep-cpu.conf` gap
-     (its `counters` pass carries `float`/`fault_rate` but with no `--csv`, so `wspy-store` never
-     ingests them), not fixed by the pin bump and not this item's own scope. Filed upstream as
-     [wspy#274](https://github.com/mvermeulen/wspy/issues/274). See CLAUDE.md's matching trap entry.
-     So this item's plumbing is in place, but a real value for it is still blocked on either that
-     wspy-side `deep-cpu.conf` fix landing or item 2 below's reference-matrix read.
+     `topdown_signals` entry. Live-confirmed the same session, though: neither field actually resolved
+     to a real value from cfm's own `deep-cpu` profile at the time — a separate, real `deep-cpu.conf`
+     gap (its `counters` pass carried `float`/`fault_rate` but with no `--csv`, so `wspy-store` never
+     ingested them), not fixed by that pin bump and not this item's own scope. Filed upstream as
+     [wspy#274](https://github.com/mvermeulen/wspy/issues/274).
+     **Resolved (pin bump past wspy#274/#275/#276, `bc65f57`, 2026-08-19):** wspy#275 gave the
+     `counters` pass real `--csv` output, and wspy#276 (a zero-guard fix for a `-nan%` CSV column that
+     #275 exposed) let it actually pass `wspy-validate`. `_ARCHETYPE_PASS_NAME["deep-cpu"]` now points
+     at `"counters"` instead of `"amdtopdown"` (confirmed live to be the objectively richer pass —
+     `confidence=high` vs. `low`, same `resource_dominance` conclusion either way), and
+     `vectorization_density`/`allocation_pressure` resolve to real values (`low`/`moderate`/`high`) from
+     a real `deep-cpu` trial. See CLAUDE.md's matching trap entry.
   2. **Split "characterization" (shape) from "calibration" (the actual number) — leverage the external
      reference-matrix corpus (`mvermeulen.org/workload`) for the former, always measure the latter
      locally.** Confirmed live (2026-08-09) exactly where deep-cpu's cost actually goes, from a real
