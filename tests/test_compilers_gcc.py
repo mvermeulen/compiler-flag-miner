@@ -54,17 +54,43 @@ def compiler(fixture_catalog):
 
 
 def test_candidate_flags_filters_by_language(compiler):
+    # -mbranch-cost=N is in the fixture catalog but is an unresolved template
+    # placeholder (tested separately below), so it never reaches this result.
     candidates = {c.flag for c in compiler.candidate_flags_for_signature(None, ["cxx"])}
-    assert candidates == {"-shared-flag", "-cxx-only-flag", "-fprofile-generate", "-fprofile-use", "-mbranch-cost=N"}
+    assert candidates == {"-shared-flag", "-cxx-only-flag", "-fprofile-generate", "-fprofile-use"}
     assert "-c-only-flag" not in candidates
     assert "-fortran-only-flag" not in candidates
+    assert "-mbranch-cost=N" not in candidates
 
 
 def test_candidate_flags_ignores_signature_argument(compiler):
     # M1 scope: signature is accepted but has zero effect on the result.
     with_none = compiler.candidate_flags_for_signature(None, ["fortran"])
     with_dummy = compiler.candidate_flags_for_signature(object(), ["fortran"])
-    assert {c.flag for c in with_none} == {c.flag for c in with_dummy} == {"-shared-flag", "-fortran-only-flag", "-mbranch-cost=N"}
+    assert {c.flag for c in with_none} == {c.flag for c in with_dummy} == {"-shared-flag", "-fortran-only-flag"}
+
+
+# -- unresolved template placeholders (real M1 gap, found ahead of the first real
+# `cfm mine` run: a literal "-march=<detected-uarch>"/"-mbranch-cost=N" flag is
+# not buildable text, GCC just rejects it outright) --------------------------------
+
+def test_candidate_flags_resolves_detected_uarch_to_march_native(compiler):
+    del compiler  # this substitution is independent of any particular catalog
+    from cfm.compilers.gcc import _resolve_flag_or_none
+    assert _resolve_flag_or_none("-march=<detected-uarch>") == "-march=native"
+
+
+def test_candidate_flags_skips_unresolved_numeric_placeholder(compiler, capsys):
+    from cfm.compilers.gcc import _resolve_flag_or_none
+    assert _resolve_flag_or_none("-mbranch-cost=N") is None
+    assert _resolve_flag_or_none("--param prefetch-latency=N") is None
+    assert "skipping" in capsys.readouterr().out
+
+
+def test_candidate_flags_passes_through_a_concrete_flag_unchanged(compiler):
+    from cfm.compilers.gcc import _resolve_flag_or_none
+    assert _resolve_flag_or_none("-flto") == "-flto"
+    assert _resolve_flag_or_none("-mprefer-vector-width=256") == "-mprefer-vector-width=256"
 
 
 def test_validate_flagset_flags_unknown_flag(compiler):
