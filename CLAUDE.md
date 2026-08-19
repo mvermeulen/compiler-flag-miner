@@ -250,6 +250,28 @@ Full branch/PR discipline, same shape as wspy's:
   `doc/DESIGN.md` §14's M2.5 item 1 and §15's wspy#227 entry described cfm computing these itself
   (a `wspy-summary --metric float` shell-out, explicitly labeled uncalibrated) — that plan predates
   this bump and needs updating to read the axes directly off `wspy-archetype`'s scorecard instead.
+- **`vectorization_density`/`allocation_pressure`/`core_utilization` still read `"unknown"` under cfm's
+  own `deep-cpu` profile today, confirmed live (2026-08-18) — a real, separate gap from wspy#270's
+  pass-selection bug, not fixed by the pin bump above.** `RunSignature` now carries dedicated
+  `vectorization_density`/`allocation_pressure` fields (`cfm/instrumentation/base.py`, populated in
+  `wspy.py`'s `characterize()`), so the plumbing to *use* these axes exists — but running the real
+  `deep-cpu` profile against a real workload (`WspyInstrumentation.characterize(..., profile="deep-cpu",
+  ...)`) still comes back `vectorization_density=unknown, allocation_pressure=unknown,
+  confidence=low, confidence_reasons=...missing-vectorization_density-data...`. Root cause:
+  `profiles/deep-cpu.conf`'s `counters` pass *does* include `float`/`fault_rate`'s source counter groups
+  in its `--passes=...` sweep, but — same as the `deep-cpu`/`amdtopdown` `wspy-store`-CSV-only trap
+  earlier in this list — that pass runs with no `--csv` ("matching the five passes it replaces", the
+  profile's own comment), so `wspy-store` never ingests it into `run_features` regardless of which pass
+  `wspy-archetype` ends up reading from. wspy#270's fix picks the *richest available* pass, but neither
+  of `deep-cpu`'s other two passes (`systemtime`, `amdtopdown`) collects `float`/`fault_rate` either, so
+  there is currently no `deep-cpu` pass with real data for these two axes to read from at all. Not a cfm
+  bug — a real gap in the `deep-cpu` profile definition itself (wspy-side: `counters` needs `--csv`
+  added, or a fourth pass needs adding) — worth filing upstream (same pattern as wspy#227/wspy#270)
+  before M2 starts relying on these axes being populated from a `deep-cpu` trial. Until then, treat
+  `config/gcc_flag_catalog.seed.json`'s new `vectorization-density-high`-gated entries
+  (`-mprefer-vector-width=256/512`) as correctly *keyed* but not yet *reachable* from cfm's own
+  characterization path — M2.5 item 2's `wspy-testpoint aggregate` reference-matrix read is the
+  nearer-term way to get a real value for them, not a `deep-cpu` fix.
 
 ## Build & test
 

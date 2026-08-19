@@ -198,7 +198,8 @@ cycle — validated ahead of time, not discovered by trial-and-error:
 |---|---|
 | `frontend-bound`, elevated `icache_miss_pct`                        | `-freorder-blocks-and-partition`, `-freorder-functions`, PGO (`-fprofile-use`), `-flto`, reduced `--param max-inline-insns-auto` (code-size pressure may be self-inflicted) |
 | `speculation-bound`, elevated `branch_mispredict_pct`                | PGO (branch probabilities beat static heuristics), `-mbranch-cost=N` tuning, *reverse* hypothesis: back off `-funroll-loops` if it's currently on (unrolling can hurt predictability on data-dependent branches) |
-| `memory-bound`, `memory_attribution=corroborated`, cache/TLB signal | `-fprefetch-loop-arrays` + `--param prefetch-latency=N`, vector-width tuning (`-mprefer-vector-width=256/512`), huge pages as a *system-level* companion action (flagged, not a compiler flag, but recorded alongside since it interacts with the same signal) |
+| `memory-bound`, `memory_attribution=corroborated`, cache/TLB signal | `-fprefetch-loop-arrays` + `--param prefetch-latency=N`, huge pages as a *system-level* companion action (flagged, not a compiler flag, but recorded alongside since it interacts with the same signal) |
+| `vectorization_density=high` (native `wspy-archetype` axis, wspy PR #269/wspy#227) | `-mprefer-vector-width=256/512` — re-keyed off this axis directly rather than `resource_dominance` (a memory-bound *integer* workload doesn't benefit from a wider vector width just because it's memory-bound; §4.3's "Generalizing the signature vocabulary" note and §14 M2.5 item 1) |
 | `memory-bound`, `uncorroborated` or `blocked`/`oversubscribed`       | **Do not chase compiler flags** — `wspy-archetype`'s own read says the CPU wasn't stalled by hardware; a real finding, but for the SPEC Runner/environment, not the flag search |
 | `compute-bound`/`retiring` high, narrow margin, few misses anywhere  | Diminishing-returns signal — low priority for aggressive flags; `-march=<detected-uarch>` (from wspy's own `cpu_info.c` vendor/model detection) for the last few percent, then stop |
 | Any signature, once base flags plateau                              | `-flto` (whole-program IPA) and PGO as compounding multipliers, tried *after* single-flag search converges (§6.3) — both are bigger, slower trials (LTO changes build time materially; PGO needs a training run) so they're deliberately late-stage, not part of the cheap screening pass |
@@ -645,7 +646,15 @@ compiler-flag-miner/
      and §4.3's table to reference these — e.g. re-key `-mprefer-vector-width=256/512` off
      `vectorization_density` instead of the current too-coarse `memory-bound-corroborated`/
      `compute-bound` pair. See CLAUDE.md's "Non-obvious traps" (the wspy#270-superseded entries) for the
-     confirming pin-bump detail.
+     confirming pin-bump detail. **Done** (`feature/vectorization-density-signal`): `RunSignature` now
+     carries dedicated `vectorization_density`/`allocation_pressure` fields, and
+     `-mprefer-vector-width=256/512` are re-keyed onto a new `vectorization-density-high`
+     `topdown_signals` entry. Live-confirmed the same session, though: neither field actually resolves
+     to a real value from cfm's own `deep-cpu` profile today — a separate, real `deep-cpu.conf` gap
+     (its `counters` pass carries `float`/`fault_rate` but with no `--csv`, so `wspy-store` never
+     ingests them), not fixed by the pin bump and not this item's own scope. See CLAUDE.md's matching
+     trap entry. So this item's plumbing is in place, but a real value for it is still blocked on
+     either a wspy-side `deep-cpu.conf` fix or item 2 below's reference-matrix read.
   2. **Split "characterization" (shape) from "calibration" (the actual number) — leverage the external
      reference-matrix corpus (`mvermeulen.org/workload`) for the former, always measure the latter
      locally.** Confirmed live (2026-08-09) exactly where deep-cpu's cost actually goes, from a real

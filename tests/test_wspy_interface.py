@@ -155,6 +155,8 @@ def test_archetype_scorecard_has_the_keys_cfm_parses(real_signature):
     )
     assert real_signature.metrics.get("confidence") == "insufficient-data"
     assert "memory_attribution" in real_signature.metrics
+    assert "vectorization_density" in real_signature.metrics
+    assert "allocation_pressure" in real_signature.metrics
 
 
 def test_characterize_succeeds_on_deep_cpu_with_a_populated_scorecard(tmp_path_factory, toy_binary):
@@ -185,6 +187,17 @@ def test_characterize_succeeds_on_deep_cpu_with_a_populated_scorecard(tmp_path_f
     hostname, _, run_id = signature.wspy_run_ref.partition(":")
     assert hostname == socket.gethostname()
     assert run_id  # non-empty, and (per the fix) not "multipass-run" itself
+
+    # vectorization_density/allocation_pressure (RunSignature's own new fields, doc/DESIGN.md sec. 14
+    # M2.5 item 1) are dedicated fields now, but confirmed live (2026-08-18) still "unknown" here --
+    # NOT a plumbing gap in this project, a real one in deep-cpu.conf itself: its "counters" pass
+    # carries float/fault_rate in its --passes sweep but with no --csv (same non-CSV trap as the
+    # amdtopdown-vs-counters pass-selection issue above), so wspy-store never ingests them into
+    # run_features regardless of which pass wspy-archetype reads from. See CLAUDE.md's "Non-obvious
+    # traps" for the full writeup. This assertion exists so a future deep-cpu.conf fix (upstream) makes
+    # this test fail loudly with a real value instead of the gap silently going unnoticed.
+    assert signature.vectorization_density == "unknown"
+    assert signature.allocation_pressure == "unknown"
 
 
 def test_wspy_archetype_reports_a_populated_scorecard_with_topdown_data(tmp_path_factory, toy_binary):

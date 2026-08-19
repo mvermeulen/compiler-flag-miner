@@ -110,8 +110,8 @@
       "risk": "safe",
       "requires": [],
       "conflicts": ["-mprefer-vector-width=512"],
-      "notes": "x86-64 only. Wider vectors move more data per cache-line touch but can also increase power/frequency throttling risk on some parts -- cross-check against wspy's --power reading if accepted.",
-      "topdown_signals": ["memory-bound-corroborated", "compute-bound"]
+      "notes": "x86-64 only. Wider vectors move more data per cache-line touch but can also increase power/frequency throttling risk on some parts -- cross-check against wspy's --power reading if accepted. Gated on real vector/FP work existing to widen (vectorization-density-high), not just memory-bound -- a memory-bound integer workload (hash tables, graph traversal) doesn't benefit from a wider vector width just because it's memory-bound (doc/DESIGN.md sec 4.3/14 M2.5 item 1). As of the 2026-08-18 wspy pin bump, this axis reads 'unknown' under cfm's own deep-cpu profile today (see RunSignature's vectorization_density docstring) -- a real value needs either a wspy-side deep-cpu.conf fix or M2.5 item 2's reference-matrix characterization path.",
+      "topdown_signals": ["vectorization-density-high"]
     },
     {
       "flag": "-mprefer-vector-width=512",
@@ -120,8 +120,8 @@
       "risk": "safe",
       "requires": [],
       "conflicts": ["-mprefer-vector-width=256"],
-      "notes": "Only meaningful if the detected target microarch has AVX-512; the Compiler Knowledge agent must check this against wspy's cpu_info-derived host detection before proposing it.",
-      "topdown_signals": ["memory-bound-corroborated", "compute-bound"]
+      "notes": "Only meaningful if the detected target microarch has AVX-512; the Compiler Knowledge agent must check this against wspy's cpu_info-derived host detection before proposing it. Gated on real vector/FP work existing to widen (vectorization-density-high), not just memory-bound -- see the =256 entry's note for why and its caveat on today's deep-cpu coverage gap.",
+      "topdown_signals": ["vectorization-density-high"]
     },
     {
       "flag": "-march=<detected-uarch>",
