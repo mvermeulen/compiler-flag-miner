@@ -72,6 +72,19 @@ SCREENING_PRUNE_THRESHOLD_PCT = 5.0
 # budget" (doc/DESIGN.md sec. 6 Phase 5).
 MAX_PAIR_TOURNAMENT_TRIALS = 10
 
+# doc/DESIGN.md sec. 14 M2.5 item 3: Phase 4/5's accept bar requires not just a
+# statistically non-overlapping CI but a *practically* significant delta -- a
+# technically-non-overlapping-but-tiny gain (the "0.8% up or 0.8% down" case)
+# defaults to reject, not to spending more reps trying to resolve it
+# (deliberately asymmetric with the reject path -- a false accept permanently
+# pollutes the peak config and the cross-benchmark knowledge table, a false
+# reject just misses a small real win). DESIGN.md's principled source for this
+# threshold is the reference-matrix corpus's own historical stddev/cv_percent,
+# once available for a given benchmark; that's not wired in yet (M2.5 item 2
+# shipped without the reference-matrix integration), so this is the documented
+# fixed fallback instead.
+MIN_PRACTICAL_SIGNIFICANCE_PCT = 1.0
+
 
 @dataclass
 class BaselineResult:
@@ -206,18 +219,90 @@ def run_baseline(
     )
 
 
+# resource_dominance-named topdown_signals -- config/gcc_flag_catalog.seed.json's
+# real vocabulary, confirmed against the seed catalog -- checked directly against
+# baseline.resource_dominance below. "memory-bound-corroborated" and
+# "vectorization-density-high" are handled as their own special cases (they key
+# off memory_attribution/vectorization_density, not resource_dominance alone);
+# "retiring-high-narrow-margin" is deliberately never excluded (see
+# _signal_is_implausible()'s docstring).
+_RESOURCE_DOMINANCE_SIGNALS = frozenset({
+    "frontend-bound", "speculation-bound", "compute-bound", "backend-bound",
+})
+
+
+def _signal_is_implausible(signal: str, baseline: BaselineResult) -> bool:
+    """doc/DESIGN.md sec. 14 M2.5 item 3: is ``signal`` (one entry of a
+    ``FlagCandidate.topdown_signals`` list) confidently contradicted by
+    ``baseline``'s characterized shape? Only ever returns True on a *confident*
+    mismatch -- absence of information (``None``/``"unknown"``) never counts as
+    implausible, matching "de-prioritize/exclude a category whose relevant signal
+    is essentially *absent*," not "exclude whenever unsure." ``"retiring-high-
+    narrow-margin"`` is never flagged here -- doc/DESIGN.md sec. 4.3's own table
+    calls it a "low priority, not exclude" signal (diminishing returns, not
+    implausibility), and there's no "margin" field to judge it by; a real
+    verdict on it belongs to M2's own resource_dominance-based ranking, not a
+    guess here.
+    """
+    if signal == "vectorization-density-high":
+        return baseline.vectorization_density == "low"
+    if signal == "memory-bound-corroborated":
+        if baseline.resource_dominance is not None and baseline.resource_dominance != "memory-bound":
+            return True
+        return False  # memory_attribution isn't tracked on BaselineResult (M1 scope)
+    if signal in _RESOURCE_DOMINANCE_SIGNALS:
+        return baseline.resource_dominance is not None and baseline.resource_dominance != signal
+    return False
+
+
+def _filter_implausible_candidates(
+    candidates: list[FlagCandidate], baseline: BaselineResult,
+) -> list[FlagCandidate]:
+    """doc/DESIGN.md sec. 14 M2.5 item 3's "first, cheapest line of defense":
+    drop a candidate only when *every one* of its ``topdown_signals`` is
+    confidently contradicted by ``baseline``'s characterized shape (a candidate
+    with no signals, or with at least one plausible/unknown signal among several,
+    is always kept -- excluding only requires the whole claim to be implausible,
+    not any part of it). Logged to stderr, not persisted -- there's no trial row
+    to attach a hypothesis to for a candidate that never ran.
+    """
+    survivors = []
+    for candidate in candidates:
+        if candidate.topdown_signals and all(
+            _signal_is_implausible(s, baseline) for s in candidate.topdown_signals
+        ):
+            print(
+                f"info: excluding {candidate.flag!r} from Phase 2 candidates -- "
+                f"topdown_signals {candidate.topdown_signals} implausible given baseline shape "
+                f"(resource_dominance={baseline.resource_dominance!r}, "
+                f"vectorization_density={baseline.vectorization_density!r})"
+            )
+            continue
+        survivors.append(candidate)
+    return survivors
+
+
 def generate_candidates(
     cfg: CfmConfig, *, benchmark: str, baseline: BaselineResult,
     compiler: Optional[GccCompiler] = None,
 ) -> list[FlagCandidate]:
-    """doc/DESIGN.md sec. 6 Phase 2, M1 scope: every catalog entry applicable to
-    this benchmark's language(s), unranked and unfiltered by signature -- "static
-    catalog priors only" (doc/DESIGN.md sec. 14). M2 replaces this with real
-    resource_dominance-based filtering/ranking (compilers/base.py's docstring).
+    """doc/DESIGN.md sec. 6 Phase 2. M1 scope: every catalog entry applicable to
+    this benchmark's language(s), unranked by signature -- "static catalog
+    priors only" (doc/DESIGN.md sec. 14); ``compilers/gcc.py``'s own
+    ``candidate_flags_for_signature()`` still ignores ``signature`` entirely,
+    per that method's own M1-vs-M2 doc boundary. M2.5 item 3 adds one cheap
+    filtering pass on top of that M1 catalog read, though:
+    ``_filter_implausible_candidates()`` drops only a candidate whose every
+    ``topdown_signals`` entry is confidently contradicted by the baseline's
+    already-characterized shape -- "never spend a trial on a mechanically-
+    implausible flag" -- distinct from M2's still-pending real
+    resource_dominance-based *ranking* (compilers/base.py's docstring), which
+    this doesn't attempt.
     """
     compiler = compiler or GccCompiler()
     languages = benchmark_languages(cfg.spec_dir, benchmark)
-    return compiler.candidate_flags_for_signature(baseline.resource_dominance, languages)
+    candidates = compiler.candidate_flags_for_signature(baseline.resource_dominance, languages)
+    return _filter_implausible_candidates(candidates, baseline)
 
 
 def screen_candidates(
@@ -347,7 +432,14 @@ def _confirm_flagset(
     else:
         ci = confidence_interval(ratios)
         delta_pct = (ci.mean - compare_ci.mean) / compare_ci.mean * 100.0
-        accepted = non_overlapping(compare_ci, ci) and ci.mean > compare_ci.mean
+        # doc/DESIGN.md sec. 14 M2.5 item 3: statistical significance (non-
+        # overlapping CI) alone isn't enough -- also require practical
+        # significance (delta_pct clearing MIN_PRACTICAL_SIGNIFICANCE_PCT),
+        # subsuming the old "ci.mean > compare_ci.mean" check (a positive delta
+        # above a positive threshold is already a higher mean). A technically-
+        # non-overlapping-but-tiny delta defaults to reject -- deliberately
+        # asymmetric, no escalation attempted for a flag that misses this bar.
+        accepted = non_overlapping(compare_ci, ci) and delta_pct >= MIN_PRACTICAL_SIGNIFICANCE_PCT
         reason = (
             f"{phase} mean {ci.mean:.6g} (n={ci.n}, 95% CI [{ci.low:.6g}, {ci.high:.6g}]) vs "
             f"comparison mean {compare_ci.mean:.6g} (95% CI [{compare_ci.low:.6g}, "
@@ -414,9 +506,10 @@ def confirm_candidates(
     """doc/DESIGN.md sec. 6 Phase 4: each Phase 3 survivor re-run at
     ``CONFIRMATION_REPETITIONS``, ``CALIBRATION_PROFILE`` (``quick`` -- sec. 14
     M2.5 item 2, shape doesn't need re-deriving per candidate), compared against
-    the *baseline*'s CI -- accept iff non-overlapping and better. ``screened`` is
-    Phase 3's full output list (not pre-filtered) so a caller can just chain
-    ``screen_candidates()``'s return value straight in.
+    the *baseline*'s CI -- accept iff non-overlapping *and* practically
+    significant (sec. 14 M2.5 item 3's ``MIN_PRACTICAL_SIGNIFICANCE_PCT``).
+    ``screened`` is Phase 3's full output list (not pre-filtered) so a caller can
+    just chain ``screen_candidates()``'s return value straight in.
     """
     return [
         _confirm_flagset(

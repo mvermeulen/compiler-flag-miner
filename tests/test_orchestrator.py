@@ -20,9 +20,11 @@ from cfm.config import CfmConfig
 from cfm.instrumentation.base import InstrumentationBackend, RunSignature
 from cfm.orchestrator import (
     MAX_PAIR_TOURNAMENT_TRIALS,
+    MIN_PRACTICAL_SIGNIFICANCE_PCT,
     BaselineResult,
     ConfirmationOutcome,
     ScreeningOutcome,
+    _filter_implausible_candidates,
     confirm_candidates,
     generate_candidates,
     greedy_combine,
@@ -262,7 +264,7 @@ def _write_object_pm(spec_dir, bench, benchlang):
     object_pm.write_text(f"$benchlang = '{benchlang}';\n")
 
 
-def test_generate_candidates_filters_by_language_and_ignores_signature(tmp_path):
+def test_generate_candidates_filters_by_language_regardless_of_shape(tmp_path):
     cfg = _cfg(tmp_path)
     _write_object_pm(Path(cfg.spec_dir), "fake_r", "C")
 
@@ -278,8 +280,10 @@ def test_generate_candidates_filters_by_language_and_ignores_signature(tmp_path)
     }))
     compiler = GccCompiler(catalog_path=catalog_path)
 
-    # Same call, two different (fabricated) baseline signatures -- M1 must ignore
-    # resource_dominance entirely and return the same result either way.
+    # Same call, two different (fabricated) baseline signatures -- neither catalog
+    # entry carries any topdown_signals, so M2.5 item 3's shape-based filtering
+    # (tested separately below) never applies here regardless of shape; this test
+    # is purely about compilers/gcc.py's own language filtering.
     baseline_a = _baseline()
     baseline_a.resource_dominance = "memory-bound"
     baseline_b = _baseline()
@@ -290,6 +294,80 @@ def test_generate_candidates_filters_by_language_and_ignores_signature(tmp_path)
 
     assert {c.flag for c in candidates_a} == {"-c-flag"}
     assert {c.flag for c in candidates_a} == {c.flag for c in candidates_b}
+
+
+# -- _filter_implausible_candidates (M2.5 item 3) --------------------------------
+
+def _signaled_candidate(flag, topdown_signals):
+    return FlagCandidate(
+        flag=flag, category="misc", risk="safe", languages=["c"], topdown_signals=topdown_signals,
+    )
+
+
+@pytest.mark.parametrize("resource_dominance,expect_excluded", [
+    ("compute-bound", True),  # confidently contradicted -- excluded
+    ("backend-bound", False),  # matches the candidate's own signal -- kept
+    (None, False),  # unknown -- absence of information never excludes
+])
+def test_filter_excludes_resource_dominance_signal_only_on_confident_mismatch(
+    resource_dominance, expect_excluded,
+):
+    baseline = _baseline(resource_dominance=resource_dominance)
+    candidates = [_signaled_candidate("-flag", ["backend-bound"])]
+    survivors = _filter_implausible_candidates(candidates, baseline)
+    assert (survivors == []) is expect_excluded
+
+
+def test_filter_excludes_vectorization_density_high_only_when_confidently_low():
+    excluded = _filter_implausible_candidates(
+        [_signaled_candidate("-vec", ["vectorization-density-high"])],
+        _baseline(vectorization_density="low"),
+    )
+    kept_unknown = _filter_implausible_candidates(
+        [_signaled_candidate("-vec", ["vectorization-density-high"])],
+        _baseline(vectorization_density=None),
+    )
+    kept_high = _filter_implausible_candidates(
+        [_signaled_candidate("-vec", ["vectorization-density-high"])],
+        _baseline(vectorization_density="high"),
+    )
+    assert excluded == []
+    assert [c.flag for c in kept_unknown] == ["-vec"]
+    assert [c.flag for c in kept_high] == ["-vec"]
+
+
+def test_filter_excludes_memory_bound_corroborated_when_resource_dominance_differs():
+    baseline = _baseline(resource_dominance="compute-bound")
+    survivors = _filter_implausible_candidates(
+        [_signaled_candidate("-prefetch", ["memory-bound-corroborated"])], baseline,
+    )
+    assert survivors == []
+
+
+def test_filter_never_excludes_retiring_high_narrow_margin():
+    baseline = _baseline(resource_dominance="memory-bound")
+    survivors = _filter_implausible_candidates(
+        [_signaled_candidate("-march", ["retiring-high-narrow-margin"])], baseline,
+    )
+    assert [c.flag for c in survivors] == ["-march"]
+
+
+def test_filter_keeps_multi_signal_candidate_if_any_signal_is_plausible():
+    # -fgraphite-identity's real catalog entry: ["backend-bound", "memory-bound-corroborated"].
+    # backend-bound is contradicted (resource_dominance is memory-bound), but
+    # memory-bound-corroborated isn't -- keep, since not *every* signal is implausible.
+    baseline = _baseline(resource_dominance="memory-bound")
+    survivors = _filter_implausible_candidates(
+        [_signaled_candidate("-fgraphite-identity", ["backend-bound", "memory-bound-corroborated"])],
+        baseline,
+    )
+    assert [c.flag for c in survivors] == ["-fgraphite-identity"]
+
+
+def test_filter_never_excludes_empty_signal_candidates():
+    baseline = _baseline(resource_dominance="compute-bound")
+    survivors = _filter_implausible_candidates([_signaled_candidate("-frecursive", [])], baseline)
+    assert [c.flag for c in survivors] == ["-frecursive"]
 
 
 # -- confirm_candidates -----------------------------------------------------------
@@ -336,6 +414,34 @@ def test_confirm_candidates_only_processes_survivors(tmp_path):
     )
     assert len(outcomes) == 1
     assert outcomes[0].flags == ["-good"]
+
+
+def test_confirm_candidates_rejects_non_overlapping_but_practically_insignificant_delta(tmp_path):
+    # doc/DESIGN.md sec. 14 M2.5 item 3: non-overlapping CI alone isn't enough --
+    # a zero-width CI at 100.5 (delta = +0.5%, under MIN_PRACTICAL_SIGNIFICANCE_PCT)
+    # is technically non-overlapping against a zero-width CI at 100.0, but still
+    # defaults to reject.
+    cfg = _cfg(tmp_path)
+    conn = db.connect(cfg.db_path)
+    exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
+    conn.close()
+
+    assert MIN_PRACTICAL_SIGNIFICANCE_PCT == 1.0  # sanity: the module default didn't drift silently
+    baseline = _baseline(mean_ratio=100.0)
+    backends = ScriptedBackends(ratio_sequences={("-marginal",): [100.5, 100.5, 100.5]})
+    outcomes = confirm_candidates(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline,
+        screened=[_screened("-marginal")], workload=backends, instrumentation=backends,
+    )
+    assert outcomes[0].accepted is False
+
+    # A delta comfortably over the threshold, same non-overlapping shape, accepts.
+    backends = ScriptedBackends(ratio_sequences={("-good",): [102.0, 102.0, 102.0]})
+    outcomes = confirm_candidates(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline,
+        screened=[_screened("-good")], workload=backends, instrumentation=backends,
+    )
+    assert outcomes[0].accepted is True
 
 
 def test_confirm_candidates_rejects_when_ci_overlaps_baseline(tmp_path):
