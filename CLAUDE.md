@@ -102,7 +102,9 @@ Full branch/PR discipline, same shape as wspy's:
   trimmed later.
 - **Mining jobs assume exclusive machine access.** Perf counters and SPEC's own run discipline both
   want the box to itself (`doc/DESIGN.md` §11, §5) — never launch a mining run on a shared/multi-user
-  host without explicit confirmation first.
+  host without explicit confirmation first, and never launch a second `cfm measure`/`cfm mine`
+  invocation while one is already running on this host (`cfm/lock.py` now enforces this mechanically
+  and will refuse the second one — see Non-obvious traps below for why it was added).
 - **Maintain the "Non-obvious traps" log below.** Same discipline as wspy's
   `doc/INVESTIGATION_ARCHIVE.md` "Non-obvious implementation traps" section — a real gotcha found
   during implementation gets written down here, flagged as required reading before touching related
@@ -288,6 +290,32 @@ Full branch/PR discipline, same shape as wspy's:
      `vectorization-density-high`-gated entries (`-mprefer-vector-width=256/512`) are now actually
      *reachable* from a real `deep-cpu` trial, not just correctly keyed. **PR #14 merged (`72065b6`,
      2026-08-19)** with this fix and the resulting doc updates.
+- **2026-08-20: two concurrent `cfm mine` invocations crashed the host — SPEC's `lock.CPU2026` is not a
+  mutex, and nothing in `cfm` itself stopped a second invocation from starting.** Two `cfm mine
+  706.stockfish_r` runs were launched ~13 seconds apart (`cfm.db` experiments 3 and 4, `started_at`
+  `06:57:45Z`/`06:57:58Z`). Both reached SPECrate's build+run fan-out around the same time — SPECrate
+  methodology runs many parallel copies of the benchmark binary (one per core-ish; `stockfish_base.`
+  measured 1.5-1.7GB RSS each here) — and the two runs' copies together exceeded the host's 91GB RAM.
+  `journalctl -b -1 -k` showed the OOM-killer invoked repeatedly for about 90 seconds, eventually
+  killing `systemd-journald` itself, consistent with the box becoming unresponsive enough to need a
+  hard reboot. `/home/mev/cpu2026/result/lock.CPU2026` looked like it might be a run mutex but is just
+  a run-ID counter (`cat` returns a bare integer, e.g. `092`) — it never blocked the second `runcpu`
+  invocation from starting. After reboot, `cfm.db`'s experiments 3/4 (and two older orphans from
+  2026-08-09) were left permanently `status='running'` with no `finished_at` — `cli.py`'s `mine`
+  handler only calls `db.finish_experiment()` *after* the whole try block succeeds, so any hard failure
+  (crash, or even a plain `RuntimeError` from inside the phases) leaves the row stuck; had to fix up by
+  hand with `db.finish_experiment(conn, experiment_id, status="failed")` after the fact — a
+  **known remaining gap**, not yet fixed: `cli.py`'s `mine` except-branch doesn't currently mark the
+  experiment `failed` on a caught `RuntimeError` either, only on a clean run. **Fixed via `cfm/lock.py`**:
+  a host-wide `fcntl.flock()`-based lock, held for the duration of any `cfm measure`/`cfm mine`
+  invocation, refusing (never queueing) a second concurrent one — deliberately not a hand-rolled PID
+  file with a staleness check, because the kernel releases an `flock` automatically when the holding
+  process's fd closes for *any* reason (normal exit, exception, or being OOM-killed), so a crashed job's
+  lock needs no manual cleanup — the exact failure mode this incident hit. Default lock path is
+  `<spec_dir>/.cfm-mining.lock` (host-wide, alongside the SPEC install, not repo-relative — see
+  `cfm/config.py`'s `lock_file` field), overridable via `--lock-file`/`CFM_LOCK_FILE` same as every
+  other `CfmConfig` path. doc/DESIGN.md §11 previously stated "this project adds no new
+  concurrency-control code" for exactly this class of thing — that line is now corrected there.
 
 ## Build & test
 
@@ -343,6 +371,7 @@ every trial along the way still landing in `cfm.db` regardless of phase or outco
 |---|---|
 | `cfm/util.py` | `parse_kv_lines()` — shared `key=value`-per-line parser for both wspy's trace-style CLI output and SPEC's `.rsf` format; `normalize_flag_base()`/`catalog_flag_base()` — shared flag-name normalization between `scripts/audit_flags_from_spec_results.py` and `compilers/gcc.py`. |
 | `cfm/config.py` | `CfmConfig.from_env()` — env-var-driven paths/hostname (`CFM_SPEC_DIR`, `CFM_WSPY_DIR`, ... — see the file for the full list and defaults), explicit kwargs > environment > built-in default, resolved at call time. |
+| `cfm/lock.py` | `host_lock()` — the host-wide `flock`-based mutex `cfm measure`/`cfm mine` hold for their entire invocation (doc/DESIGN.md §11's "cross-invocation exclusivity" bullet); raises `MiningLockHeld` immediately (never queues/waits) if another invocation already holds it. See Non-obvious traps below for why it's `flock`-based, not a PID file. |
 | `cfm/db.py` | Applies `schema/cfm_schema.sql` (idempotent) and provides typed `create_experiment`/`record_trial`/`update_trial_verdict`/`get_experiment`/`list_trials`/`list_trials_by_phase`/`finish_experiment`/`set_baseline_run_ref`/`record_hypothesis`/`upsert_knowledge` accessors. No ORM. |
 | `cfm/stats.py` | Confidence-interval statistics for Phase 4's confirmation stage — `confidence_interval()`/`non_overlapping()`, replicating `wspy-summary`'s own documented CI formula (mean, sample stddev, Student's t 95%) applied to `cfm.db`'s own `trials.ratio` values, since `wspy-summary` itself has no way to see SPEC's `ratio` field (doc/DESIGN.md §6 Phase 4). |
 | `cfm/compilers/base.py` | `CompilerBackend` interface + `FlagCandidate`/`ValidationResult` dataclasses (doc/DESIGN.md §4.3/§12). |
