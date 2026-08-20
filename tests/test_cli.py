@@ -45,7 +45,7 @@ def test_mine_reports_a_winning_flagset(tmp_path, monkeypatch, capsys):
     # is mocked, never actually created one) -- finish_experiment()'s UPDATE
     # affecting zero rows is harmless and not what these tests are checking.
 
-    exit_code = cli.main(["mine", "fake_r", "--db", str(tmp_path / "cfm.db")])
+    exit_code = cli.main(["mine", "fake_r", "--db", str(tmp_path / "cfm.db"), "--lock-file", str(tmp_path / "test.lock")])
     assert exit_code == 0
 
     summary = json.loads(capsys.readouterr().out)
@@ -75,7 +75,7 @@ def test_mine_max_trials_truncates_candidate_list_and_flags_budget_exhausted(tmp
 
     # --max-trials 5, 3 already spent on baseline -> only 2 of the 4 candidates
     # should reach screen_candidates().
-    exit_code = cli.main(["mine", "fake_r", "--max-trials", "5", "--db", str(tmp_path / "cfm.db")])
+    exit_code = cli.main(["mine", "fake_r", "--max-trials", "5", "--db", str(tmp_path / "cfm.db"), "--lock-file", str(tmp_path / "test.lock")])
     assert exit_code == 0
     assert seen["candidates_len"] == 2
 
@@ -86,7 +86,7 @@ def test_mine_propagates_a_runtime_error_cleanly(tmp_path, monkeypatch, capsys):
 
     monkeypatch.setattr(cli.orchestrator, "run_baseline", raise_it)
 
-    exit_code = cli.main(["mine", "fake_r", "--db", str(tmp_path / "cfm.db")])
+    exit_code = cli.main(["mine", "fake_r", "--db", str(tmp_path / "cfm.db"), "--lock-file", str(tmp_path / "test.lock")])
     assert exit_code == 1
     assert "no valid ratio" in capsys.readouterr().err
 
@@ -116,5 +116,5 @@ def test_mine_calls_finish_experiment_with_the_right_experiment_id_and_status(tm
         lambda *a, **k: CombinationResult(winning_flags=["-O3"], winning_ci=confidence_interval([100.0] * 3)),
     )
 
-    cli.main(["mine", "fake_r", "--db", str(tmp_path / "cfm.db")])
+    cli.main(["mine", "fake_r", "--db", str(tmp_path / "cfm.db"), "--lock-file", str(tmp_path / "test.lock")])
     assert calls == [(42, "converged")]
