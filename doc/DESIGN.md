@@ -617,16 +617,22 @@ compiler-flag-miner/
     captured `.rsf` excerpt caught it, now `tests/fixtures/706.stockfish_r.peak.sample.rsf`). The
     `ratio` field name itself was right the whole time; both bugs were structural, not a wrong guess.
   Single-pass profiles (`quick`) only; `deep-cpu`/multi-pass support is explicitly deferred, see §4.2.
-- **M1 — rule-based screening/confirmation loop (§6 Phases 1-5), no LLM. Built, landed as 6 small PRs;
-  real end-to-end run against this host's SPEC/wspy install still pending.** Static catalog priors
-  only; `cfm mine <benchmark>` wires all five phases together (`orchestrator.py`), backed by
-  `cfm/stats.py`'s CI logic for the accept/reject bar. Every phase function and the CLI's own
-  argument/summary-building logic is unit-tested against mocked `WorkloadBackend`/
-  `InstrumentationBackend` backends (103+ tests) plus the real, live-confirmed `deep-cpu` multi-pass
-  fix from M1's first PR (§4.2) -- but unlike M0, which earned "shipped and verified" only after an
-  actual `706.stockfish_r` run, M1's first fully-automated "peak beats base" result against real
-  SPEC/wspy hasn't happened yet. That's a manual, opt-in step (CLAUDE.md's exclusive-machine-access
-  rule) once actually run.
+- **M1 — rule-based screening/confirmation loop (§6 Phases 1-5), no LLM. Shipped and verified end to
+  end against a real SPEC run, 2026-08-20.** Static catalog priors only; `cfm mine <benchmark>` wires
+  all five phases together (`orchestrator.py`), backed by `cfm/stats.py`'s CI logic for the
+  accept/reject bar. Every phase function and the CLI's own argument/summary-building logic is
+  unit-tested against mocked `WorkloadBackend`/`InstrumentationBackend` backends, plus the real,
+  live-confirmed `deep-cpu` multi-pass fix from M1's first PR (§4.2) -- and, matching the bar M0 set
+  ("shipped and verified" only after a real run, never on unit tests alone), a real
+  `cfm mine 706.stockfish_r --max-trials 8` run: 2h18m wall-clock, all five phases completed cleanly,
+  correctly rejected all 4 screened candidates (each looked marginally better under cheap
+  single-iteration screening but measurably worse under 3-rep confirmation -- exactly the false-accept
+  case §15's asymmetric-bar decision is designed to catch), and live-confirmed
+  `_filter_implausible_candidates()` (M2.5 item 3) excluding 10 of 18 catalog flags against the
+  baseline's real characterized shape, not just mocks. Two real gaps surfaced and fixed along the way,
+  detailed in CLAUDE.md's Non-obvious traps log: a host-exclusivity lock (`cfm/lock.py`, after two
+  concurrent `cfm mine` invocations crashed the host once) and a fix so a crashed/failed run's
+  experiment row no longer gets stuck at `status='running'` forever.
 - **M2 — signature-aware candidate filtering.** Wire in `wspy-archetype`'s `resource_dominance`/
   `memory_attribution` to drive Compiler Knowledge agent candidate selection (the table in §4.3),
   instead of trying the whole catalog uniformly.
