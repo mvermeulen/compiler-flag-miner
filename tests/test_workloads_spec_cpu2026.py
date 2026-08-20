@@ -50,6 +50,10 @@ def test_run_command_shape(tmp_path):
     assert "--action=validate" in inner
     assert "--tune peak" in inner
     assert "--iterations 3" in inner
+    # Required, not optional -- the shipped gcc_O3.cfg's `reportable = 1` default
+    # rejects any single-benchmark selection without this, regardless of
+    # --iterations (confirmed live against a real runcpu invocation).
+    assert "--noreportable" in inner
     assert "706.stockfish_r" in inner
 
 
