@@ -100,9 +100,22 @@ class SpecCpu2026Workload(WorkloadBackend):
         # is the command an InstrumentationBackend wraps in
         # `wspy-run ... -- <this>`; see cfm/workloads/base.py's WorkloadBackend
         # docstring for why this class never launches it directly.
+        #
+        # --noreportable is required, not optional: this shipped SPEC install's
+        # gcc_O3.cfg sets `reportable = 1` (its own default per config.html), and
+        # --action=validate/report/makebundle with reportable on requires every
+        # benchmark in the full SPECrate2026_int benchset to be present
+        # (parse.pl's FULL_BSET_CHECK) -- a single-benchmark mining trial never
+        # satisfies that, regardless of --iterations. Confirmed live: without this
+        # flag, runcpu fails immediately (0s elapsed) with "ERROR: A reportable
+        # run was requested; individual benchmark selection is not allowed,"
+        # before ever building/running anything -- a real bug caught by the first
+        # actual `cfm mine` run against this host's SPEC install (doc/DESIGN.md
+        # sec. 14's M1 status), not by inspection or the earlier M0 manual
+        # verification (which evidently didn't go through this exact code path).
         return self._shrc_command(
             f"runcpu --config {config_path.stem} --action=validate --tune {tune} "
-            f"--iterations {iterations} {bench}"
+            f"--iterations {iterations} --noreportable {bench}"
         )
 
     def parse_result(self, bench: str, tune: str, raw_output: str) -> RunResult:
