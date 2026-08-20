@@ -2,17 +2,28 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working in this repository.
 
-**Status: M0 shipped; M1 built, real end-to-end run still pending** (doc/DESIGN.md §14) — the
-mechanical pipeline (`cfm measure`) is unit-tested and has been verified end to end against this
-host's real SPEC CPU2026/wspy install (a real `--action=validate` run, single-pass `quick` profile).
-M1's rule-based screening/confirmation loop (§6 Phases 1-5, `cfm mine`) landed as a series of small
-merged PRs — every phase function and the CLI wiring itself are unit-tested against mocked backends,
-but **no real `cfm mine` run against actual SPEC/wspy has happened yet** (unlike M0's `cfm measure`,
-which earned "shipped and verified" only after a real run) — that's a manual, opt-in confirmation
-step per the exclusive-machine-access rule below, not yet done. Compiler-knowledge catalog wiring
-beyond M1's static-priors scope, cross-benchmark knowledge transfer, and the LLM driver are still
-ahead — M2-M3 (doc/DESIGN.md §13's layout table marks exactly what exists vs. what's still pending,
-module by module).
+**Status: M0 and M1 both shipped and verified end to end against real SPEC CPU2026/wspy** (doc/DESIGN.md
+§14). M0's mechanical pipeline (`cfm measure`) was verified first (a real `--action=validate` run,
+single-pass `quick` profile). M1's rule-based screening/confirmation loop (§6 Phases 1-5, `cfm mine`)
+landed as a series of small merged PRs, unit-tested against mocked backends throughout — but per this
+project's own "shipped and verified" bar (never claimed on unit tests alone), it stayed "built, not yet
+run for real" until **2026-08-20's first real `cfm mine 706.stockfish_r --max-trials 8` run** (experiment
+5 in `cfm.db`): a clean 2h18m end-to-end pass through all five phases with no crashes, correctly
+determined `-O3` alone was already the peak config for this benchmark (all 4 screened candidates —
+`-fprefetch-loop-arrays`, `-mprefer-vector-width=256/512`, `-march=native` — looked marginally better in
+cheap single-iteration screening but got measurably *worse* under 3-rep confirmation, correctly
+rejected), and along the way live-confirmed M2.5's `_filter_implausible_candidates()` firing for real
+(10 of 18 catalog flags excluded as implausible against the baseline's real characterized
+`memory-bound`/`moderate`-vectorization-density shape, not just against mocks). That run also surfaced
+and fixed two real gaps, both in `CLAUDE.md`'s Non-obvious traps log below: two concurrent `cfm mine`
+invocations had crashed the host once already (fixed via `cfm/lock.py`'s host-exclusivity guard), and a
+crashed/failed run used to leave its `cfm.db` experiment row stuck at `status='running'` forever (fixed
+in `run_one_trial()`/`run_baseline()`). Compiler-knowledge catalog wiring beyond M1/M2.5's scope
+(a full signature-aware *ranking* pass, not just include/exclude — M2's "left to M2's ranking pass" note,
+§14), the reference-matrix-corpus half of M2.5 item 2 (deliberately deferred, see that item's own
+"Deliberately not implemented here" note), cross-benchmark knowledge transfer, and the LLM driver are
+still ahead — M2/M3/M4 (doc/DESIGN.md §13's layout table marks exactly what exists vs. what's still
+pending, module by module).
 
 ## Documentation map
 
