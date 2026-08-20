@@ -304,9 +304,8 @@ Full branch/PR discipline, same shape as wspy's:
   2026-08-09) were left permanently `status='running'` with no `finished_at` — `cli.py`'s `mine`
   handler only calls `db.finish_experiment()` *after* the whole try block succeeds, so any hard failure
   (crash, or even a plain `RuntimeError` from inside the phases) leaves the row stuck; had to fix up by
-  hand with `db.finish_experiment(conn, experiment_id, status="failed")` after the fact — a
-  **known remaining gap**, not yet fixed: `cli.py`'s `mine` except-branch doesn't currently mark the
-  experiment `failed` on a caught `RuntimeError` either, only on a clean run. **Fixed via `cfm/lock.py`**:
+  hand with `db.finish_experiment(conn, experiment_id, status="failed")` after the fact. **Fixed via
+  `cfm/lock.py`**:
   a host-wide `fcntl.flock()`-based lock, held for the duration of any `cfm measure`/`cfm mine`
   invocation, refusing (never queueing) a second concurrent one — deliberately not a hand-rolled PID
   file with a staleness check, because the kernel releases an `flock` automatically when the holding
@@ -316,6 +315,18 @@ Full branch/PR discipline, same shape as wspy's:
   `cfm/config.py`'s `lock_file` field), overridable via `--lock-file`/`CFM_LOCK_FILE` same as every
   other `CfmConfig` path. doc/DESIGN.md §11 previously stated "this project adds no new
   concurrency-control code" for exactly this class of thing — that line is now corrected there.
+  **Resolved 2026-08-20 (same day, follow-up fix): the stuck-at-`running` bookkeeping gap itself.**
+  `cfm/agents/spec_agent.py`'s `run_one_trial()` now wraps its body (after `experiment_id` is known) in
+  a `try/except Exception` that calls `db.finish_experiment(conn, experiment_id, status="failed")`
+  before re-raising — every orchestrator phase (screen/confirm/combine) funnels through this one
+  function with no per-candidate catch of its own, so an unhandled exception from *any* of them was
+  always going to abort the whole `cfm mine` run regardless; this just makes sure `cfm.db` records that
+  instead of leaving the row stuck. One case doesn't route through `run_one_trial`'s own try/except,
+  though: `orchestrator.run_baseline()`'s "every calibration repetition returned no usable ratio" check
+  runs *after* those calls all returned normally (no exception, just no ratio), so it has its own
+  matching `finish_experiment(..., status="failed")` immediately before its `raise RuntimeError(...)`.
+  Covered by `tests/test_agents_spec_agent.py::test_run_one_trial_marks_experiment_failed_on_unexpected_exception`
+  and an assertion added to `tests/test_orchestrator.py::test_run_baseline_raises_when_every_repetition_fails_to_build`.
 
 ## Build & test
 

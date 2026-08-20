@@ -163,6 +163,20 @@ def test_run_baseline_raises_when_every_repetition_fails_to_build(tmp_path):
     with pytest.raises(RuntimeError, match="fake_r"):
         run_baseline(cfg, benchmark="fake_r", base_flags=["-O3"], workload=backends, instrumentation=backends)
 
+    # The experiment characterize_baseline() already created must not be left
+    # stuck at status='running' -- this is exactly the gap CLAUDE.md's
+    # Non-obvious traps log (2026-08-20 entry) flagged and cfm/orchestrator.py
+    # now closes.
+    conn = db.connect(cfg.db_path)
+    try:
+        cur = conn.execute(
+            "SELECT status FROM experiments WHERE benchmark=? ORDER BY id DESC LIMIT 1",
+            ("fake_r",),
+        )
+        assert cur.fetchone()[0] == "failed"
+    finally:
+        conn.close()
+
 
 # -- screen_candidates ----------------------------------------------------------
 

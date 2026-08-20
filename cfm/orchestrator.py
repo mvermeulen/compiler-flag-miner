@@ -192,6 +192,16 @@ def run_baseline(
             wspy_run_refs.append(result["wspy_run_ref"])
 
     if not ratios:
+        # Every individual run_one_trial() call above returned normally (no
+        # exception -- spec_agent.py's own except-and-mark-failed doesn't apply
+        # here), just with no usable ratio; this experiment can't proceed as a
+        # baseline, so mark it failed ourselves rather than leaving it stuck at
+        # `running` (CLAUDE.md's Non-obvious traps log, 2026-08-20 entry).
+        conn = db.connect(cfg.db_path)
+        try:
+            db.finish_experiment(conn, experiment_id, status="failed")
+        finally:
+            conn.close()
         raise RuntimeError(
             f"baseline for {benchmark!r} produced no valid ratio across "
             f"{CONFIRMATION_REPETITIONS} calibration repetitions -- see trials "
