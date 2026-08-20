@@ -13,6 +13,7 @@ from . import db, orchestrator
 from .agents.spec_agent import run_one_trial
 from .compilers.gcc import GccCompiler
 from .config import CfmConfig
+from .lock import host_lock
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -46,6 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     measure.add_argument("--output-root", default=None)
     measure.add_argument("--db", dest="db_path", default=None)
     measure.add_argument("--wspy-profile", default=None)
+    measure.add_argument("--lock-file", default=None)
 
     mine = sub.add_parser(
         "mine",
@@ -70,6 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
     mine.add_argument("--wspy-dir", default=None)
     mine.add_argument("--output-root", default=None)
     mine.add_argument("--db", dest="db_path", default=None)
+    mine.add_argument("--lock-file", default=None)
 
     init_db = sub.add_parser("init-db", help="create/upgrade cfm.db at the configured path")
     init_db.add_argument("--db", dest="db_path", default=None)
@@ -90,12 +93,14 @@ def main(argv=None) -> int:
         cfg = CfmConfig.from_env(
             spec_dir=args.spec_dir, spec_config=args.spec_config, wspy_dir=args.wspy_dir,
             output_root=args.output_root, db_path=args.db_path, wspy_profile=args.wspy_profile,
+            lock_file=args.lock_file,
         )
         try:
-            result = run_one_trial(
-                cfg, benchmark=args.benchmark, flags=args.flags.split(),
-                tune=args.tune, iterations=args.iterations,
-            )
+            with host_lock(cfg, command=f"cfm measure {args.benchmark}"):
+                result = run_one_trial(
+                    cfg, benchmark=args.benchmark, flags=args.flags.split(),
+                    tune=args.tune, iterations=args.iterations,
+                )
         except RuntimeError as exc:
             print(f"cfm measure: {exc}", file=sys.stderr)
             return 1
@@ -105,36 +110,37 @@ def main(argv=None) -> int:
     if args.command == "mine":
         cfg = CfmConfig.from_env(
             spec_dir=args.spec_dir, spec_config=args.spec_config, wspy_dir=args.wspy_dir,
-            output_root=args.output_root, db_path=args.db_path,
+            output_root=args.output_root, db_path=args.db_path, lock_file=args.lock_file,
         )
         compiler = GccCompiler(catalog_path=args.catalog) if args.catalog else GccCompiler()
         base_flags = args.base_flags.split()
 
         try:
-            baseline = orchestrator.run_baseline(cfg, benchmark=args.benchmark, base_flags=base_flags)
+            with host_lock(cfg, command=f"cfm mine {args.benchmark}"):
+                baseline = orchestrator.run_baseline(cfg, benchmark=args.benchmark, base_flags=base_flags)
 
-            candidates = orchestrator.generate_candidates(
-                cfg, benchmark=args.benchmark, baseline=baseline, compiler=compiler,
-            )
-            budget_exhausted = False
-            if args.max_trials is not None:
-                remaining = max(args.max_trials - len(baseline.trial_ids), 0)
-                if len(candidates) > remaining:
-                    budget_exhausted = True
-                candidates = candidates[:remaining]
+                candidates = orchestrator.generate_candidates(
+                    cfg, benchmark=args.benchmark, baseline=baseline, compiler=compiler,
+                )
+                budget_exhausted = False
+                if args.max_trials is not None:
+                    remaining = max(args.max_trials - len(baseline.trial_ids), 0)
+                    if len(candidates) > remaining:
+                        budget_exhausted = True
+                    candidates = candidates[:remaining]
 
-            screened = orchestrator.screen_candidates(
-                cfg, experiment_id=baseline.experiment_id, benchmark=args.benchmark,
-                baseline=baseline, candidates=candidates,
-            )
-            confirmed = orchestrator.confirm_candidates(
-                cfg, experiment_id=baseline.experiment_id, benchmark=args.benchmark,
-                baseline=baseline, screened=screened,
-            )
-            combination = orchestrator.greedy_combine(
-                cfg, experiment_id=baseline.experiment_id, benchmark=args.benchmark,
-                baseline=baseline, confirmed=confirmed,
-            )
+                screened = orchestrator.screen_candidates(
+                    cfg, experiment_id=baseline.experiment_id, benchmark=args.benchmark,
+                    baseline=baseline, candidates=candidates,
+                )
+                confirmed = orchestrator.confirm_candidates(
+                    cfg, experiment_id=baseline.experiment_id, benchmark=args.benchmark,
+                    baseline=baseline, screened=screened,
+                )
+                combination = orchestrator.greedy_combine(
+                    cfg, experiment_id=baseline.experiment_id, benchmark=args.benchmark,
+                    baseline=baseline, confirmed=confirmed,
+                )
         except RuntimeError as exc:
             print(f"cfm mine: {exc}", file=sys.stderr)
             return 1

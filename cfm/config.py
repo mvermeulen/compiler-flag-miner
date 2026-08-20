@@ -42,6 +42,7 @@ class CfmConfig:
     db_path: Path
     wspy_profile: str
     hostname: str
+    lock_file: Path
 
     @classmethod
     def from_env(
@@ -54,6 +55,7 @@ class CfmConfig:
         db_path: Optional[str] = None,
         wspy_profile: Optional[str] = None,
         hostname: Optional[str] = None,
+        lock_file: Optional[str] = None,
     ) -> "CfmConfig":
         """Resolve config: explicit keyword argument (e.g. from argparse) wins over
         the environment; the environment wins over the built-in default. Read
@@ -62,12 +64,23 @@ class CfmConfig:
         effect -- a module-level ``os.environ.get(...)`` default would freeze at
         import time instead and silently ignore a later ``os.environ`` change.
         """
+        resolved_spec_dir = (
+            Path(spec_dir) if spec_dir else _env_path("CFM_SPEC_DIR", Path.home() / "cpu2026")
+        )
         return cls(
-            spec_dir=Path(spec_dir) if spec_dir else _env_path("CFM_SPEC_DIR", Path.home() / "cpu2026"),
+            spec_dir=resolved_spec_dir,
             spec_config=spec_config or _env_str("CFM_SPEC_CONFIG", "gcc_O3.cfg"),
             wspy_dir=Path(wspy_dir) if wspy_dir else _env_path("CFM_WSPY_DIR", _VENDORED_WSPY_DIR),
             output_root=Path(output_root) if output_root else _env_path("CFM_OUTPUT_ROOT", Path("results")),
             db_path=Path(db_path) if db_path else _env_path("CFM_DB", Path("cfm.db")),
             wspy_profile=wspy_profile or _env_str("CFM_WSPY_PROFILE", "quick"),
             hostname=hostname or socket.gethostname(),
+            # Host-wide, not repo-relative: the resource this guards (perf counters,
+            # SPEC's own run discipline) is the whole host, not this clone -- lives
+            # alongside the SPEC install by default so it's shared across clones/
+            # worktrees on the same box. See cfm/lock.py.
+            lock_file=(
+                Path(lock_file) if lock_file
+                else _env_path("CFM_LOCK_FILE", resolved_spec_dir / ".cfm-mining.lock")
+            ),
         )

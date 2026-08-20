@@ -502,9 +502,16 @@ prior knowledge-base entries were reused vs. newly discovered here.
   fine."
 - **Hard budget ceilings** (trial count, wall-clock) enforced by the orchestrator, independent of LLM
   opinion (§9 job 3 is advisory only, per principle 1).
-- **Serial execution**: one trial's build+run+measure at a time, via `wspy-queue`, since perf counters
-  and SPEC's own run assumptions both want exclusive machine use — this project adds no new
-  concurrency-control code.
+- **Serial execution within a run**: one trial's build+run+measure at a time, via `wspy-queue`, since
+  perf counters and SPEC's own run assumptions both want exclusive machine use.
+- **Cross-invocation exclusivity: `cfm/lock.py`'s host-wide `flock` lock**, held for the duration of
+  any `cfm measure`/`cfm mine` invocation, refusing (not queueing) a second concurrent one on the same
+  host. This reverses this section's earlier stance ("this project adds no new concurrency-control
+  code") after a real incident (CLAUDE.md's "Non-obvious traps" log, 2026-08-20): two `cfm mine`
+  invocations launched ~13s apart both reached SPECrate's per-copy fan-out around the same time,
+  saturating the host's RAM and forcing a hard reboot — `wspy-queue`'s serialization (above) only
+  covers trials *within* one orchestrator process, never stopped a second process from starting in the
+  first place, and SPEC's own `lock.CPU2026` file is just a run-ID counter, not a mutex.
 - **Everything reproducible**: every trial's rendered SPEC config, wspy manifest, and run-index entry
   persists (same artifact-contract posture wspy already guarantees) — any trial's exact result can be
   re-run or bundled (`wspy-bundle`) independent of `cfm.db` staying intact.
