@@ -1,0 +1,334 @@
+
+<h1 class="wp-block-heading">cpu2026 / 706.stockfish_r-gcc_O3-base / 20260808T233540.058-1e75ff49</h1>
+
+
+
+<h2 class="wp-block-heading">command line</h2>
+
+
+
+<pre class="wp-block-preformatted">bash -c cd\ /home/mev/cpu2026\ \&amp;\&amp;\ source\ /home/mev/cpu2026/shrc\ \&amp;\&amp;\ ulimit\ -s\ unlimited\ \&amp;\&amp;\ runcpu\ --config\ gcc_O3.cfg\ --action=validate\ --tune\ base\ --iterations\ 1\ --nobuild\ 706.stockfish_r 
+</pre>
+
+
+
+<h2 class="wp-block-heading">plot: systemtime.system-cpu.png</h2>
+
+
+
+<figure class="wp-block-image"><img decoding="async" src="https://mvermeulen.org/workload/wp-content/uploads/sites/9/2026/08/systemtime.system-cpu-50.png" alt="plot: systemtime.system-cpu.png" /></figure>
+
+
+
+<h2 class="wp-block-heading">counters: counters.txt</h2>
+
+
+
+<pre class="wp-block-preformatted">elapsed              300.749
+on_cpu               0.911          # 21.87 / 24 cores
+utime                6522.733
+stime                55.874
+nvcsw                9097           # 20.15%
+nivcsw               36056          # 79.85%
+inblock              488            # 1.62/sec
+onblock              49872          # 165.83/sec
+maxrss               1711716        # 1671.60 MB
+minflt               32805293       # 109078.75/sec
+majflt               23             # 0.08/sec
+nswap                0              # 0.00/sec
+##### pass  0 (mask 0x1) #####################
+cpu-cycles           20085332956180 # 2.78 GHz
+instructions         22278066325835 # 1.11 IPC
+##### pass  1 (mask 0x4) #####################
+slots                160307716475960 #
+retiring             21223219606149 # 13.2% (15.4%) low-confidence(50%)
+-- ucode             2129277112     #     0.0%
+-- fastpath          21221090329037 #    15.4%
+frontend             48992624354386 # 30.6% (35.6%) low-confidence(50%)
+-- latency           28373665724040 #    20.6%
+-- bandwidth         20618958630346 #    15.0%
+backend              61706603251200 # 38.5% (44.8%) low-confidence(50%)
+-- cpu               6009353493187  #     4.4%
+-- memory            55697249758013 #    40.4%
+speculation          5671162830138  #  3.5% ( 4.1%) low-confidence(50%)
+smt-contention       22559822978606 # 14.1% ( 0.0%)
+sanity check         99.9% of slots
+##### pass  2 (mask 0x8) #####################
+instructions         22277415390567 #
+icache               8871963709281  # 398.249 icache per 1000 inst
+icache miss          995621885855   # 11.2% icache miss rate
+l1 iTLB miss         913074909      # 0.041 L1 iTLB per 1000 inst
+l2 iTLB miss         0              # 0.000 L2 iTLB per 1000 inst
+tlb flush            68321          # 0.000 TLB flush per 1000 inst
+##### pass  3 (mask 0x20) #####################
+instructions         22277223200583 #
+opcache              5638129179867  # 253.089 opcache per 1000 inst
+opcache miss         1368999447083  # 24.3% opcache miss rate
+l1 dTLB miss         131814157516   # 5.917 L1 dTLB per 1000 inst
+l2 dTLB miss         7891898555     # 0.354 L2 dTLB per 1000 inst
+##### pass  4 (mask 0x40) #####################
+branches             2415320803746  # 108.418 branches per 1000 inst
+branch misses        102935863049   # 4.26% branch miss
+conditional          1909031900621  # 85.692 conditional branches per 1000 inst
+indirect             21989535958    # 0.987 indirect branches per 1000 inst
+near return          164767301586   # 7.396 near return per 1000 inst
+near ret mispredict  23563398       # 0.01% near return mispredict rate
+indirect mispredict  2079265512     # 9.46% indirect branch mispredict rate
+##### pass  5 (mask 0x400) #####################
+instructions         22277671648876 # 106.811 l2 access per 1000 inst
+l2 hit from l1       1658987425528  #
+l2 miss from l1      149399615315   # 9.57% l2 miss
+l2 hit from l2 pf    642123467258   #
+l3 hit from l2 pf    43951043672    #
+l3 miss from l2 pf   34449430591    #
+##### pass  6 (mask 0x9800) #####################
+cpu-clock            6534152328546  # 6534.152 seconds
+task-clock           6534179889230  # 6534.180 seconds
+page faults          32803781       # 5020.336/sec
+context switches     40103          # 6.137/sec
+cpu migrations       862            # 0.132/sec
+major page faults    32             # 0.005/sec
+minor page faults    32803749       # 5020.331/sec
+alignment faults     0              # 0.000/sec
+emulation faults     0              # 0.000/sec
+instructions         22288969407701 # 0.000 l3 access per 1000 inst
+l3 access            0              # 0.000 l3 access per 1000 inst
+l3 miss              0              # -nan% l3 miss
+##### pass  7 (mask 0x10000) #####################
+instructions         22276963146403 # 37.833 float per 1000 inst
+float 512            604            # 0.000 AVX-512 per 1000 inst
+float 256            96838076745    # 4.347 AVX-256 per 1000 inst
+float 128            745969933214   # 33.486 AVX-128 per 1000 inst
+float MMX            0              # 0.000 MMX per 1000 inst
+float scalar         4              # 0.000 scalar per 1000 inst
+counter coverage     57/57 measured
+</pre>
+
+
+
+<h2 class="wp-block-heading">ibs: ibs.txt</h2>
+
+
+
+<pre class="wp-block-preformatted">ibs_sample_fetch_count     5419      
+ibs_sample_ic_miss_rate     12.4%
+ibs_sample_l1tlb_miss_rate   0.9%
+ibs_sample_l2tlb_miss_rate   0.1%
+ibs_sample_op_count        3259      
+ibs_sample_dc_miss_rate         1.5%
+ibs_sample_dc_l1tlb_miss_rate   0.4%
+ibs_sample_dc_l2tlb_miss_rate   0.2%
+ibs_sample_brn_misp_rate        8.1%          # of 322 branch-retiring ops
+ibs_sample_dram_rate           30.0%
+ibs_sample_remote_node_rate     0.0%
+ibs_sample_data_src_breakdown (scheme: zen4_ibs_extensions):
+  Local L3 or other L1/L2 in CCX                  16.3%
+  Another CCX cache in the same NUMA node          8.4%
+  DRAM                                            30.0%
+# warning: 93 IBS sample(s) lost (ring buffer overrun) -- rates above are a lower bound
+# note: --ibs-sample rates are computed once at end-of-run; combined with --interval, periodic rows show 0 here and only the final row is populated (see INVESTIGATION.md&#x27;s 4.3 &quot;AMD IBS sampling-mode support&quot;)
+counter coverage     2/2 measured
+</pre>
+
+
+
+<h2 class="wp-block-heading">process.tree.top1pct.txt</h2>
+
+
+
+<pre class="wp-block-preformatted">Process tree pruned to the top 7 of 698 processes by CPU time (utime+stime), plus their ancestor chain:
+
+   0.560s specperl (pid=364707)
+     1.340s specperl (pid=364743)
+       0.020s specinvoke (pid=364980)
+         0.000s sh (pid=364982)
+        * 122.700s stockfish_base. (pid=364994)
+          * 122.580s stockfish_base. (pid=365040)
+         0.000s sh (pid=364989)
+        * 122.070s stockfish_base. (pid=365009)
+          ... 1 more process(es) omitted (below top 1%)
+         0.000s sh (pid=365002)
+        * 122.800s stockfish_base. (pid=365018)
+          * 122.680s stockfish_base. (pid=365047)
+         0.000s sh (pid=365007)
+        * 122.340s stockfish_base. (pid=365016)
+          * 122.210s stockfish_base. (pid=365042)
+      ... 204 more process(es) omitted (below top 1%)
+    ... 443 more process(es) omitted (below top 1%)
+  ... 36 more process(es) omitted (below top 1%)
+</pre>
+
+
+
+<h2 class="wp-block-heading">process.tree.top.txt</h2>
+
+
+
+<pre class="wp-block-preformatted">Top 7 of 698 processes by CPU time (utime+stime):
+
+  122.800s  pid=365018   ppid=365002   ../run_base_refrate_gcc_O3.0000/stockfish_base.gcc_O3 bench 1600 1 26 spec_ref_pos_1to6.fen depth classical
+  122.700s  pid=364994   ppid=364982   ../run_base_refrate_gcc_O3.0000/stockfish_base.gcc_O3 bench 1600 1 26 spec_ref_pos_1to6.fen depth classical
+  122.680s  pid=365047   ppid=365002   ../run_base_refrate_gcc_O3.0000/stockfish_base.gcc_O3 bench 1600 1 26 spec_ref_pos_1to6.fen depth classical
+  122.580s  pid=365040   ppid=364982   ../run_base_refrate_gcc_O3.0000/stockfish_base.gcc_O3 bench 1600 1 26 spec_ref_pos_1to6.fen depth classical
+  122.340s  pid=365016   ppid=365007   ../run_base_refrate_gcc_O3.0000/stockfish_base.gcc_O3 bench 1600 1 26 spec_ref_pos_1to6.fen depth classical
+  122.210s  pid=365042   ppid=365007   ../run_base_refrate_gcc_O3.0000/stockfish_base.gcc_O3 bench 1600 1 26 spec_ref_pos_1to6.fen depth classical
+  122.070s  pid=365009   ppid=364989   ../run_base_refrate_gcc_O3.0000/stockfish_base.gcc_O3 bench 1600 1 26 spec_ref_pos_1to6.fen depth classical
+</pre>
+
+
+
+<h2 class="wp-block-heading">AI narrative analysis (model: gpt-oss_20b) <em>(AI-generated)</em></h2>
+
+
+
+<p class="wp-block-paragraph"><strong>PERFORMANCE ENGINEERING REPORT – Stockfish (gcc‑O3, base tuning)</strong> <em>Run ID</em>: 20260808T233540.058‑1e75ff49 – 1 iteration, 24‑core AMD Zen‑4 CPU (≈2.78 GHz)*</p>
+
+
+
+<hr class="wp-block-separator" />
+
+
+
+<h2 class="wp-block-heading">1. Executive Summary &amp; Application Profile</h2>
+
+
+
+<figure class="wp-block-table"><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody><tr><td><strong>Elapsed time</strong></td><td><code>300.749 s</code></td></tr><tr><td><strong>Core‑busy ratio</strong> (<code>on_cpu</code>)</td><td><code>0.911</code>  (≈ 21.87 / 24 cores)</td></tr><tr><td><strong>Instructions issued</strong></td><td><code>22278066325835</code></td></tr><tr><td><strong>IPC</strong></td><td><code>1.11</code></td></tr><tr><td><strong>Cycles per instruction</strong></td><td><code>20085332956180 / 22278066325835 ≈ 0.90</code> <em>(measurement artefact; use IPC value for analysis)</em></td></tr><tr><td><strong>Branch‑miss rate</strong></td><td><code>4.26 %</code> (overall) – <code>8.1 %</code> of branch‑retiring ops (IBS)</td></tr><tr><td><strong>DRAM data traffic</strong></td><td><code>30.0 %</code> of data accesses (IBS)</td></tr><tr><td><strong>Cache misses</strong></td><td>L2 miss 9.57 %; L3 miss reported <code>0 %</code> (likely negligible)</td></tr></tbody></table></figure>
+
+
+
+<p class="wp-block-paragraph"><strong>What the numbers say</strong></p>
+
+
+
+<ul class="wp-block-list"><li>The workload is <em>compute‑bound</em>: the core‑busy ratio is high (<code>0.911</code>) and the IPC comfortably exceeds 1.0.  </li><li>There is <em>moderate</em> backend pressure (≈ 38 % of slots stalled on execution resources), while the frontend is relatively benign.  </li><li>The <em>memory subsystem</em> shows a small working‑set that largely resides in L1/L2, with only ~9 % of L1 accesses falling to L2 and virtually no L3 traffic.  </li><li>The main contention comes from <strong>backend stalls</strong> and a noticeable branch‑mis‑prediction cost, particularly for indirect branches.</li></ul>
+
+
+
+<p class="wp-block-paragraph">No execution phases or core‑level utilization anomalies appear in the raw telemetry; the process runs steadily, keeping the majority of cores busy throughout the 5‑minute interval.</p>
+
+
+
+<hr class="wp-block-separator" />
+
+
+
+<h2 class="wp-block-heading">2. Top‑Down Microarchitectural Analysis</h2>
+
+
+
+<p class="wp-block-paragraph">The top‑down breakdown (from the <code>amdtopdown</code> group) is:</p>
+
+
+
+<figure class="wp-block-table"><table><thead><tr><th>Category</th><th>All slots (%)</th><th>This thread’s slots (%)</th><th>Confidence</th></tr></thead><tbody><tr><td><strong>Retiring</strong></td><td><code>13.2 %</code></td><td><code>15.4 %</code></td><td>low‑confidence(50%)</td></tr><tr><td><strong>Frontend</strong></td><td><code>30.6 %</code></td><td><code>35.6 %</code></td><td>low‑confidence(50%)</td></tr><tr><td><strong>Backend</strong></td><td><code>38.5 %</code></td><td><code>44.8 %</code></td><td>low‑confidence(50%)</td></tr><tr><td><strong>Speculation</strong></td><td><code>3.5 %</code></td><td><code>4.1 %</code></td><td>low‑confidence(50%)</td></tr><tr><td><strong>SMT‑contention</strong></td><td><code>14.1 %</code></td><td><code>0.0 %</code></td><td>–</td></tr></tbody></table></figure>
+
+
+
+<p class="wp-block-paragraph">&gt; <strong>Primary bottleneck:</strong> <em>Backend‑bound stalls</em> dominate the pipeline (≈ 44 % of this thread’s own slots). &gt; The high backend utilization reflects that the processor is frequently waiting on execution resources, most notably memory‑dependent operations (see cache‑miss data below).</p>
+
+
+
+<h3 class="wp-block-heading">Branch‑misprediction</h3>
+
+
+
+<ul class="wp-block-list"><li><strong>Overall miss‑rate</strong>: <code>4.26 %</code>.  </li><li><strong>Indirect branch miss‑rate</strong>: <code>9.46 %</code> (derived from <code>indirect mispredict</code> / <code>indirect</code> counts).  </li><li>IBS reports <code>8.1 %</code> of branch‑retiring ops mispredicted.  </li><li>The near‑return mispredict rate is negligible (<code>0.01 %</code>).  </li></ul>
+
+
+
+<p class="wp-block-paragraph">Thus branch prediction is a secondary issue but the high indirect‑branch penalty suggests that many polymorphic or virtual calls are not being predicted effectively.</p>
+
+
+
+<h3 class="wp-block-heading">SMT Contention</h3>
+
+
+
+<p class="wp-block-paragraph"><code>22559822978606</code> slots (14.1 %) were consumed by the sibling logical core. Since the parenthesized value for this thread is <code>0.0 %</code>, the contention does <strong>not</strong> contribute to the stalls experienced by the thread; it simply reduces overall slot availability. Affinity is therefore not a pressing concern.</p>
+
+
+
+<hr class="wp-block-separator" />
+
+
+
+<h2 class="wp-block-heading">3. Memory &amp; Cache Subsystem Behavior</h2>
+
+
+
+<figure class="wp-block-table"><table><thead><tr><th>Counter</th><th>Value</th><th>Interpretation</th></tr></thead><tbody><tr><td><strong>L1 iTLB miss</strong></td><td><code>913074909</code> → <code>0.041</code> per 1000 inst</td><td>Negligible, instruction fetches are effectively cached.</td></tr><tr><td><strong>L2 iTLB miss</strong></td><td><code>0</code></td><td>No instruction page misses beyond L1.</td></tr><tr><td><strong>L1 dTLB miss</strong></td><td><code>131814157516</code> → <code>5.917</code> per 1000 inst</td><td>Modest demand‑side TLB pressure, but not dominant.</td></tr><tr><td><strong>L2 dTLB miss</strong></td><td><code>7891898555</code> → <code>0.354</code> per 1000 inst</td><td>Very low, most data accesses hit L2 TLB.</td></tr><tr><td><strong>L2 miss from L1</strong></td><td><code>149399615315</code> → <code>9.57 %</code></td><td>About one in ten L1 data accesses requires L2.</td></tr><tr><td><strong>L3 access</strong></td><td><code>0</code></td><td>No L3 traffic was recorded; the working set fits within L1/L2 or is served via memory controller without L3 participation.</td></tr><tr><td><strong>DRAM data traffic</strong></td><td><code>30.0 %</code> of data accesses (IBS)</td><td>Roughly one‑third of memory references reach main memory, indicating a moderate working‑set size.</td></tr><tr><td><strong>Minor page faults</strong></td><td><code>32803749</code> → <code>5020.331/sec</code></td><td>The process incurs page faults at a low rate (~5 k/s), well within the memory controller’s capacity.</td></tr></tbody></table></figure>
+
+
+
+<p class="wp-block-paragraph"><strong>Implication:</strong> The application’s data footprint is small enough to avoid L3 cache pressure but still large enough that ~10 % of L1 data accesses must go to L2 and a substantial portion ultimately reaches DRAM. The backend stalls seen in the top‑down view are consistent with these memory‑bound delays.</p>
+
+
+
+<hr class="wp-block-separator" />
+
+
+
+<h2 class="wp-block-heading">4. Conclusion &amp; Actionable Recommendations</h2>
+
+
+
+<figure class="wp-block-table"><table><thead><tr><th>Bottleneck</th><th>Evidence</th><th>Recommendation</th></tr></thead><tbody><tr><td><strong>Backend stalls (≈ 44 % of slots)</strong></td><td><code>backend 38.5 %</code> (overall) / <code>44.8 %</code> (own slots)</td><td><strong>Cache‑line and memory‑access optimization</strong>: Reduce L2 miss rate by ensuring data locality (e.g., align critical structures to cache lines, use structure‑of‑arrays layouts). Consider prefetching or software‑controlled cache hints if the architecture supports them.</td></tr><tr><td><strong>Indirect branch misprediction (9.46 %)</strong></td><td><code>indirect mispredict / indirect</code> ≈ 9.46 %</td><td><strong>Profile‑guided optimization</strong>: Generate branch‑prediction hints or reorder indirect calls to improve predictability. Compiler‑level options that expose branch hints or enable <code>-fbranch-probabilities</code> can help.</td></tr><tr><td><strong>Limited vector usage</strong></td><td><code>float 256</code> 4.347 AVX‑256 per 1000 inst; <code>float 128</code> 33.486 AVX‑128 per 1000 inst; AVX‑512 only 0.000</td><td><strong>Vectorization enhancement</strong>: Strengthen SIMD utilization by enabling or improving automatic vectorization (e.g., <code>-march=native -ftree-vectorize</code>). Ensure data is aligned and packed to take advantage of wide vectors.</td></tr><tr><td><strong>Slight L1 dTLB pressure</strong></td><td><code>5.917</code> L1 dTLB misses per 1000 inst</td><td><strong>TLB‑friendly data structures</strong>: Align large arrays to page boundaries, reduce virtual memory fragmentation.</td></tr><tr><td><strong>DRAM traffic (30 %)</strong></td><td>IBS shows 30 % data hits in DRAM</td><td><strong>Memory bandwidth tuning</strong>: If the architecture provides memory bandwidth throttling or caching options (e.g., use of larger prefetch buffers), consider adjusting. Additionally, ensuring that data structures are cache‑friendly reduces DRAM fetches.</td></tr></tbody></table></figure>
+
+
+
+<p class="wp-block-paragraph"><strong>Overall assessment</strong> Stockfish, as compiled with GCC O3 and default tuning, achieves a solid IPC of 1.11 on a 2.78 GHz Zen‑4 core and keeps the majority of cores busy (<code>0.911</code> core‑busy). The main performance impediment is <strong>backend execution stall</strong>, driven by moderate L2 miss activity and a non‑negligible fraction of memory accesses reaching DRAM. Branch misprediction, especially on indirect branches, also contributes a measurable cost but is secondary to memory‑related stalls.</p>
+
+
+
+<p class="wp-block-paragraph">Applying the above recommendations—particularly focusing on data‑layout changes and compiler‑enabled vectorization—will likely yield the most significant performance gains for this workload.</p>
+
+
+
+<h2 class="wp-block-heading">plot: amdtopdown.topdown.png</h2>
+
+
+
+<figure class="wp-block-image"><img decoding="async" src="https://mvermeulen.org/workload/wp-content/uploads/sites/9/2026/08/amdtopdown.topdown-49.png" alt="plot: amdtopdown.topdown.png" /></figure>
+
+
+
+<h2 class="wp-block-heading">plot: systemtime.metrics.png</h2>
+
+
+
+<figure class="wp-block-image"><img decoding="async" src="https://mvermeulen.org/workload/wp-content/uploads/sites/9/2026/08/systemtime.metrics-50.png" alt="plot: systemtime.metrics.png" /></figure>
+
+
+
+<h2 class="wp-block-heading">plot: systemtime.memory-pressure.png</h2>
+
+
+
+<figure class="wp-block-image"><img decoding="async" src="https://mvermeulen.org/workload/wp-content/uploads/sites/9/2026/08/systemtime.memory-pressure-49.png" alt="plot: systemtime.memory-pressure.png" /></figure>
+
+
+
+<h2 class="wp-block-heading">plot: systemtime.power-vs-frequency.png</h2>
+
+
+
+<figure class="wp-block-image"><img decoding="async" src="https://mvermeulen.org/workload/wp-content/uploads/sites/9/2026/08/systemtime.power-vs-frequency-49.png" alt="plot: systemtime.power-vs-frequency.png" /></figure>
+
+
+
+<h2 class="wp-block-heading">plot: systemtime.temp-vs-frequency.png</h2>
+
+
+
+<figure class="wp-block-image"><img decoding="async" src="https://mvermeulen.org/workload/wp-content/uploads/sites/9/2026/08/systemtime.temp-vs-frequency-50.png" alt="plot: systemtime.temp-vs-frequency.png" /></figure>
+
+
+
+<h2 class="wp-block-heading">plot: systemtime.temp-vs-utilization.png</h2>
+
+
+
+<figure class="wp-block-image"><img decoding="async" src="https://mvermeulen.org/workload/wp-content/uploads/sites/9/2026/08/systemtime.temp-vs-utilization-49.png" alt="plot: systemtime.temp-vs-utilization.png" /></figure>
+
+

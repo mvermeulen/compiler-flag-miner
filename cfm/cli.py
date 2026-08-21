@@ -163,6 +163,7 @@ def main(argv=None) -> int:
             "baseline_resource_dominance": baseline.resource_dominance,
             "baseline_vectorization_density": baseline.vectorization_density,
             "baseline_allocation_pressure": baseline.allocation_pressure,
+            "baseline_characterization_source": baseline.characterization_source,
             "candidates_screened": len(screened),
             "candidates_confirmed": sum(1 for c in confirmed if c.accepted),
             "winning_flags": combination.winning_flags,

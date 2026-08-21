@@ -727,20 +727,33 @@ compiler-flag-miner/
      what supplies the robustness now); `_confirm_flagset()` (shared by Phase 4/5) does the same. The
      characterization trial's ratio is recorded as a real trial row but excluded from the CI sample, so
      a deep-cpu-profile measurement never mixes with quick-profile ones in one statistic.
-     **Deliberately not implemented here**: the `wspy-testpoint aggregate`-against-the-reference-matrix
-     half of this item's original text. Checked live against the actual `wspy-testpoint` CLI
-     (`cmd_characterize`/`cmd_aggregate`/`cmd_render`, all gated by `load_stats_pool_present()`) — none
-     of them can actually read an*other* already-published machine's data with zero local setup; each
-     requires *this* `--machine` slug's own `runs.json` (and local store presence) to exist first, so
-     "already-existing, already-working stable CLI" undersold the real integration cost. This host also
-     has no registered machine slug and no report-root clone yet. So `_characterize_baseline()` today is
-     exactly the one-local-rep fallback path, nothing more — but it's a deliberately isolated function
-     specifically so a later "try the reference matrix first" version (the user's own framing, 2026-08-19:
-     the mining host and the reference-matrix host needn't be the same machine, since shape is expected
-     to be portable across similarly-behaved machines even though the ratio never is) is a drop-in
-     replacement for just that function's body, not a rewrite of `run_baseline()` or anything downstream
-     — real fast-follow work (report-root git clone, either markdown-parsing or extending
-     `collect_wordpress_archetype_scorecards()`'s own WordPress-recovery approach), not a cheap wire-up.
+     **Was deliberately not implemented at first** (2026-08-19): `wspy-testpoint`'s own CLI subcommands
+     (`characterize`/`aggregate`/`render`) all turned out to require *this* host's own `--machine`
+     slug/local `runs.json`/store presence to exist before they'd even attempt the WordPress-recovery
+     half — a real structural gate, not a config gap, so "already-existing, already-working stable CLI"
+     had undersold the real integration cost.
+     **Done** (`feature/reference-matrix-characterization`, 2026-08-20), a different shape than
+     originally planned: `cfm/reference_matrix.py` talks to `mvermeulen.org/workload` directly rather
+     than through `wspy-testpoint`, sidestepping that gate entirely — confirmed live that the site's
+     WordPress REST API serves published-page content (including full-depth `counters.txt` `<pre>`
+     blocks) to fully anonymous, unauthenticated GET requests, so **no `wp_cfg`/Application Password is
+     needed on the mining host at all** (a hard requirement from the user going in: a mining host must
+     never need to be able to log in anywhere). `_characterize_baseline()` tries
+     `reference_matrix.fetch_shape()` first, falling back to the local `deep-cpu` trial only when no
+     matching published entry exists — exactly the drop-in-replacement seam that function was always
+     kept isolated for. Deliberately reuses `vendor/wspy`'s own `web/counter_text.py` directly (a
+     pinned-submodule Python import, not a CLI shell-out) for the actual `counters.txt`-block parsing —
+     a narrow, confirmed-with-the-user exception to cfm's usual "stable CLI only" posture, since
+     reimplementing ~370 lines of already-debugged parsing logic was judged the worse trade; the only
+     wspy CLI actually shelled out to is `wspy-archetype --run-guest` (real, stable, pre-existing).
+     Verified end to end against real data, same day: `resource_dominance` recovers correctly
+     (`memory-bound`, agreeing with this host's own earlier local characterization of
+     `706.stockfish_r`) from a completely different real machine (`amd-370-64gb`) with zero local setup
+     on this host at all. `vectorization_density`/`allocation_pressure` come back `unknown` from this
+     path today — `counter_text.py`'s WordPress-recovery parsing isn't yet name-aligned for
+     `float_pct`/`fault_rate` the way it is for the topdown axes; filed upstream as
+     [wspy#278](https://github.com/mvermeulen/wspy/issues/278), not a cfm-side bug, and degrades safely
+     (`_filter_implausible_candidates()` never excludes on unknown data).
   3. **Adaptive trial-count strategy, biased toward cheap rejection over expensive precision.**
      (Two baseline repetitions from this same live run measured 105.03 and 127.65 — a ~21% spread —
      but this machine was *not* under exclusive use for that window per CLAUDE.md's own rule, so it's

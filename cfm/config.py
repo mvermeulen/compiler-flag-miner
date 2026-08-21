@@ -43,6 +43,7 @@ class CfmConfig:
     wspy_profile: str
     hostname: str
     lock_file: Path
+    reference_matrix_url: str
 
     @classmethod
     def from_env(
@@ -56,6 +57,7 @@ class CfmConfig:
         wspy_profile: Optional[str] = None,
         hostname: Optional[str] = None,
         lock_file: Optional[str] = None,
+        reference_matrix_url: Optional[str] = None,
     ) -> "CfmConfig":
         """Resolve config: explicit keyword argument (e.g. from argparse) wins over
         the environment; the environment wins over the built-in default. Read
@@ -83,4 +85,12 @@ class CfmConfig:
                 Path(lock_file) if lock_file
                 else _env_path("CFM_LOCK_FILE", resolved_spec_dir / ".cfm-mining.lock")
             ),
+            # cfm/reference_matrix.py's external shape source (doc/DESIGN.md sec. 14 M2.5 item 2) --
+            # read-only, fully anonymous (confirmed live 2026-08-20: this site's WordPress REST API
+            # serves published pages to unauthenticated GETs). No trailing slash, so callers can
+            # always do f"{url}/wp-json/...".
+            reference_matrix_url=(
+                reference_matrix_url
+                or _env_str("CFM_REFERENCE_MATRIX_URL", "https://mvermeulen.org/workload")
+            ).rstrip("/"),
         )

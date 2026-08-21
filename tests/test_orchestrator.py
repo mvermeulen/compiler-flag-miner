@@ -116,6 +116,14 @@ def _cfg(tmp_path):
     )
 
 
+def _no_reference_matrix(cfg, benchmark):
+    """Forces _characterize_baseline()'s local-trial fallback path deterministically --
+    run_baseline()'s real default (reference_matrix.fetch_shape) makes real network calls, which no
+    unit test may do (CLAUDE.md's Build & test section). Matches reference_matrix.fetch_shape()'s own
+    (cfg, benchmark) signature exactly."""
+    return None
+
+
 # -- run_baseline -------------------------------------------------------------
 
 def test_run_baseline_computes_ci_over_repeated_trials(tmp_path):
@@ -131,6 +139,7 @@ def test_run_baseline_computes_ci_over_repeated_trials(tmp_path):
     result = run_baseline(
         cfg, benchmark="fake_r", base_flags=["-O3"],
         workload=backends, instrumentation=backends,
+        reference_matrix_fetch=_no_reference_matrix,
     )
 
     assert isinstance(result, BaselineResult)
@@ -161,7 +170,8 @@ def test_run_baseline_raises_when_every_repetition_fails_to_build(tmp_path):
         ratio_sequences={("-O3",): []}, build_fails_for=frozenset({("-O3",)}),
     )
     with pytest.raises(RuntimeError, match="fake_r"):
-        run_baseline(cfg, benchmark="fake_r", base_flags=["-O3"], workload=backends, instrumentation=backends)
+        run_baseline(cfg, benchmark="fake_r", base_flags=["-O3"], workload=backends, instrumentation=backends,
+                     reference_matrix_fetch=_no_reference_matrix)
 
     # The experiment characterize_baseline() already created must not be left
     # stuck at status='running' -- this is exactly the gap CLAUDE.md's
@@ -675,6 +685,7 @@ def test_full_pipeline_surfaces_a_genuinely_better_flag(tmp_path):
 
     baseline = run_baseline(
         cfg, benchmark="fake_r", base_flags=baseline_flags, workload=backends, instrumentation=backends,
+        reference_matrix_fetch=_no_reference_matrix,
     )
     screened = screen_candidates(
         cfg, experiment_id=baseline.experiment_id, benchmark="fake_r", baseline=baseline,
@@ -707,6 +718,7 @@ def test_full_pipeline_reports_baseline_when_nothing_helps(tmp_path):
 
     baseline = run_baseline(
         cfg, benchmark="fake_r", base_flags=["-O3"], workload=backends, instrumentation=backends,
+        reference_matrix_fetch=_no_reference_matrix,
     )
     screened = screen_candidates(
         cfg, experiment_id=baseline.experiment_id, benchmark="fake_r", baseline=baseline,
