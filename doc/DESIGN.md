@@ -749,11 +749,15 @@ compiler-flag-miner/
      Verified end to end against real data, same day: `resource_dominance` recovers correctly
      (`memory-bound`, agreeing with this host's own earlier local characterization of
      `706.stockfish_r`) from a completely different real machine (`amd-370-64gb`) with zero local setup
-     on this host at all. `vectorization_density`/`allocation_pressure` come back `unknown` from this
-     path today — `counter_text.py`'s WordPress-recovery parsing isn't yet name-aligned for
-     `float_pct`/`fault_rate` the way it is for the topdown axes; filed upstream as
-     [wspy#278](https://github.com/mvermeulen/wspy/issues/278), not a cfm-side bug, and degrades safely
-     (`_filter_implausible_candidates()` never excludes on unknown data).
+     on this host at all. `vectorization_density`/`allocation_pressure` initially came back `unknown`
+     from this path — `counter_text.py`'s WordPress-recovery parsing wasn't yet name-aligned for
+     `float_pct`/`fault_rate` the way it was for the topdown axes; filed upstream as
+     [wspy#278](https://github.com/mvermeulen/wspy/issues/278), not a cfm-side bug, and degraded safely
+     regardless (`_filter_implausible_candidates()` never excludes on unknown data). **Resolved same
+     day**: wspy#278 closed (#279/#280), pin bumped past it — live-verified `fetch_shape()` now recovers
+     real `vectorization_density="moderate"`/`allocation_pressure="high"`, exactly matching this host's
+     own local `deep-cpu` characterization of the same benchmark (independent confirmation the whole
+     recovery chain is correct, not just internally consistent).
   3. **Adaptive trial-count strategy, biased toward cheap rejection over expensive precision.**
      (Two baseline repetitions from this same live run measured 105.03 and 127.65 — a ~21% spread —
      but this machine was *not* under exclusive use for that window per CLAUDE.md's own rule, so it's
