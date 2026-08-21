@@ -31,11 +31,13 @@ parse that recovers nothing, ``wspy-archetype`` scoring failing -- never raises 
 missing/failed reference-matrix lookup just means ``_characterize_baseline()`` falls through to its
 existing local ``deep-cpu`` trial, exactly like "no entry exists yet" always has.
 
-Known gap, not fixed here: ``vectorization_density``/``allocation_pressure`` currently come back
-"unknown" more often than ``resource_dominance`` does, since ``float_pct``/``fault_rate`` aren't
-reliably name-aligned in ``counter_text.py`` yet -- filed upstream as
-https://github.com/mvermeulen/wspy/issues/278. Not a cfm-side bug; degrades gracefully (an unknown
-axis is never treated as an exclusion signal by ``_filter_implausible_candidates()``).
+``vectorization_density``/``allocation_pressure`` initially came back "unknown" from this path more
+often than ``resource_dominance`` did, since ``float_pct``/``fault_rate`` weren't reliably name-aligned
+in ``counter_text.py`` yet (filed upstream as https://github.com/mvermeulen/wspy/issues/278) -- resolved
+same day (wspy#279/#280), pin bumped past it; both now resolve to real values, live-verified to exactly
+match this host's own local ``deep-cpu`` characterization of the same benchmark. Any future gap of this
+shape still degrades gracefully regardless -- an unknown axis is never treated as an exclusion signal
+by ``_filter_implausible_candidates()``.
 """
 
 from __future__ import annotations
