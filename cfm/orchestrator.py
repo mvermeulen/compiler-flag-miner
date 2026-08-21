@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from . import db
+from . import reference_matrix
 from .agents.spec_agent import run_one_trial
 from .compilers.base import FlagCandidate
 from .compilers.gcc import GccCompiler, benchmark_languages
@@ -104,6 +105,10 @@ class BaselineResult:
     vectorization_density: Optional[str] = None
     allocation_pressure: Optional[str] = None
     trial_ids: list[int] = field(default_factory=list)
+    # "reference-matrix:<machine-slug>" or "local-deep-cpu-trial" -- doc/DESIGN.md sec. 14 M2.5 item 2,
+    # _characterize_baseline()'s own provenance tag. Surfaced through to cli.py's summary JSON so a
+    # mining run's output visibly says which shape source it actually used, not just the values.
+    characterization_source: Optional[str] = None
 
 
 @dataclass
@@ -131,24 +136,54 @@ def _characterize_baseline(
     base_flags: list[str],
     workload: Optional[WorkloadBackend],
     instrumentation: Optional[InstrumentationBackend],
+    reference_matrix_fetch=reference_matrix.fetch_shape,
 ) -> dict:
-    """doc/DESIGN.md sec. 14 M2.5 item 2: exactly one characterization-grade trial
-    (``deep-cpu``, ``CHARACTERIZATION_ITERATIONS`` -- shape needs one measurement,
-    not a repetition-based CI) to capture the baseline's ``RunSignature`` fields.
-    Deliberately its own function, not inlined into ``run_baseline()``: today this
-    is a single local trial (the DESIGN.md-documented fallback for "no
-    reference-matrix entry exists yet for this benchmark"), but a future version
-    that tries the external reference-matrix corpus first -- shape is expected to
-    be portable across similarly-behaved machines even though the ratio never is,
-    see this PR's own notes -- only ever needs to replace this one function's
-    body; ``run_baseline()`` and everything downstream only consume the resulting
-    shape fields, never how they were obtained.
+    """doc/DESIGN.md sec. 14 M2.5 item 2: shape (``resource_dominance``/
+    ``vectorization_density``/``allocation_pressure``), not the ratio -- tried first
+    against the external reference-matrix corpus (``reference_matrix.fetch_shape()``,
+    read-only/anonymous, ~a few HTTP calls), falling back to exactly one local
+    ``deep-cpu`` characterization-grade trial (``CHARACTERIZATION_ITERATIONS`` -- shape
+    needs one measurement, not a repetition-based CI) only when no matching published
+    entry exists yet. This was a single local trial only until 2026-08-20; this
+    function was already kept deliberately isolated for exactly this swap (see git
+    history) -- ``run_baseline()`` and everything downstream only consume the
+    resulting shape fields, never how they were obtained.
+
+    ``reference_matrix_fetch`` is injectable so tests can force the local-trial path
+    deterministically (a lambda returning ``None``) without a real network call --
+    the default real function takes only ``(cfg, benchmark)``, matching
+    ``reference_matrix.fetch_shape()``'s own signature exactly.
+
+    The experiment row is created here unconditionally (not inside ``run_one_trial()``
+    via ``experiment_id=None`` as before) since the reference-matrix path needs one
+    regardless of whether a real local trial happens at all.
     """
-    return run_one_trial(
+    conn = db.connect(cfg.db_path)
+    try:
+        experiment_id = db.create_experiment(
+            conn, benchmark=benchmark, hostname=cfg.hostname, compiler="gcc",
+        )
+    finally:
+        conn.close()
+
+    shape = reference_matrix_fetch(cfg, benchmark)
+    if shape is not None:
+        return {
+            "experiment_id": experiment_id,
+            "trial_id": None,
+            "resource_dominance": shape.get("resource_dominance"),
+            "vectorization_density": shape.get("vectorization_density"),
+            "allocation_pressure": shape.get("allocation_pressure"),
+            "characterization_source": "reference-matrix:%s" % shape.get("source_machine", "?"),
+        }
+
+    result = run_one_trial(
         cfg, benchmark=benchmark, flags=base_flags, phase="confirmation",
         profile=CHARACTERIZATION_PROFILE, iterations=CHARACTERIZATION_ITERATIONS,
-        experiment_id=None, workload=workload, instrumentation=instrumentation,
+        experiment_id=experiment_id, workload=workload, instrumentation=instrumentation,
     )
+    result.setdefault("characterization_source", "local-deep-cpu-trial")
+    return result
 
 
 def run_baseline(
@@ -158,6 +193,7 @@ def run_baseline(
     base_flags: list[str],
     workload: Optional[WorkloadBackend] = None,
     instrumentation: Optional[InstrumentationBackend] = None,
+    reference_matrix_fetch=reference_matrix.fetch_shape,
 ) -> BaselineResult:
     """doc/DESIGN.md sec. 6 Phase 1, sec. 14 M2.5 item 2: one characterization-grade
     trial (``_characterize_baseline()``, shape only -- its ratio is *not* part of
@@ -165,17 +201,24 @@ def run_baseline(
     ones in the same statistic) followed by ``CONFIRMATION_REPETITIONS``
     calibration-grade trials (``quick`` profile, cheap enough to repeat for a real
     CI where ``deep-cpu`` wasn't) establishing the running baseline every
-    subsequent trial compares against.
+    subsequent trial compares against. ``reference_matrix_fetch`` passes straight
+    through to ``_characterize_baseline()`` -- see its own docstring.
     """
     char_result = _characterize_baseline(
         cfg, benchmark=benchmark, base_flags=base_flags,
         workload=workload, instrumentation=instrumentation,
+        reference_matrix_fetch=reference_matrix_fetch,
     )
     experiment_id = char_result["experiment_id"]
     resource_dominance = char_result.get("resource_dominance")
     vectorization_density = char_result.get("vectorization_density")
     allocation_pressure = char_result.get("allocation_pressure")
-    trial_ids: list[int] = [char_result["trial_id"]]
+    characterization_source = char_result.get("characterization_source")
+    # None when characterization came from the reference matrix -- no real trial
+    # happened, nothing to add to the budget-spent list (doc/DESIGN.md sec. 14 M2.5
+    # item 2: this is a strict improvement on top of the local-trial path's own
+    # budget cost, not just a time saving).
+    trial_ids: list[int] = [char_result["trial_id"]] if char_result["trial_id"] is not None else []
 
     ratios: list[float] = []
     wspy_run_refs: list[str] = []
@@ -226,6 +269,7 @@ def run_baseline(
         vectorization_density=vectorization_density,
         allocation_pressure=allocation_pressure,
         trial_ids=trial_ids,
+        characterization_source=characterization_source,
     )
 
 

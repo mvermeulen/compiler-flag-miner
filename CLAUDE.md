@@ -338,6 +338,38 @@ Full branch/PR discipline, same shape as wspy's:
   matching `finish_experiment(..., status="failed")` immediately before its `raise RuntimeError(...)`.
   Covered by `tests/test_agents_spec_agent.py::test_run_one_trial_marks_experiment_failed_on_unexpected_exception`
   and an assertion added to `tests/test_orchestrator.py::test_run_baseline_raises_when_every_repetition_fails_to_build`.
+- **2026-08-20: `mvermeulen.org/workload`'s WordPress REST API serves published pages fully
+  anonymously — confirmed live, not assumed — which is what made `cfm/reference_matrix.py` (M2.5 item
+  2's deferred half) possible without any credentials on the mining host at all.** `vendor/wspy`'s own
+  `web/wp_client.py` always sends a Basic-Auth header (from `~/.config/wspy/publish.json`'s
+  `wp_cfg`), so it was easy to assume reading needs the same credentials writing does. Tested directly
+  against the real site instead: a plain unauthenticated `GET
+  /wp-json/wp/v2/pages?slug=cpu2026` returns real published-page data (`200`, real `id`/`slug`/
+  `parent`/`link` fields), and even a deliberately garbage `Authorization: Basic Og==` header (empty
+  `:`-only credentials) still returns `200` with real data — WordPress just serves published content
+  to anonymous GETs regardless, standard REST API behavior most hosts don't turn off. Two follow-on
+  findings from the same investigation:
+  1. **`content.raw` needs `context=edit` (auth); `content.rendered` doesn't, and carries the exact
+     same `<pre class="wp-block-preformatted">` block text.** `wp_client.fetch_page_raw_content()`
+     always requests `context=edit` (needed for its own drift-detection use case, comparing against
+     exactly what's stored) — `cfm/reference_matrix.py`'s own `_fetch_rendered_content()` deliberately
+     doesn't reuse that function, requesting plain `.rendered` instead, confirmed live to contain the
+     identical counters.txt text (it's literally what's shown on the public page).
+  2. **The reference-matrix corpus is `mvermeulen.org/**workload**`, a separate WordPress instance
+     from `mvermeulen.org` itself** (a subdirectory multisite install, its own `wp-json` root at
+     `mvermeulen.org/workload/wp-json/`) — querying the bare `mvermeulen.org/wp-json/...` returns 200
+     with real but *unrelated* data (a personal blog/bike-trips site), which looks like a working
+     integration until the returned pages never match anything cpu2026-shaped. Caught by checking a
+     plain page-listing response's own `link` header, which named the correct subdirectory root
+     directly.
+  Also confirmed live: `cfm/orchestrator.py`'s `_characterize_baseline()` recovers a real
+  `resource_dominance` (`memory-bound`) for `706.stockfish_r` from a completely different real machine
+  (`amd-370-64gb`) with zero local setup on this mining host — agreeing with this host's own earlier
+  local characterization of the same benchmark. `vectorization_density`/`allocation_pressure` come
+  back `unknown` from this path today (not a cfm bug — `vendor/wspy`'s `web/counter_text.py` isn't yet
+  name-aligned for `float_pct`/`fault_rate` the way it is for the topdown axes; filed upstream as
+  [wspy#278](https://github.com/mvermeulen/wspy/issues/278)) — degrades safely since
+  `_filter_implausible_candidates()` never excludes a candidate on unknown/absent signal data.
 
 ## Build & test
 
@@ -403,7 +435,8 @@ every trial along the way still landing in `cfm.db` regardless of phase or outco
 | `cfm/instrumentation/base.py` | `InstrumentationBackend` interface + `RunSignature` dataclass (doc/DESIGN.md §4.2/§12). |
 | `cfm/instrumentation/wspy.py` | The only implementation: `preflight()` checks all six wspy binaries exist; `characterize()` runs `wspy-run <profile> -- <command>`, then resolves the *real* run identity from the run-index file (see Non-obvious traps — single-pass and the `deep-cpu` multi-pass profile both work), then `wspy-validate`/`wspy-store`/`wspy-archetype`. `check_regression()` wraps `wspy-summary --check-regression` as a secondary environment/counter-sanity guardrail (never the accept/reject decision — that's `cfm/stats.py`, over `cfm.db`'s own data). |
 | `cfm/agents/spec_agent.py` | `run_one_trial()` — the M0 pipeline glue described above. `workload`/`instrumentation` backends and `profile` are injectable/overridable per call (`orchestrator.py` needs a different wspy profile per phase, and its own tests inject fakes — no real SPEC/wspy calls); all default to the real M0 behavior when omitted. The only agent module that exists; `knowledge_agent`/`hypothesis_agent`/`report_agent` are M2-M3. |
-| `cfm/orchestrator.py` | Phase state machine (doc/DESIGN.md §5-6). `run_baseline()` (Phase 1, sec. 14 M2.5 item 2: one `deep-cpu --iterations 1` characterization trial via `_characterize_baseline()` for shape — resource_dominance/vectorization_density/allocation_pressure — plus `CONFIRMATION_REPETITIONS` cheap `quick`-profile calibration trials feeding `cfm/stats.py`'s CI; `_characterize_baseline()` is a deliberately isolated seam a future reference-matrix-first version can replace without touching anything downstream), `generate_candidates()` (Phase 2, M1's whole-catalog read from `compilers/gcc.py` still ignores `resource_dominance` per that module's own M1-vs-M2 boundary, but sec. 14 M2.5 item 3 layers `_filter_implausible_candidates()` on top — drops a candidate only when *every* `topdown_signals` entry is confidently contradicted by the baseline's characterized shape, never on unknown/absent data), `screen_candidates()` (Phase 3, one cheap `quick`-profile trial per candidate, prunes only a clearly-worse point estimate), `confirm_candidates()` (Phase 4, re-confirms each survivor against the baseline's CI via `_confirm_flagset()`'s calibration-profile reps — accept requires both non-overlapping CI *and* a delta clearing `MIN_PRACTICAL_SIGNIFICANCE_PCT`, M2.5 item 3's asymmetric bar — `check_regression()` as a sanity-only guardrail on accept, `knowledge` table upsert per single flag), `greedy_combine()` (Phase 5, cumulative greedy walk re-confirmed against the *current* running set each step via the same `_confirm_flagset()`, plus a bounded random-pair tournament evaluated against baseline that can still replace the greedy winner). No `cfm mine` CLI wiring yet — that's still pending. |
+| `cfm/orchestrator.py` | Phase state machine (doc/DESIGN.md §5-6). `run_baseline()` (Phase 1, sec. 14 M2.5 item 2: shape — resource_dominance/vectorization_density/allocation_pressure — via `_characterize_baseline()`, which now tries `cfm/reference_matrix.py`'s external corpus lookup first and falls back to one local `deep-cpu --iterations 1` characterization trial only when no matching published entry exists, plus `CONFIRMATION_REPETITIONS` cheap `quick`-profile calibration trials feeding `cfm/stats.py`'s CI either way; `_characterize_baseline()` stays the one isolated seam either shape source flows through), `generate_candidates()` (Phase 2, M1's whole-catalog read from `compilers/gcc.py` still ignores `resource_dominance` per that module's own M1-vs-M2 boundary, but sec. 14 M2.5 item 3 layers `_filter_implausible_candidates()` on top — drops a candidate only when *every* `topdown_signals` entry is confidently contradicted by the baseline's characterized shape, never on unknown/absent data), `screen_candidates()` (Phase 3, one cheap `quick`-profile trial per candidate, prunes only a clearly-worse point estimate), `confirm_candidates()` (Phase 4, re-confirms each survivor against the baseline's CI via `_confirm_flagset()`'s calibration-profile reps — accept requires both non-overlapping CI *and* a delta clearing `MIN_PRACTICAL_SIGNIFICANCE_PCT`, M2.5 item 3's asymmetric bar — `check_regression()` as a sanity-only guardrail on accept, `knowledge` table upsert per single flag), `greedy_combine()` (Phase 5, cumulative greedy walk re-confirmed against the *current* running set each step via the same `_confirm_flagset()`, plus a bounded random-pair tournament evaluated against baseline that can still replace the greedy winner). |
+| `cfm/reference_matrix.py` | `fetch_shape()` — read-only, fully anonymous (no WordPress login/credentials needed at all, confirmed live) external reference-matrix corpus lookup, doc/DESIGN.md §14 M2.5 item 2's deferred half. Walks `mvermeulen.org/workload`'s published page hierarchy directly (own minimal anonymous HTTP client), reuses `vendor/wspy`'s `web/counter_text.py` (direct pinned-submodule import, a deliberate narrow exception to "stable CLI only") to parse recovered `counters.txt` blocks, then scores the result via the real `wspy-archetype --run-guest` CLI. Degrades to `None` on any failure — no network, no matching page, nothing recoverable — never raises; `_characterize_baseline()`'s local `deep-cpu` trial is still the fallback. See CLAUDE.md's Non-obvious traps below for the anonymous-access/`.rendered`-vs-`.raw` finding and the known `vectorization_density`/`allocation_pressure` gap ([wspy#278](https://github.com/mvermeulen/wspy/issues/278)). |
 | `cfm/cli.py` | `cfm measure`/`cfm init-db`/`cfm mine`. `mine` wires all five orchestrator phases in sequence, `--max-trials` best-effort-caps Phase 2's candidate list (the widest fan-out point — Phase 4/5's own trial count isn't separately capped yet), prints a plain JSON summary (winning flags, ratio, %gain) — no curated report yet, that's M3. |
 | `scripts/bootstrap_wspy.sh` | Initializes + builds the `vendor/wspy` submodule ("wspy dependency" above). |
 | `vendor/wspy` | Pinned wspy submodule — not part of this project's own code, never edited here. |
