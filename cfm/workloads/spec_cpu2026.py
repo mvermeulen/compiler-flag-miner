@@ -68,15 +68,32 @@ class SpecCpu2026Workload(WorkloadBackend):
         # `include:` pulls in the real base config unmodified (SPEC's own
         # config.html "Included files" section) -- this trial's override only
         # touches the one benchmark's peak section, via the exact `<bench>=peak:`
-        # section syntax SPEC's own docs demonstrate (search "706.stockfish_r=peak:"
-        # in Docs/config.html for the source example this mirrors). `basepeak = no`
-        # is required alongside it: the shipped gcc_O3.cfg sets `basepeak = yes`
-        # suite-wide, which makes peak silently reuse the base binary/measurement
-        # unless overridden per-benchmark here.
+        # section syntax SPEC's own docs demonstrate (search "997.noisy=peak:" in
+        # Docs/config.txt's basepeak entry for the source example this mirrors).
+        # `basepeak = no` is required alongside it: the shipped gcc_O3.cfg sets
+        # `basepeak = yes` suite-wide, which makes peak silently reuse the base
+        # binary/measurement unless overridden per-benchmark here.
+        #
+        # CRITICAL: `basepeak = no` MUST live *inside* the `{bench}=peak:` block,
+        # not as a separate unscoped `{bench}: basepeak = no` line before it --
+        # Docs/config.txt's own basepeak entry warns "this works only if the
+        # basepeak option is placed in the header section [or, per its own
+        # worked example, scoped per-benchmark-and-tune as `997.noisy=peak:
+        # basepeak=yes`]. Put it anywhere else, spend more time indoors." An
+        # earlier version of this method used the unscoped form and it was
+        # silently ignored -- confirmed live, 2026-08-21 (CLAUDE.md's Non-obvious
+        # traps log): every real mining trial from M0 through four full `cfm
+        # mine` runs actually built and measured the *base*-tuning binary
+        # (`-g -O3 -march=native`, gcc_O3.cfg's own fixed default) regardless of
+        # which candidate flags this method thought it was rendering. The build
+        # log's own label even said "peak" while silently using
+        # `build_base_gcc_O3.NNNN` and reporting "Build successes for ...:
+        # <bench>(base)" -- the *only* externally-visible sign anything was
+        # wrong, easy to miss without specifically checking for it.
         config_path.write_text(
             f"include: {self.base_config}\n\n"
-            f"{bench}: basepeak = no\n"
             f"{bench}=peak:\n"
+            f"   basepeak = no\n"
             f"   OPTIMIZE = {optimize_string}\n"
         )
         return config_path

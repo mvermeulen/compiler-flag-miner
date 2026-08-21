@@ -1,5 +1,27 @@
 # `cfm mine` results: 714.cpython_r, 2026-08-21
 
+> ## ⚠️ Correction (2026-08-21, same day, after this run)
+>
+> **Every accept/reject conclusion and per-flag number in this document is void — including, doubly,
+> the PGO discussion below.** `cfm/workloads/spec_cpu2026.py`'s per-trial SPEC config rendered
+> `basepeak = no` in a form SPEC silently ignores (an unscoped line, not nested inside the
+> `<bench>=peak:` block it needs to be in) — every trial in this run, regardless of which candidate
+> flag was nominally under test, actually built and measured the fixed *base*-tuning binary
+> (`-g -O3 -march=native`, `gcc_O3.cfg`'s own suite-wide default), never the candidate flags at all
+> (so `-fprofile-generate`/`-fprofile-use` weren't just evaluated the wrong way, as the "Why cpython_r"
+> section below explains — they were never applied at all). See `CLAUDE.md`'s Non-obvious traps log
+> ("Resolved 2026-08-21: `generate_config()`'s per-trial `basepeak = no` override was silently ignored
+> by SPEC since this project's very first commit") for the full root-cause writeup and fix.
+>
+> **The step-pattern timing finding below survives, reinterpreted, and is arguably cleaner for it**:
+> since every trial in this run measured the *identical* binary, the observed step really is pure
+> host/environmental noise, unconfounded by any real flag difference. But every "candidate
+> rejected"/"`-O3` remains peak" conclusion is void, and the PGO methodology discussion below — while
+> still worth reading for *why* single-flag-at-a-time screening can't evaluate real PGO — describes a
+> problem this run never actually tested in the first place. This benchmark's real answer, and a real
+> PGO evaluation, both need a corrected re-run (and, for PGO, the Phase 6 work this doc already flags
+> as a prerequisite).
+
 The fourth real `cfm mine` run (experiment 8 in `cfm.db`), and the first against a genuinely
 different characterized shape — `frontend-bound` rather than the `memory-bound` stockfish and lbm
 both were. First real test of the previously-always-excluded flag categories (`-flto`,

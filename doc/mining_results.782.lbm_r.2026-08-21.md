@@ -1,5 +1,22 @@
 # `cfm mine` results: 782.lbm_r, 2026-08-21
 
+> ## ⚠️ Correction (2026-08-21, same day, after this run)
+>
+> **Every accept/reject conclusion and per-flag number in this document is void.**
+> `cfm/workloads/spec_cpu2026.py`'s per-trial SPEC config rendered `basepeak = no` in a form SPEC
+> silently ignores (an unscoped line, not nested inside the `<bench>=peak:` block it needs to be in)
+> — every trial in this run, regardless of which candidate flag was nominally under test, actually
+> built and measured the fixed *base*-tuning binary (`-g -O3 -march=native`, `gcc_O3.cfg`'s own
+> suite-wide default), never the candidate flags at all. See `CLAUDE.md`'s Non-obvious traps log
+> ("Resolved 2026-08-21: `generate_config()`'s per-trial `basepeak = no` override was silently ignored
+> by SPEC since this project's very first commit") for the full root-cause writeup and fix.
+>
+> **The drift finding below survives, reinterpreted, and is arguably cleaner for it**: since every
+> trial in this run measured the *identical* binary, the near-monotonic ~7.8-hour ramp really is pure
+> host/environmental noise, unconfounded by any real flag difference — not partially explained by real
+> per-flag effects as the original writeup assumed. But every "candidate rejected"/"`-O3` remains
+> peak" conclusion is void; this benchmark's real answer needs a corrected re-run.
+
 The third real `cfm mine` run (experiment 7 in `cfm.db`), and the first to actually use the external
 reference-matrix characterization path (`cfm/reference_matrix.py`, PRs #25-#27) for real rather than
 falling back to a local `deep-cpu` trial. Same headline conclusion as `doc/mining_results.

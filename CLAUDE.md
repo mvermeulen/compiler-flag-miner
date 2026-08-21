@@ -2,28 +2,30 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working in this repository.
 
-**Status: M0 and M1 both shipped and verified end to end against real SPEC CPU2026/wspy** (doc/DESIGN.md
-§14). M0's mechanical pipeline (`cfm measure`) was verified first (a real `--action=validate` run,
-single-pass `quick` profile). M1's rule-based screening/confirmation loop (§6 Phases 1-5, `cfm mine`)
-landed as a series of small merged PRs, unit-tested against mocked backends throughout — but per this
-project's own "shipped and verified" bar (never claimed on unit tests alone), it stayed "built, not yet
-run for real" until **2026-08-20's first real `cfm mine 706.stockfish_r --max-trials 8` run** (experiment
-5 in `cfm.db`): a clean 2h18m end-to-end pass through all five phases with no crashes, correctly
-determined `-O3` alone was already the peak config for this benchmark (all 4 screened candidates —
-`-fprefetch-loop-arrays`, `-mprefer-vector-width=256/512`, `-march=native` — looked marginally better in
-cheap single-iteration screening but got measurably *worse* under 3-rep confirmation, correctly
-rejected), and along the way live-confirmed M2.5's `_filter_implausible_candidates()` firing for real
-(10 of 18 catalog flags excluded as implausible against the baseline's real characterized
-`memory-bound`/`moderate`-vectorization-density shape, not just against mocks). That run also surfaced
-and fixed two real gaps, both in `CLAUDE.md`'s Non-obvious traps log below: two concurrent `cfm mine`
-invocations had crashed the host once already (fixed via `cfm/lock.py`'s host-exclusivity guard), and a
-crashed/failed run used to leave its `cfm.db` experiment row stuck at `status='running'` forever (fixed
-in `run_one_trial()`/`run_baseline()`). Compiler-knowledge catalog wiring beyond M1/M2.5's scope
-(a full signature-aware *ranking* pass, not just include/exclude — M2's "left to M2's ranking pass" note,
-§14), the reference-matrix-corpus half of M2.5 item 2 (deliberately deferred, see that item's own
-"Deliberately not implemented here" note), cross-benchmark knowledge transfer, and the LLM driver are
-still ahead — M2/M3/M4 (doc/DESIGN.md §13's layout table marks exactly what exists vs. what's still
-pending, module by module).
+**Status: M0/M1's pipeline mechanics are real and working, but every prior "verified"/"real run"
+result before 2026-08-21 measured the wrong binary — retracted pending a fresh corrected run.** See
+`CLAUDE.md`'s Non-obvious traps log ("Resolved 2026-08-21: `generate_config()`'s per-trial `basepeak
+= no` override was silently ignored by SPEC since this project's very first commit") for the full
+story: every real trial ever run — M0's own original verification, and all four `doc/mining_results.
+*.md` write-ups (two `706.stockfish_r` runs, `782.lbm_r`, `714.cpython_r`) — silently built and
+measured the fixed *base*-tuning binary (`gcc_O3.cfg`'s own `-g -O3 -march=native`) regardless of
+which candidate flags `cfm` intended to test. The bug is now fixed and re-verified live through `cfm`'s
+own real `generate_config()`/`build()` code path (a genuinely different binary now gets built for a
+genuinely different flag set) — but no `cfm measure`/`cfm mine` run has been *re-run* end-to-end since
+the fix, so nothing should be treated as "shipped and verified" again until one has.
+What *is* still true and unaffected by this bug: the mechanical pipeline's plumbing itself (build →
+`wspy-run` → `wspy-validate`/`wspy-store`/`wspy-archetype` → `.rsf` ratio parsing → `cfm.db`
+recording) all genuinely works, since none of that cares which flags went into a binary, only that one
+got built and measured correctly; M1's phase state machine, statistics, and CLI wiring are real code
+that ran for real, just against non-signal; Phase 2's `_filter_implausible_candidates()` and the
+reference-matrix characterization work (`cfm/reference_matrix.py`) are both untouched by this bug
+(neither depends on `generate_config()`'s peak-override rendering). The `knowledge` table's 13 rows
+from the four affected runs have been cleared (all contaminated). Compiler-knowledge catalog wiring
+beyond M1/M2.5's scope (a full signature-aware *ranking* pass, not just include/exclude — M2's "left to
+M2's ranking pass" note, §14), cross-benchmark knowledge transfer, and the LLM driver are still ahead —
+M2/M3/M4 (doc/DESIGN.md §13's layout table marks exactly what exists vs. what's still pending, module
+by module) — none of which are blocked by this bug either, but none of which have been validated
+against real signal yet.
 
 ## Documentation map
 
@@ -124,7 +126,10 @@ Full branch/PR discipline, same shape as wspy's:
 ## Non-obvious traps
 
 - **Resolved 2026-08-09: SPEC's `.rsf` ratio field, confirmed against a real run — field name was right,
-  two structural assumptions weren't.** A real `--action=validate --iterations 3` run of
+  two structural assumptions weren't.** (See the 2026-08-21 `basepeak` entry below for a critical
+  caveat on this same verification run: the *parsing* findings here remain correct, but the specific
+  numbers quoted may have come from a base-tuning build, not the peak+LTO one this run intended.) A
+  real `--action=validate --iterations 3` run of
   `706.stockfish_r` (`gcc_O3` peak, `-O3 -march=native -flto`, 14m25s wall-clock) confirmed `ratio` is
   the correct field name (formula checks out exactly: `ratio == copies * reference / reported_time`,
   `32 * 1260 / 315.907284 == 127.632384`) — but two things the original guess got wrong meant `ratio`
@@ -378,6 +383,59 @@ Full branch/PR discipline, same shape as wspy's:
   the same day's real mining run (experiment 6), independent confirmation the whole recovery chain
   (HTML fetch → `counters.txt` parsing → `wspy-archetype --run-guest` scoring) is actually correct, not
   merely internally consistent with itself.
+- **Resolved 2026-08-21: `generate_config()`'s per-trial `basepeak = no` override was silently ignored
+  by SPEC since this project's very first commit — every real trial ever run, M0 through four full
+  `cfm mine` runs, actually built and measured the fixed *base*-tuning binary (`-g -O3 -march=native`,
+  `gcc_O3.cfg`'s own suite-wide default), never whichever candidate flags `cfm` thought it was testing.**
+  Surfaced while scoping real PGO/FDO support (the user's own instinct — "want to work this through
+  before we try cpython again... otherwise we aren't really looking at the other benchmarks" — turned
+  out to be far more literal than either of us expected). `generate_config()` rendered:
+  ```
+  {bench}: basepeak = no
+  {bench}=peak:
+     OPTIMIZE = <candidate flags>
+  ```
+  — `basepeak = no` as a separate, *unscoped* line before the `{bench}=peak:` block. This looks
+  correct (search "706.stockfish_r=peak:" in `Docs/config.html`, the exact example this was modeled
+  on) but `Docs/config.txt`'s own `basepeak` entry has a warning easy to read past: *"this works only
+  if the basepeak option is placed in the header section [or, per its own worked example, scoped
+  per-benchmark-and-tune as `997.noisy=peak: basepeak=yes`]. Put it anywhere else, spend more time
+  indoors."* An unscoped `{bench}: basepeak = no` is exactly "anywhere else" — SPEC silently keeps the
+  suite-wide `default: basepeak = yes` (`gcc_O3.cfg`'s own shipped default) in effect regardless, so
+  peak tuning transparently reuses/rebuilds the *base* binary every time.
+  **Confirmed live, reproduced twice, root-caused, and fixed** — not by inspection: a real
+  `runcpu --action=build` with `cfm`'s exact unscoped shape built `782.lbm_r` and logged `"Building
+  782.lbm_r peak gcc_O3: (build_base_gcc_O3.0000)"` / `"Build successes for fprate: 782.lbm_r(base)"`
+  (note "peak" only in the human-readable label — the actual directory name and success line both say
+  `base`) with `OPTIMIZE="-g -O3 -march=native"` in the real compile/link command lines, completely
+  ignoring the candidate flags requested. The identical config with `basepeak = no` moved *inside* the
+  `{bench}=peak:` block built `build_peak_gcc_O3.0000` for real, with the requested flags genuinely
+  reaching the compile/link lines. Fix: move `basepeak = no` inside the section. Verified again through
+  `cfm`'s own real (now-fixed) `generate_config()`/`build()` code path, not just the hand-written
+  diagnostic config, before considering this closed.
+  **Blast radius**: every trial recorded before this fix — M0's original "shipped and verified" run,
+  and all four `doc/mining_results.*.md` write-ups (two `706.stockfish_r` runs, `782.lbm_r`,
+  `714.cpython_r`) — measured the *same binary* regardless of which candidate flag was nominally under
+  test. Every "screening ratio"/"confirmation delta"/"accept-reject verdict" in those docs reflects
+  pure run-to-run noise between repeated builds of an *identical* program, not any real flag effect;
+  every `knowledge` table row those runs produced was upserted from the same non-signal and has been
+  cleared (`DELETE FROM knowledge;`, 13 contaminated rows). Silver lining, not spin: since every trial
+  in an affected run measured the identical binary, the *timing/environmental* findings in
+  `doc/mining_results.782.lbm_r.2026-08-21.md` (the ~7.8-hour monotonic drift) and
+  `doc/mining_results.714.cpython_r.2026-08-21.md` (the step-shaped noise) are now known for certain to
+  be pure host/environmental noise, unconfounded by any real flag difference — if anything a *cleaner*
+  characterization of this host's run-to-run variance than originally realized, even though every
+  per-flag conclusion drawn from the same data is void. `_filter_implausible_candidates()` (Phase 2)
+  and the reference-matrix characterization work (`cfm/reference_matrix.py`) are both unaffected —
+  neither touches `generate_config()`'s peak-override rendering at all.
+  **Lesson for next time**: a unit test asserting the exact *unscoped* line as the "correct" rendered
+  shape (`tests/test_workloads_spec_cpu2026.py`'s original assertion) passed throughout, because it only
+  checked substring presence, never SPEC's own interpretation of the config — exactly the "a hand-rolled
+  fixture encodes the same assumption as the code it's testing proves nothing" lesson from the `.rsf`
+  entry above, recurring in a new shape: this time the fixture wasn't hand-written data but a
+  hand-written *assertion* about correct-looking-but-untested config syntax. Fixed test now asserts
+  `basepeak`'s *position* relative to the section header, not just its presence, and a real re-run
+  through `runcpu --action=build` is what actually caught this, not any unit test.
 
 ## Build & test
 
