@@ -20,9 +20,25 @@ def test_generate_config_writes_include_and_peak_override(tmp_path):
     assert config_path.exists()
     text = config_path.read_text()
     assert "include: gcc_O3.cfg" in text
-    assert "706.stockfish_r: basepeak = no" in text
     assert "706.stockfish_r=peak:" in text
     assert "OPTIMIZE = -O3 -flto" in text
+    # `basepeak = no` MUST be scoped *inside* the "<bench>=peak:" block, not a
+    # separate unscoped "<bench>: basepeak = no" line before it -- SPEC silently
+    # ignores the unscoped form (confirmed live against a real runcpu build,
+    # CLAUDE.md's Non-obvious traps log, 2026-08-21: every real cfm mine trial
+    # before this fix actually built the *base*-tuning binary regardless of
+    # which candidate flags this method rendered -- the build log's own label
+    # said "peak" while silently using build_base_*/"Build successes for
+    # ...(base)"). A plain substring check on "basepeak = no" being present
+    # anywhere would not catch a regression back to the unscoped form -- this
+    # test previously asserted the *unscoped* line verbatim as the "correct"
+    # shape, which is exactly why the bug shipped undetected in the first
+    # place; only checking basepeak's position relative to the section header
+    # actually guards against it.
+    assert "706.stockfish_r: basepeak = no" not in text
+    peak_header_pos = text.index("706.stockfish_r=peak:")
+    basepeak_pos = text.index("basepeak = no")
+    assert basepeak_pos > peak_header_pos
 
 
 def test_generate_config_is_deterministic_for_same_flags(tmp_path):

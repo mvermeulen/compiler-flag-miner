@@ -1,5 +1,22 @@
 # `cfm mine` results: 706.stockfish_r, 2026-08-20
 
+> ## ⚠️ Correction (2026-08-21, after this run)
+>
+> **Every accept/reject conclusion and per-flag number in this document is void.**
+> `cfm/workloads/spec_cpu2026.py`'s per-trial SPEC config rendered `basepeak = no` in a form SPEC
+> silently ignores (an unscoped line, not nested inside the `<bench>=peak:` block it needs to be in)
+> — every trial in both runs below, regardless of which candidate flag was nominally under test,
+> actually built and measured the fixed *base*-tuning binary (`-g -O3 -march=native`, `gcc_O3.cfg`'s
+> own suite-wide default), never the candidate flags at all. See `CLAUDE.md`'s Non-obvious traps log
+> ("Resolved 2026-08-21: `generate_config()`'s per-trial `basepeak = no` override was silently ignored
+> by SPEC since this project's very first commit") for the full root-cause writeup and fix — this bug
+> dates to M0, so it also affects the very first "shipped and verified" claim this file's own opening
+> line references.
+>
+> Everything below is preserved as-written for the historical record (the process/timing/mechanics
+> observations still have some value), but no "`-O3` remains peak" or per-flag delta conclusion below
+> should be trusted. A corrected re-run is needed before this benchmark's real answer is known.
+
 The first two real `cfm mine` runs against actual SPEC CPU2026/wspy (M1's "shipped and verified"
 milestone, `CLAUDE.md`'s Status line). Both mined the same benchmark from the same `-O3` baseline on
 the same host; documented together because the differences between them are as informative as the
