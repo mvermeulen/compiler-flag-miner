@@ -380,8 +380,15 @@ def screen_candidates(
     conn = db.connect(cfg.db_path)
     try:
         for candidate in candidates:
+            # baseline.flags + [candidate.flag], never candidate.flag alone --
+            # confirmed live, 2026-08-22 (CLAUDE.md's Non-obvious traps log):
+            # testing a candidate flag in total isolation means no -O level at
+            # all reaches the compiled binary, a ~-O0-vs--O3 comparison, not
+            # "does this flag help on top of the baseline" -- this was masked
+            # the whole time by the basepeak bug (nothing built for real before
+            # its fix), so it had zero observable effect until now.
             result = run_one_trial(
-                cfg, benchmark=benchmark, flags=[candidate.flag], phase="screening",
+                cfg, benchmark=benchmark, flags=baseline.flags + [candidate.flag], phase="screening",
                 profile=SCREENING_PROFILE, iterations=SCREENING_ITERATIONS,
                 experiment_id=experiment_id, workload=workload, instrumentation=instrumentation,
             )
@@ -532,10 +539,20 @@ def _confirm_flagset(
         # confirmation is still persisted above, as trials + hypotheses, just not
         # folded into this numeric aggregate). compiler_version/target_arch are
         # both None -- no host/GCC detection wired in yet (CLAUDE.md's traps log).
-        if len(flags) == 1 and ratios:
+        #
+        # phase == "confirmation" (not len(flags) == 1) is what actually
+        # distinguishes Phase 4 from Phase 5 here: flags is now always
+        # baseline.flags + [the one candidate under test] (confirmed live,
+        # 2026-08-22 -- see confirm_candidates()'s own comment for why it's no
+        # longer just [candidate.flag] alone), so it's never length 1 by
+        # itself, and Phase 5's own greedy-walk first step has the identical
+        # length/shape (baseline.flags + [flag]) -- phase is the only reliable
+        # signal. The candidate itself is flags[-1] (the newly-added one), not
+        # flags[0] (now baseline's own first flag, e.g. "-O3").
+        if phase == "confirmation" and ratios:
             db.upsert_knowledge(
                 conn, cluster_key=baseline.resource_dominance or "unknown", compiler="gcc",
-                compiler_version=None, target_arch=None, flag=flags[0], accepted=accepted,
+                compiler_version=None, target_arch=None, flag=flags[-1], accepted=accepted,
                 delta_pct=delta_pct, last_benchmark=benchmark,
             )
     finally:
@@ -566,10 +583,12 @@ def confirm_candidates(
     just chain ``screen_candidates()``'s return value straight in.
     """
     return [
+        # baseline.flags + [candidate.flag], never candidate.flag alone -- same
+        # fix and same reasoning as screen_candidates() above.
         _confirm_flagset(
             cfg, experiment_id=experiment_id, benchmark=benchmark, baseline=baseline,
-            flags=[outcome.candidate.flag], phase="confirmation", compare_ci=baseline.ci,
-            workload=workload, instrumentation=instrumentation,
+            flags=baseline.flags + [outcome.candidate.flag], phase="confirmation",
+            compare_ci=baseline.ci, workload=workload, instrumentation=instrumentation,
         )
         for outcome in screened
         if outcome.survived
@@ -623,7 +642,11 @@ def greedy_combine(
     steps: list[ConfirmationOutcome] = []
 
     for candidate in accepted:
-        flag = candidate.flags[0]
+        # flags[-1], not flags[0] -- Phase 4's ConfirmationOutcome.flags is now
+        # baseline.flags + [the candidate] (confirmed live, 2026-08-22; see
+        # confirm_candidates()'s own comment), so the actual candidate flag is
+        # the last element, not the first (which is baseline's own, e.g. "-O3").
+        flag = candidate.flags[-1]
         if flag in current_flags:
             continue
         trial_flags = current_flags + [flag]
@@ -644,13 +667,15 @@ def greedy_combine(
     # together on its own (e.g. two flags each individually rejected that only
     # help in combination), not to re-explore what greedy already covered.
     pair_trials: list[ConfirmationOutcome] = []
-    candidate_flags = [c.flags[0] for c in accepted]
+    candidate_flags = [c.flags[-1] for c in accepted]  # see the greedy loop's own comment above
     pairs = list(itertools.combinations(candidate_flags, 2))
     rng.shuffle(pairs)
     for a, b in pairs[:max_pair_trials]:
+        # baseline.flags + the two candidates, never the pair alone -- same
+        # fix and same reasoning as screen_candidates()/confirm_candidates().
         pair_trials.append(_confirm_flagset(
             cfg, experiment_id=experiment_id, benchmark=benchmark, baseline=baseline,
-            flags=sorted({a, b}), phase="combination", compare_ci=baseline.ci,
+            flags=baseline.flags + sorted({a, b}), phase="combination", compare_ci=baseline.ci,
             workload=workload, instrumentation=instrumentation,
         ))
 

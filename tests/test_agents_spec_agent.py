@@ -91,6 +91,17 @@ def test_summarize_compiled_flags_audit_reports_found_missing_and_skipped():
     assert "confirmed compiled in: ['-flto']" in summary
     assert "NOT FOUND in compiled binary" in summary and "-fno-semantic-interposition" in summary
     assert "not independently checkable" in summary and "-march=native" in summary
+    assert "no -O optimization level" not in summary  # -O3 is right there in the dump
+
+
+def test_summarize_compiled_flags_audit_warns_when_no_optimization_level_found():
+    # The real 2026-08-22 bug this generic check exists to catch: a build whose
+    # flags list never included baseline's own -O3 at all. Deliberately not
+    # gated on whether "flags" itself expected an -O entry -- the whole point
+    # is to catch flags itself having been wrong.
+    dump = "GNU C17 15.2.0 -mtune=generic -march=x86-64 -fprefetch-loop-arrays -frecord-gcc-switches\n"
+    summary = _summarize_compiled_flags_audit(["-fprefetch-loop-arrays"], dump)
+    assert "⚠ WARNING: no -O optimization level found" in summary
 
 
 # -- audit wiring in run_one_trial() -------------------------------------------
