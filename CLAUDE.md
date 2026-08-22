@@ -472,6 +472,66 @@ Full branch/PR discipline, same shape as wspy's:
   session, but deliberately not implemented yet — no calibrated threshold/timeout exists to tune an
   active gate against, and adding new blocking logic to an unattended overnight run before one does is
   a real risk, not a free improvement).
+- **Resolved 2026-08-22: the "18x slowdown" mystery — screening/confirmation candidates were tested in
+  total isolation from the baseline's own `-O3`, not layered on top of it. A genuine `-O0`-vs-`-O3`
+  comparison, not a hardware problem.** Surfaced the morning after the basepeak fix (previous entry),
+  during the first real, focused post-fix mining run: a screening trial's ratio crashed from
+  baseline's ~95-102 to ~7, and its wall-clock exploded from ~7 minutes to ~90+ minutes. Several real
+  hypotheses were chased and each was genuinely ruled out with live evidence before finding the actual
+  cause — worth recording the sequence, since each dead end was a reasonable thing to check, not a
+  wasted detour:
+  1. **Power profile** (`powerprofilesctl` showed `"balanced"`, not `"performance"`) — plausible at
+     first (a power-constrained mobile/APU chip), but the user's own prior experience running fine on
+     `"balanced"` was the right pushback, and a fresh isolated trial afterward under `"performance"`
+     mode didn't cleanly separate the two anyway.
+  2. **Simple clock-frequency throttling** — directly falsified by the numbers: this chip's sustained
+     frequency range under full load tops out around 3-8x slower at the extreme low end, nowhere near
+     the observed ~13-18x. Real thermal throttling *cannot* be the sole mechanism for a gap this large.
+  3. **Swap thrashing / memory pressure** — ruled out via real historical `sar` data (`sysstat`'s
+     10-minute samples): 0% swap used and a flat ~58% memory utilization for the entire window,
+     including the slow trials.
+  4. **A cold/slow build** — ruled out by reading the actual SPEC log: `"Up to date 706.stockfish_r
+     peak gcc_O3"` — the binary was cached, not recompiled; 100% of the ~90-minute anomaly was in the
+     *run* phase alone.
+  **Actual root cause**, found by directly inspecting the compiled binary's own audit trail (the
+  previous entry's `-frecord-gcc-switches` addition) rather than the environment: `cfm/orchestrator.py`
+  passed `flags=[candidate.flag]` to `run_one_trial()`/`_confirm_flagset()` in `screen_candidates()`,
+  `confirm_candidates()`, and the pair-tournament half of `greedy_combine()` — the candidate flag
+  *alone*, never combined with `baseline.flags`. A live audit hypothesis for the slow trial read
+  `"compiled-flags audit -- confirmed compiled in: ['-fprefetch-loop-arrays']"` — no `-O3` anywhere.
+  Stockfish's NNUE evaluation is extremely sensitive to both optimization level and vector instruction
+  availability, so testing it at an effective `-O0` (no `-O` flag at all implies GCC's own default)
+  produced exactly the ~13-18x regression observed — no hardware explanation needed. **This bug was
+  completely masked by the basepeak bug until the moment that one was fixed**: before the fix, every
+  trial silently rebuilt/reused the identical base-tuning binary regardless of what `flags` list was
+  passed in, so a wrong `flags` list had zero observable effect. It only became visible the instant
+  candidate flags started actually reaching the compiler for the first time in this project's history.
+  **Could this have been caught sooner?** Yes — the compiled-flags audit already had the answer
+  (baseline's own trial showed `confirmed compiled in: ['-O3']`; the broken trial's own row, sitting in
+  the same `cfm.db`, never mentioned `-O3` at all) well before any of the thermal/power/swap
+  investigation above started. The gap wasn't the audit's existence, it was that (a) nothing
+  cross-referenced a trial's audit against baseline's own, and (b) the orchestrator's own unit tests
+  encoded the identical wrong assumption the code had (`ScriptedBackends`' `ratio_sequences` fixtures
+  were keyed by the bare candidate flag, e.g. `("-good",)`, matching the bug) — the third recurrence of
+  the "a hand-rolled fixture encodes the same assumption as the code it's testing proves nothing" class
+  of bug in this project's own history (the `.rsf` entry, the `basepeak` entry, now this).
+  **Fix**: `screen_candidates()`/`confirm_candidates()`/`greedy_combine()`'s pair tournament now render
+  `baseline.flags + [candidate.flag]` (or `+ sorted({a, b})` for a pair) -- matching the greedy walk's
+  own cumulative step, which was already correct. `_confirm_flagset()`'s knowledge-table upsert
+  (previously gated on `len(flags) == 1`, now never true for Phase 4 since `flags` always includes
+  baseline's own) switched to gating on `phase == "confirmation"` instead, reading the actual candidate
+  off `flags[-1]` rather than `flags[0]`. Every affected test's fixture updated to the corrected shape
+  — including tests that were passing *for the wrong reason* (an exhausted/never-matched mock queue
+  silently producing "no usable ratio," which happened to satisfy the same assertion a real accept/
+  reject would have) — not just the ones that outright failed. Verified for real: the identical
+  candidate that produced the broken audit now compiles with `-O3` genuinely present, confirmed via
+  `audit_compiled_flags()` against a real build.
+  **New generic safety net, motivated directly by "could this have been caught sooner"**: the audit
+  (`_summarize_compiled_flags_audit()`) now unconditionally checks the compiled dump for *any* `-O`
+  optimization level at all and emits a loud `⚠ WARNING` if none is found — regardless of what `flags`
+  itself claimed to want, so a *future* caller making this same class of mistake surfaces it
+  automatically in `cfm.db`, without requiring a human to notice by manually diffing two trials' audit
+  rows against each other (which is what actually happened this time).
 
 ## Build & test
 

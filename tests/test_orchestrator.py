@@ -214,9 +214,9 @@ def test_screen_candidates_prunes_clearly_worse_keeps_better_and_marginal(tmp_pa
     baseline = _baseline(mean_ratio=100.0)
     candidates = [_candidate("-good"), _candidate("-bad"), _candidate("-marginal")]
     backends = ScriptedBackends(ratio_sequences={
-        ("-good",): [110.0],      # +10% -- clearly better, survives
-        ("-bad",): [80.0],        # -20% -- clearly worse, pruned
-        ("-marginal",): [96.0],   # -4% -- within the 5% prune bar, survives
+        ("-O3", "-good"): [110.0],      # +10% -- clearly better, survives
+        ("-O3", "-bad"): [80.0],        # -20% -- clearly worse, pruned
+        ("-O3", "-marginal"): [96.0],   # -4% -- within the 5% prune bar, survives
     })
 
     outcomes = screen_candidates(
@@ -240,7 +240,7 @@ def test_screen_candidates_build_failure_does_not_survive(tmp_path):
     baseline = _baseline()
     candidates = [_candidate("-broken")]
     backends = ScriptedBackends(
-        ratio_sequences={("-broken",): []}, build_fails_for=frozenset({("-broken",)}),
+        ratio_sequences={("-O3", "-broken"): []}, build_fails_for=frozenset({("-O3", "-broken")}),
     )
 
     outcomes = screen_candidates(
@@ -262,7 +262,7 @@ def test_screen_candidates_persists_a_hypothesis_row_per_trial(tmp_path):
 
     baseline = _baseline()
     candidates = [_candidate("-good")]
-    backends = ScriptedBackends(ratio_sequences={("-good",): [110.0]})
+    backends = ScriptedBackends(ratio_sequences={("-O3", "-good"): [110.0]})
     outcomes = screen_candidates(
         cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline,
         candidates=candidates, workload=backends, instrumentation=backends,
@@ -410,7 +410,7 @@ def test_confirm_candidates_accepts_a_clear_improvement(tmp_path):
     conn.close()
 
     baseline = _baseline(mean_ratio=100.0)  # zero-width CI at 100
-    backends = ScriptedBackends(ratio_sequences={("-good",): [109.0, 110.0, 111.0]})
+    backends = ScriptedBackends(ratio_sequences={("-O3", "-good"): [109.0, 110.0, 111.0]})
 
     outcomes = confirm_candidates(
         cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline,
@@ -430,14 +430,14 @@ def test_confirm_candidates_only_processes_survivors(tmp_path):
     conn.close()
 
     baseline = _baseline()
-    backends = ScriptedBackends(ratio_sequences={("-good",): [110.0, 110.0, 110.0]})
+    backends = ScriptedBackends(ratio_sequences={("-O3", "-good"): [110.0, 110.0, 110.0]})
     outcomes = confirm_candidates(
         cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline,
         screened=[_screened("-good", survived=True), _screened("-bad", survived=False)],
         workload=backends, instrumentation=backends,
     )
     assert len(outcomes) == 1
-    assert outcomes[0].flags == ["-good"]
+    assert outcomes[0].flags == ["-O3", "-good"]
 
 
 def test_confirm_candidates_rejects_non_overlapping_but_practically_insignificant_delta(tmp_path):
@@ -452,7 +452,7 @@ def test_confirm_candidates_rejects_non_overlapping_but_practically_insignifican
 
     assert MIN_PRACTICAL_SIGNIFICANCE_PCT == 1.0  # sanity: the module default didn't drift silently
     baseline = _baseline(mean_ratio=100.0)
-    backends = ScriptedBackends(ratio_sequences={("-marginal",): [100.5, 100.5, 100.5]})
+    backends = ScriptedBackends(ratio_sequences={("-O3", "-marginal"): [100.5, 100.5, 100.5]})
     outcomes = confirm_candidates(
         cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline,
         screened=[_screened("-marginal")], workload=backends, instrumentation=backends,
@@ -460,7 +460,7 @@ def test_confirm_candidates_rejects_non_overlapping_but_practically_insignifican
     assert outcomes[0].accepted is False
 
     # A delta comfortably over the threshold, same non-overlapping shape, accepts.
-    backends = ScriptedBackends(ratio_sequences={("-good",): [102.0, 102.0, 102.0]})
+    backends = ScriptedBackends(ratio_sequences={("-O3", "-good"): [102.0, 102.0, 102.0]})
     outcomes = confirm_candidates(
         cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline,
         screened=[_screened("-good")], workload=backends, instrumentation=backends,
@@ -476,7 +476,7 @@ def test_confirm_candidates_rejects_when_ci_overlaps_baseline(tmp_path):
 
     baseline = _baseline(mean_ratio=100.0)
     # No real difference from baseline -- CIs will overlap.
-    backends = ScriptedBackends(ratio_sequences={("-meh",): [99.0, 100.0, 101.0]})
+    backends = ScriptedBackends(ratio_sequences={("-O3", "-meh"): [99.0, 100.0, 101.0]})
     outcomes = confirm_candidates(
         cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline,
         screened=[_screened("-meh")], workload=backends, instrumentation=backends,
@@ -492,7 +492,7 @@ def test_confirm_candidates_calls_check_regression_only_when_accepted(tmp_path):
     baseline = _baseline(mean_ratio=100.0)
 
     accepted_backends = ScriptedBackends(
-        ratio_sequences={("-good",): [110.0, 110.0, 110.0]},
+        ratio_sequences={("-O3", "-good"): [110.0, 110.0, 110.0]},
         regression_rows=[{"metric": "ipc", "status": "within", "baseline_verdict": "PASS"}],
     )
     confirm_candidates(
@@ -501,7 +501,7 @@ def test_confirm_candidates_calls_check_regression_only_when_accepted(tmp_path):
     )
     assert len(accepted_backends.check_regression_calls) == 3  # once per repetition
 
-    rejected_backends = ScriptedBackends(ratio_sequences={("-meh",): [100.0, 100.0, 100.0]})
+    rejected_backends = ScriptedBackends(ratio_sequences={("-O3", "-meh"): [100.0, 100.0, 100.0]})
     confirm_candidates(
         cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline,
         screened=[_screened("-meh")], workload=rejected_backends, instrumentation=rejected_backends,
@@ -516,7 +516,7 @@ def test_confirm_candidates_persists_verdict_and_upserts_knowledge(tmp_path):
     conn.close()
 
     baseline = _baseline(mean_ratio=100.0)
-    backends = ScriptedBackends(ratio_sequences={("-good",): [110.0, 110.0, 110.0]})
+    backends = ScriptedBackends(ratio_sequences={("-O3", "-good"): [110.0, 110.0, 110.0]})
     outcomes = confirm_candidates(
         cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline,
         screened=[_screened("-good")], workload=backends, instrumentation=backends,
@@ -549,7 +549,7 @@ def test_confirm_candidates_total_failure_rejects_without_knowledge_upsert(tmp_p
 
     baseline = _baseline()
     backends = ScriptedBackends(
-        ratio_sequences={("-broken",): []}, build_fails_for=frozenset({("-broken",)}),
+        ratio_sequences={("-O3", "-broken"): []}, build_fails_for=frozenset({("-O3", "-broken")}),
     )
     outcomes = confirm_candidates(
         cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline,
@@ -588,8 +588,14 @@ def test_greedy_combine_builds_a_cumulative_winning_set(tmp_path):
     confirmed = [_confirmed("-flag-a", delta=10.0), _confirmed("-flag-b", delta=5.0)]
     backends = ScriptedBackends(ratio_sequences={
         ("-O3", "-flag-a"): [110.0, 110.0, 110.0],
+        # Same tuple the pair tournament's own (only possible) pair -- {-flag-a,
+        # -flag-b} -- would also evaluate (baseline.flags is always included now,
+        # confirmed live, 2026-08-22): with only 2 candidates total, the pair
+        # tournament can never reach a combination the greedy walk didn't already
+        # try, so it just finds this queue exhausted (no usable ratio) and never
+        # disturbs the greedy winner. See the *_can_beat_the_greedy_winner test
+        # below for a real 3-candidate synergy case where they do diverge.
         ("-O3", "-flag-a", "-flag-b"): [120.0, 120.0, 120.0],
-        ("-flag-a", "-flag-b"): [108.0, 108.0, 108.0],  # pair alone -- worse than the greedy winner
     })
 
     result = greedy_combine(
@@ -613,16 +619,29 @@ def test_greedy_combine_pair_tournament_can_beat_the_greedy_winner(tmp_path):
         experiment_id=exp_id, flags=["-O3"], ratios=[100.0] * 3,
         ci=confidence_interval([100.0, 100.0, 100.0]), resource_dominance="memory-bound",
     )
-    confirmed = [_confirmed("-flag-a", delta=10.0), _confirmed("-flag-b", delta=8.0)]
+    # Three candidates, not two -- with only two, the pair tournament's one
+    # possible pair is mechanically identical to the greedy walk's own last
+    # step (baseline.flags is always included in both now, confirmed live,
+    # 2026-08-22), so it can never diverge from what greedy already tried. A
+    # real synergy-catching scenario needs a pair the greedy walk *never*
+    # reaches -- here, greedy commits to -flag-a first (highest delta), then
+    # -flag-b and -flag-c each fail to improve on top of it, but -flag-b and
+    # -flag-c *together* (a combination greedy never tries, having already
+    # committed to -flag-a) beat the greedy winner.
+    confirmed = [
+        _confirmed("-flag-a", delta=10.0),
+        _confirmed("-flag-b", delta=8.0),
+        _confirmed("-flag-c", delta=5.0),
+    ]
     backends = ScriptedBackends(ratio_sequences={
         ("-O3", "-flag-a"): [110.0, 110.0, 110.0],
-        # Adding -flag-b on top of -flag-a doesn't clear the bar over the current
-        # winner (110) -- an interaction effect the greedy walk can't see past.
+        # Neither -flag-b nor -flag-c improves on top of -flag-a enough to clear
+        # the bar over the current winner (110).
         ("-O3", "-flag-a", "-flag-b"): [109.0, 111.0, 110.0],
-        # But -flag-a and -flag-b *together* (without -O3's baseline flags) beat
-        # both baseline and the greedy winner -- exactly the synergy the pair
-        # tournament exists to catch.
-        ("-flag-a", "-flag-b"): [125.0, 125.0, 125.0],
+        ("-O3", "-flag-a", "-flag-c"): [109.0, 111.0, 110.0],
+        # But -flag-b and -flag-c together beat both baseline and the greedy
+        # winner -- exactly the synergy the pair tournament exists to catch.
+        ("-O3", "-flag-b", "-flag-c"): [125.0, 125.0, 125.0],
     })
 
     result = greedy_combine(
@@ -630,7 +649,7 @@ def test_greedy_combine_pair_tournament_can_beat_the_greedy_winner(tmp_path):
         workload=backends, instrumentation=backends, rng=random.Random(0),
     )
 
-    assert result.winning_flags == ["-flag-a", "-flag-b"]
+    assert result.winning_flags == ["-O3", "-flag-b", "-flag-c"]
     assert result.winning_ci.mean == pytest.approx(125.0)
 
 
@@ -672,15 +691,19 @@ def test_full_pipeline_surfaces_a_genuinely_better_flag(tmp_path):
     cfg = _cfg(tmp_path)
     baseline_flags = ["-O3"]
     candidates = [_candidate("-good-flag"), _candidate("-bad-flag")]
-    # ScriptedBackends pops from one queue per flags-tuple regardless of which
-    # phase is asking -- ("-good-flag",) is used both by Phase 3's single
-    # screening run and Phase 4's 3 confirmation reps, consumed in call order, so
-    # its queue needs 1 (screening) + 3 (confirmation) = 4 entries queued up front.
+    # Every phase now renders baseline.flags + [candidate.flag] (confirmed live,
+    # 2026-08-22 -- see screen_candidates()'s own comment for why), so Phase 3's
+    # screening run, Phase 4's 3 confirmation reps, *and* Phase 5's own greedy
+    # step for "-good-flag" all share the identical ("-O3", "-good-flag") queue
+    # key -- one queue of 1+3+3=7 entries, consumed in call order.
     backends = ScriptedBackends(ratio_sequences={
-        ("-O3",): [100.0, 100.0, 100.0, 100.0],              # baseline: 1 characterization + 3 calibration
-        ("-good-flag",): [110.0, 111.0, 111.0, 111.0],       # 1 screening + 3 confirmation
-        ("-bad-flag",): [80.0],                              # 1 screening only (pruned)
-        ("-O3", "-good-flag"): [112.0, 112.0, 112.0],        # Phase 5's greedy step
+        ("-O3",): [100.0, 100.0, 100.0, 100.0],  # baseline: 1 characterization + 3 calibration
+        ("-O3", "-good-flag"): [
+            110.0,                # 1 screening
+            111.0, 111.0, 111.0,  # 3 confirmation
+            112.0, 112.0, 112.0,  # Phase 5's greedy step
+        ],
+        ("-O3", "-bad-flag"): [80.0],  # 1 screening only (pruned)
     })
 
     baseline = run_baseline(
@@ -712,8 +735,8 @@ def test_full_pipeline_reports_baseline_when_nothing_helps(tmp_path):
     candidates = [_candidate("-bad-flag-1"), _candidate("-bad-flag-2")]
     backends = ScriptedBackends(ratio_sequences={
         ("-O3",): [100.0, 100.0, 100.0, 100.0],  # 1 characterization + 3 calibration
-        ("-bad-flag-1",): [70.0],
-        ("-bad-flag-2",): [60.0],
+        ("-O3", "-bad-flag-1"): [70.0],
+        ("-O3", "-bad-flag-2"): [60.0],
     })
 
     baseline = run_baseline(

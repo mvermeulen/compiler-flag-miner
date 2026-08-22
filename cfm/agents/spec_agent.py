@@ -44,6 +44,18 @@ def new_run_id() -> str:
 _AUDIT_UNVERIFIABLE_LITERAL_FLAGS = frozenset({"-march=native", "-mtune=native"})
 
 
+# Confirmed live, 2026-08-22 (CLAUDE.md's Non-obvious traps log): a real GCC
+# ".GCC.command.line" dump for a genuinely-optimized build always has exactly
+# one of these. Its complete absence is a strong, cheap, generic signal that
+# something upstream handed this trial a flags list with no -O level at all --
+# exactly the shape of the screen_candidates()/confirm_candidates() bug this
+# same investigation found (candidate flags tested in total isolation, never
+# combined with the baseline's own -O3). This check doesn't know or care
+# *why* -O is missing -- it would catch a similar mistake in a future caller
+# just as well, not just this one.
+_OPTIMIZATION_LEVEL_RE = re.compile(r"-O(?:0|1|2|3|s|g|z|fast)\b")
+
+
 def _summarize_compiled_flags_audit(flags: list[str], audit_dump: str) -> str:
     """Best-effort literal-substring check of each requested flag against
     audit_compiled_flags()'s raw `.GCC.command.line` dump -- confirms what SPEC
@@ -54,6 +66,15 @@ def _summarize_compiled_flags_audit(flags: list[str], audit_dump: str) -> str:
     (-flto, -fprofile-*, -freorder-*, -fno-semantic-interposition,
     -mprefer-vector-width=N, ...) is recorded by GCC verbatim, so a real
     substring match is meaningful for them.
+
+    Also flags -- loudly, unconditionally -- if no `-O` optimization level
+    shows up in the compiled binary at all, regardless of whether one was
+    expected in `flags`. This is deliberately *not* gated on `flags` itself
+    containing an `-O` entry: the whole point is to catch a case where the
+    caller's own `flags` list was already wrong (missing the baseline's own
+    `-O3`) before anyone has to notice by manually diffing two trials' audit
+    rows against each other, which is what actually happened the first time
+    (2026-08-22).
     """
     found, missing, skipped = [], [], []
     for flag in flags:
@@ -70,6 +91,13 @@ def _summarize_compiled_flags_audit(flags: list[str], audit_dump: str) -> str:
         parts.append(f"NOT FOUND in compiled binary (see CLAUDE.md's basepeak trap): {missing}")
     if skipped:
         parts.append(f"not independently checkable (GCC expands these before recording): {skipped}")
+    if not _OPTIMIZATION_LEVEL_RE.search(audit_dump):
+        parts.append(
+            "⚠ WARNING: no -O optimization level found in the compiled binary at all -- "
+            "this trial's build very likely got no real optimization (see CLAUDE.md's Non-obvious "
+            "traps log, 2026-08-22 entry on screen_candidates()/confirm_candidates() once testing a "
+            "candidate flag in total isolation from the baseline's own -O3)"
+        )
     return "compiled-flags audit -- " + "; ".join(parts)
 
 
