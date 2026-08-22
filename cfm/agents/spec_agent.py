@@ -14,6 +14,7 @@ to operate over.
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -31,6 +32,67 @@ def new_run_id() -> str:
     # be byte-identical to it -- we always pass --run-id explicitly.
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
     return f"{stamp}-{uuid.uuid4().hex[:8]}"
+
+
+# GCC rewrites these before recording them into .GCC.command.line (-march=native/
+# -mtune=native expand into dozens of concrete -m*/--param= flags, e.g.
+# "-march=znver5 -mmmx -mpopcnt ..." -- confirmed live, 2026-08-21, no literal
+# "native" survives anywhere in the recording) -- a literal substring check
+# against these two specifically would always report "missing" even on a
+# perfectly correct build, so audit_compiled_flags()'s check skips them rather
+# than raising a false alarm.
+_AUDIT_UNVERIFIABLE_LITERAL_FLAGS = frozenset({"-march=native", "-mtune=native"})
+
+
+def _summarize_compiled_flags_audit(flags: list[str], audit_dump: str) -> str:
+    """Best-effort literal-substring check of each requested flag against
+    audit_compiled_flags()'s raw `.GCC.command.line` dump -- confirms what SPEC
+    actually compiled with, independent of runcpu's own "Build successes"
+    report (CLAUDE.md's Non-obvious traps log, 2026-08-21 basepeak entry, on
+    why that report alone isn't sufficient). Not a hard pass/fail signal: every
+    catalog flag *other* than the two in _AUDIT_UNVERIFIABLE_LITERAL_FLAGS
+    (-flto, -fprofile-*, -freorder-*, -fno-semantic-interposition,
+    -mprefer-vector-width=N, ...) is recorded by GCC verbatim, so a real
+    substring match is meaningful for them.
+    """
+    found, missing, skipped = [], [], []
+    for flag in flags:
+        if flag in _AUDIT_UNVERIFIABLE_LITERAL_FLAGS:
+            skipped.append(flag)
+        elif flag in audit_dump:
+            found.append(flag)
+        else:
+            missing.append(flag)
+    parts = []
+    if found:
+        parts.append(f"confirmed compiled in: {found}")
+    if missing:
+        parts.append(f"NOT FOUND in compiled binary (see CLAUDE.md's basepeak trap): {missing}")
+    if skipped:
+        parts.append(f"not independently checkable (GCC expands these before recording): {skipped}")
+    return "compiled-flags audit -- " + "; ".join(parts)
+
+
+# wspy's system.c prints "cpu temp             XX.X C" (SYSTEM_TEMP, on by
+# default in system_mask, present whenever a profile passes --system -- every
+# "quick"-profile trial already does, cfm/orchestrator.py's CALIBRATION_PROFILE/
+# SCREENING_PROFILE both being "quick"). This data has been sitting in every
+# trial's own RunSignature.raw_output all along -- not a new collection
+# mechanism, just the first time anything parses it out. Motivated by a real
+# 2026-08-21 near-incident (CLAUDE.md's Non-obvious traps log): an ad hoc
+# verification script that bypassed cfm/lock.py briefly ran two concurrent
+# SPECrate builds and got the host to the edge of OOM again -- a per-trial
+# thermal record, squirreled away cheaply, is exactly the kind of data that
+# would help debug a "why did this run's later trials look different" question
+# after the fact, without needing to actively gate/wait on it mid-run (which
+# risks adding untested blocking logic to an unattended overnight run before a
+# sensible threshold/timeout exists to tune it against).
+_CPU_TEMP_RE = re.compile(r"cpu temp\s+([\d.]+)\s*C", re.IGNORECASE)
+
+
+def _extract_cpu_temp_c(raw_output: str) -> Optional[float]:
+    match = _CPU_TEMP_RE.search(raw_output)
+    return float(match.group(1)) if match else None
 
 
 def run_one_trial(
@@ -114,6 +176,38 @@ def run_one_trial(
                 parent_trial_id=parent_trial_id,
             )
 
+            # Independent audit of what SPEC actually compiled with, not just
+            # what runcpu's own "Build successes" report claims -- see
+            # workloads/spec_cpu2026.py's audit_compiled_flags() docstring and
+            # CLAUDE.md's Non-obvious traps log (2026-08-21 basepeak entry) for
+            # why that report alone wasn't enough once already. getattr-guarded
+            # since fake WorkloadBackends in tests don't implement this
+            # (optional, degrade-gracefully signal, never load-bearing for the
+            # trial's own build_status).
+            audit_fn = getattr(workload, "audit_compiled_flags", None)
+            if audit_fn is not None:
+                audit_dump = audit_fn(benchmark, tune)
+                if audit_dump is not None:
+                    db.record_hypothesis(
+                        # proposed_by="rule": schema/cfm_schema.sql's hypotheses.proposed_by
+                        # CHECK constraint only allows ('rule','analogical','llm') -- this is
+                        # a deterministic, rule-based check like every other hypothesis this
+                        # module records, not a fundamentally new category; the "compiled-flags
+                        # audit --" rationale prefix is what distinguishes it at a glance.
+                        conn, trial_id=trial_id, proposed_by="rule",
+                        rationale=_summarize_compiled_flags_audit(flags, audit_dump),
+                    )
+
+            # Per-trial thermal record -- see _extract_cpu_temp_c()'s own
+            # comment for why this is worth squirreling away even though
+            # nothing here actively gates or waits on it.
+            cpu_temp_c = _extract_cpu_temp_c(signature.raw_output)
+            if cpu_temp_c is not None:
+                db.record_hypothesis(
+                    conn, trial_id=trial_id, proposed_by="rule",
+                    rationale=f"host cpu_temp at measurement: {cpu_temp_c:.1f} C",
+                )
+
             return {
                 "experiment_id": experiment_id, "trial_id": trial_id,
                 "build_status": build_status, "wspy_run_ref": signature.wspy_run_ref,
@@ -122,6 +216,7 @@ def run_one_trial(
                 "vectorization_density": signature.vectorization_density,
                 "allocation_pressure": signature.allocation_pressure,
                 "ratio": run_result.ratio,
+                "cpu_temp_c": cpu_temp_c,
             }
         except Exception:
             # An unhandled exception here (not a build/validate *failure*, which

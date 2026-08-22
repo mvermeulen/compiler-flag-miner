@@ -1,4 +1,5 @@
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -41,11 +42,68 @@ def test_generate_config_writes_include_and_peak_override(tmp_path):
     assert basepeak_pos > peak_header_pos
 
 
+def test_generate_config_always_appends_frecord_gcc_switches(tmp_path):
+    # Always on -- audit_compiled_flags() below depends on every trial's binary
+    # carrying a .GCC.command.line section to read back (CLAUDE.md's
+    # Non-obvious traps log, 2026-08-21). Metadata-only, never affects codegen
+    # or the measured ratio, so this is safe to add unconditionally.
+    workload = _make_workload(tmp_path)
+    config_path = workload.generate_config("706.stockfish_r", "peak", ["-O3", "-flto"])
+    text = config_path.read_text()
+    assert "OPTIMIZE = -O3 -flto -frecord-gcc-switches" in text
+
+
 def test_generate_config_is_deterministic_for_same_flags(tmp_path):
     workload = _make_workload(tmp_path)
     a = workload.generate_config("706.stockfish_r", "peak", ["-O3", "-flto"])
     b = workload.generate_config("706.stockfish_r", "peak", ["-O3", "-flto"])
     assert a == b  # same flag set -> same trial config name, safe to regenerate
+
+
+def test_audit_compiled_flags_returns_none_when_no_build_dir(tmp_path):
+    workload = _make_workload(tmp_path)
+    assert workload.audit_compiled_flags("706.stockfish_r", "peak") is None
+
+
+def test_audit_compiled_flags_returns_none_when_no_elf_binary_present(tmp_path):
+    workload = _make_workload(tmp_path)
+    build_dir = workload.spec_dir / "benchspec" / "CPU" / "706.stockfish_r" / "build" / "build_peak_gcc_O3.0000"
+    build_dir.mkdir(parents=True)
+    (build_dir / "simple-build-stockfish-706.sh").write_text("#!/bin/sh\necho not an elf binary\n")
+    assert workload.audit_compiled_flags("706.stockfish_r", "peak") is None
+
+
+def test_audit_compiled_flags_finds_the_most_recent_build_dir_and_reads_it(tmp_path):
+    # Real readelf, a real (tiny, locally-compiled) ELF binary with a genuine
+    # .GCC.command.line section -- confirms the glob/ELF-detection/readelf
+    # plumbing end to end without needing a real SPEC build. The actual
+    # against-a-real-SPEC-binary confirmation is documented in CLAUDE.md's
+    # Non-obvious traps log (2026-08-21), not repeated here as an automated
+    # test per this project's "no real runcpu/SPEC calls in the unit tier" rule.
+    if shutil.which("gcc") is None or shutil.which("readelf") is None:
+        pytest.skip("gcc/readelf not available")
+    workload = _make_workload(tmp_path)
+    bench_dir = workload.spec_dir / "benchspec" / "CPU" / "706.stockfish_r" / "build"
+    older = bench_dir / "build_peak_gcc_O3.0000"
+    newer = bench_dir / "build_peak_gcc_O3.0001"
+    older.mkdir(parents=True)
+    newer.mkdir(parents=True)
+    (older / "toy").write_bytes(b"not a real elf, just older")
+    src = newer / "toy.c"
+    src.write_text("int main(void) { return 0; }\n")
+    # A real compiler *switch*, not a -D define -- confirmed live, 2026-08-21:
+    # -frecord-gcc-switches doesn't embed preprocessor defines, only genuine
+    # command-line switches (see cfm/agents/spec_agent.py's own
+    # _AUDIT_UNVERIFIABLE_LITERAL_FLAGS comment for the related -march=native
+    # expansion caveat).
+    subprocess.run(
+        ["gcc", "-frecord-gcc-switches", "-funroll-loops", "-o", str(newer / "toy"), str(src)],
+        check=True,
+    )
+
+    dump = workload.audit_compiled_flags("706.stockfish_r", "peak")
+    assert dump is not None
+    assert "-funroll-loops" in dump
 
 
 def test_generate_config_rejects_base_tune(tmp_path):
