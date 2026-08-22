@@ -107,6 +107,20 @@ class WspyInstrumentation(InstrumentationBackend):
         ] + command
         proc = subprocess.run(argv, capture_output=True, text=True)
         raw = proc.stdout + proc.stderr
+        # wspy-run's own stdout/stderr (above) is the *wrapper's* narration (which
+        # pass ran, timing) -- the actual per-pass human-readable metrics (IPC,
+        # topdown, system/cpu_temp, ...) go to rundir/summary.txt instead (each
+        # underlying wspy invocation's own stdout, redirected to a file via its
+        # own `-o`; wspy-run never echoes it back to its own stdout at all).
+        # Confirmed live, 2026-08-22: RunSignature.raw_output never contained a
+        # "cpu temp" line for spec_agent.py's own _extract_cpu_temp_c() to find,
+        # despite wspy genuinely measuring and printing it -- summary.txt is the
+        # same file deep-cpu's own multi-pass output already aggregates into
+        # (profiles/deep-cpu.conf's own comments), so reading it here is
+        # profile-agnostic, not a single-pass-only special case.
+        summary_path = rundir / "summary.txt"
+        if summary_path.exists():
+            raw += "\n" + summary_path.read_text()
 
         validated = self._validate(rundir)
         self._ingest()
