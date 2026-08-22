@@ -159,6 +159,19 @@ def test_archetype_scorecard_has_the_keys_cfm_parses(real_signature):
     assert "allocation_pressure" in real_signature.metrics
 
 
+def test_raw_output_contains_the_real_per_pass_metrics_text(real_signature):
+    # Confirmed live, 2026-08-22: RunSignature.raw_output used to be only
+    # wspy-run's own wrapper-level stdout/stderr (which pass ran, timing) --
+    # never the underlying wspy invocation's own human-readable metrics (IPC,
+    # system/cpu_temp, ...), which go to rundir/summary.txt instead and were
+    # never echoed back to wspy-run's own stdout at all. cfm/agents/
+    # spec_agent.py's _extract_cpu_temp_c() (and any future raw_output-parsing
+    # consumer) silently found nothing, ever, until characterize() started
+    # reading summary.txt too. "cpu temp" is present whenever a profile passes
+    # --system, which "quick" (used here) always does.
+    assert "cpu temp" in real_signature.raw_output
+
+
 def test_characterize_succeeds_on_deep_cpu_with_a_populated_scorecard(tmp_path_factory, toy_binary):
     # doc/DESIGN.md sec. 6 Phase 4's confirmation stage needs the multi-pass
     # "deep-cpu" profile -- M0 didn't support that (_resolve_run_identity() raised
