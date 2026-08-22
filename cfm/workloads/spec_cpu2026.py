@@ -64,6 +64,19 @@ class SpecCpu2026Workload(WorkloadBackend):
             )
         optimize_string = " ".join(flags)
         digest = hashlib.sha1(optimize_string.encode()).hexdigest()[:10]
+        # -frecord-gcc-switches, always appended (doc/DESIGN.md's non-
+        # comparability decision doesn't apply -- this only adds a small ELF
+        # metadata section, never touches codegen, so it can't affect the
+        # measured ratio): embeds the actual expanded compiler invocation into
+        # a .GCC.command.line section of the compiled binary, letting
+        # audit_compiled_flags() below independently confirm what SPEC actually
+        # built with, rather than trusting `runcpu`'s own "Build successes"
+        # report alone -- exactly the gap the basepeak trap above exploited
+        # undetected for this project's entire history (CLAUDE.md's Non-obvious
+        # traps log, 2026-08-21). Not folded into `digest` above -- it's a fixed
+        # constant on every trial, not part of what makes one trial's flagset
+        # distinct from another's.
+        render_string = f"{optimize_string} -frecord-gcc-switches"
         config_path = self.config_dir / f"cfm-{bench}-{digest}.cfg"
         # `include:` pulls in the real base config unmodified (SPEC's own
         # config.html "Included files" section) -- this trial's override only
@@ -94,9 +107,60 @@ class SpecCpu2026Workload(WorkloadBackend):
             f"include: {self.base_config}\n\n"
             f"{bench}=peak:\n"
             f"   basepeak = no\n"
-            f"   OPTIMIZE = {optimize_string}\n"
+            f"   OPTIMIZE = {render_string}\n"
         )
         return config_path
+
+    def audit_compiled_flags(self, bench: str, tune: str) -> Optional[str]:
+        """Independent, best-effort audit of what SPEC *actually* compiled --
+        reads the just-built binary's own `.GCC.command.line` section
+        (`-frecord-gcc-switches`, always appended in `generate_config()` above)
+        via `readelf`, rather than trusting `runcpu`'s own "Build successes"
+        report. Exists specifically because that report alone was not enough
+        to catch the basepeak trap (CLAUDE.md's Non-obvious traps log,
+        2026-08-21) -- the build log said "peak" while silently building
+        `base`, and nothing before this method would have noticed.
+
+        Finds the most-recently-modified `build_<tune>_*` directory for this
+        benchmark (SPEC's own build-dir naming; the tag component, e.g.
+        `gcc_O3`, comes from the base config's own compiler identification, not
+        this trial's own config filename, so it can't be predicted from
+        `config_path` alone) and the one ELF file inside it (as opposed to the
+        accompanying `simple-build-*.sh` build script, identified by the ELF
+        magic number rather than a benchmark-specific name convention, which
+        differs per benchmark). Returns the raw `readelf -p .GCC.command.line`
+        output, or `None` if the build directory, binary, or `readelf` itself
+        can't be found/read -- degrades gracefully, same posture as
+        `instrumentation/wspy.py`'s `check_regression()` (a sanity signal,
+        never a build/trial correctness verdict itself).
+        """
+        build_root = self.spec_dir / "benchspec" / "CPU" / bench / "build"
+        candidates = sorted(
+            build_root.glob(f"build_{tune}_*"),
+            key=lambda p: p.stat().st_mtime, reverse=True,
+        )
+        if not candidates:
+            return None
+        exe_path = None
+        for entry in candidates[0].iterdir():
+            if not entry.is_file():
+                continue
+            try:
+                if entry.read_bytes()[:4] == b"\x7fELF":
+                    exe_path = entry
+                    break
+            except OSError:
+                continue
+        if exe_path is None:
+            return None
+        try:
+            proc = subprocess.run(
+                ["readelf", "-p", ".GCC.command.line", str(exe_path)],
+                capture_output=True, text=True,
+            )
+        except OSError:
+            return None
+        return proc.stdout if proc.returncode == 0 else None
 
     def build(self, bench: str, tune: str, config_path: Path) -> BuildResult:
         cmd = self._shrc_command(

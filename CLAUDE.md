@@ -436,6 +436,42 @@ Full branch/PR discipline, same shape as wspy's:
   hand-written *assertion* about correct-looking-but-untested config syntax. Fixed test now asserts
   `basepeak`'s *position* relative to the section header, not just its presence, and a real re-run
   through `runcpu --action=build` is what actually caught this, not any unit test.
+- **2026-08-21: ad hoc real-SPEC verification via a direct `run_one_trial()` call bypasses
+  `cfm/lock.py` entirely — nearly caused a repeat of the 2026-08-20 OOM incident, self-inflicted this
+  time.** While independently re-verifying the basepeak fix (previous entry) against the real pipeline,
+  a `python3 -c "run_one_trial(...)"` one-liner was used instead of `cfm measure`/`cfm mine` — the host
+  lock is acquired inside `cli.py`'s command handlers, not inside `run_one_trial()`/the orchestrator
+  functions themselves, so calling them directly, as any ad hoc script or future debugging session
+  might, holds no lock at all. A first such call was killed by a `timeout 300` wrapper that expired
+  before a slow (~21 min) `782.lbm_r` trial finished — `timeout` signals only its immediate child
+  (`python3`), not the grandchild `runcpu`/`specinvoke`/benchmark-copy process tree underneath it
+  (`bash -c '... exec runcpu ...'`'s own `exec` replaces bash with runcpu in place, but the *further*
+  children `runcpu` itself forks are unaffected by a signal sent to a process two generations up), so
+  the real SPECrate copies kept running, orphaned, after the wrapper exited. A second, immediately-
+  following verification call then launched a *second* full set of copies on top of the still-running
+  first set — real memory: 91Gi/91Gi used, 7.7Gi/8Gi swap, load average 59, and the kernel OOM-killer
+  did fire (confirmed via `dmesg`, four `lbm_r_peak.gcc_` processes killed) before both process trees
+  were found and killed by hand (`pkill -9 -f lbm_r_peak` and matching `runcpu`/`specinvoke`/config-name
+  patterns). Unlike the 2026-08-20 incident this time the kill list stayed contained to the benchmark
+  processes themselves (nothing suite-critical like `systemd-journald` was hit) and the host didn't
+  need a hard reboot to recover — confirmed live via `free`/`ps` immediately after — but a reboot was
+  still done anyway before the next real run, for certainty rather than because anything specific was
+  still known-broken. **Lesson**: `cfm/lock.py`'s protection is real but scoped to the CLI entry
+  points (`cli.py`'s `measure`/`mine` handlers) — any direct call into `run_one_trial()`,
+  `orchestrator.run_baseline()`, or similar for ad hoc verification/debugging against the real SPEC
+  install needs its own manual exclusivity discipline (confirm nothing else is running first, same as
+  the rule for `cfm measure`/`cfm mine` themselves) since the lock provides none of its own. Also
+  motivated two small, low-risk additions to `run_one_trial()` itself, done the same day: an
+  independent post-build compiled-flags audit (`-frecord-gcc-switches` + reading the binary's own
+  `.GCC.command.line` section back, since trusting `runcpu`'s own "Build successes" report alone is
+  exactly what let the basepeak bug hide undetected for so long) and a per-trial `cpu_temp` record
+  (parsed from data `wspy`'s `--system` flag — on by default for every `quick`-profile trial cfm
+  already runs — was already collecting and printing, just never read by anything before now) to make
+  a future "why did this run's later trials look different" question answerable from `cfm.db` alone,
+  without needing to actively gate or wait on thermal state mid-run (a real idea, floated the same
+  session, but deliberately not implemented yet — no calibrated threshold/timeout exists to tune an
+  active gate against, and adding new blocking logic to an unattended overnight run before one does is
+  a real risk, not a free improvement).
 
 ## Build & test
 
@@ -497,10 +533,10 @@ every trial along the way still landing in `cfm.db` regardless of phase or outco
 | `cfm/compilers/base.py` | `CompilerBackend` interface + `FlagCandidate`/`ValidationResult` dataclasses (doc/DESIGN.md §4.3/§12). |
 | `cfm/compilers/gcc.py` | The only implementation: `candidate_flags_for_signature()` (M1: ignores its own `signature` arg, returns the whole applicable-language catalog uniformly), `validate_flagset()` (unknown-flag/conflict checks against `config/gcc_flag_catalog.seed.json`), `render_optimize_string()`, plus `benchmark_languages()` (reads a benchmark's language from SPEC's own `Spec/object.pm`). |
 | `cfm/workloads/base.py` | `WorkloadBackend` interface + `BuildResult`/`RunResult` dataclasses (doc/DESIGN.md §4.1/§12). |
-| `cfm/workloads/spec_cpu2026.py` | The only implementation: renders a per-trial SPEC config via `include:` + a `<bench>=peak:` override section, drives `runcpu --action=build`/`--action=validate` through a `shrc`-sourcing `bash -c` wrapper (see Non-obvious traps above), parses the resulting `.rsf` file. |
+| `cfm/workloads/spec_cpu2026.py` | The only implementation: renders a per-trial SPEC config via `include:` + a `<bench>=peak:` override section (`basepeak = no` scoped *inside* it — see Non-obvious traps above for why that scoping is load-bearing), always appends `-frecord-gcc-switches` to the rendered `OPTIMIZE` line, drives `runcpu --action=build`/`--action=validate` through a `shrc`-sourcing `bash -c` wrapper, parses the resulting `.rsf` file. `audit_compiled_flags()` independently reads a just-built binary's own `.GCC.command.line` section back via `readelf`, for `run_one_trial()`'s own compiled-flags audit (below). |
 | `cfm/instrumentation/base.py` | `InstrumentationBackend` interface + `RunSignature` dataclass (doc/DESIGN.md §4.2/§12). |
 | `cfm/instrumentation/wspy.py` | The only implementation: `preflight()` checks all six wspy binaries exist; `characterize()` runs `wspy-run <profile> -- <command>`, then resolves the *real* run identity from the run-index file (see Non-obvious traps — single-pass and the `deep-cpu` multi-pass profile both work), then `wspy-validate`/`wspy-store`/`wspy-archetype`. `check_regression()` wraps `wspy-summary --check-regression` as a secondary environment/counter-sanity guardrail (never the accept/reject decision — that's `cfm/stats.py`, over `cfm.db`'s own data). |
-| `cfm/agents/spec_agent.py` | `run_one_trial()` — the M0 pipeline glue described above. `workload`/`instrumentation` backends and `profile` are injectable/overridable per call (`orchestrator.py` needs a different wspy profile per phase, and its own tests inject fakes — no real SPEC/wspy calls); all default to the real M0 behavior when omitted. The only agent module that exists; `knowledge_agent`/`hypothesis_agent`/`report_agent` are M2-M3. |
+| `cfm/agents/spec_agent.py` | `run_one_trial()` — the M0 pipeline glue described above. `workload`/`instrumentation` backends and `profile` are injectable/overridable per call (`orchestrator.py` needs a different wspy profile per phase, and its own tests inject fakes — no real SPEC/wspy calls); all default to the real M0 behavior when omitted. Also records two best-effort, degrade-gracefully hypothesis notes per trial once a build succeeds: `_summarize_compiled_flags_audit()` (cross-checks the requested flags against `workload.audit_compiled_flags()`'s real compiled-binary readback) and `_extract_cpu_temp_c()` (parses `wspy`'s own already-collected `cpu temp` reading out of `RunSignature.raw_output` — see Non-obvious traps below for why both were added the same day). The only agent module that exists; `knowledge_agent`/`hypothesis_agent`/`report_agent` are M2-M3. |
 | `cfm/orchestrator.py` | Phase state machine (doc/DESIGN.md §5-6). `run_baseline()` (Phase 1, sec. 14 M2.5 item 2: shape — resource_dominance/vectorization_density/allocation_pressure — via `_characterize_baseline()`, which now tries `cfm/reference_matrix.py`'s external corpus lookup first and falls back to one local `deep-cpu --iterations 1` characterization trial only when no matching published entry exists, plus `CONFIRMATION_REPETITIONS` cheap `quick`-profile calibration trials feeding `cfm/stats.py`'s CI either way; `_characterize_baseline()` stays the one isolated seam either shape source flows through), `generate_candidates()` (Phase 2, M1's whole-catalog read from `compilers/gcc.py` still ignores `resource_dominance` per that module's own M1-vs-M2 boundary, but sec. 14 M2.5 item 3 layers `_filter_implausible_candidates()` on top — drops a candidate only when *every* `topdown_signals` entry is confidently contradicted by the baseline's characterized shape, never on unknown/absent data), `screen_candidates()` (Phase 3, one cheap `quick`-profile trial per candidate, prunes only a clearly-worse point estimate), `confirm_candidates()` (Phase 4, re-confirms each survivor against the baseline's CI via `_confirm_flagset()`'s calibration-profile reps — accept requires both non-overlapping CI *and* a delta clearing `MIN_PRACTICAL_SIGNIFICANCE_PCT`, M2.5 item 3's asymmetric bar — `check_regression()` as a sanity-only guardrail on accept, `knowledge` table upsert per single flag), `greedy_combine()` (Phase 5, cumulative greedy walk re-confirmed against the *current* running set each step via the same `_confirm_flagset()`, plus a bounded random-pair tournament evaluated against baseline that can still replace the greedy winner). |
 | `cfm/reference_matrix.py` | `fetch_shape()` — read-only, fully anonymous (no WordPress login/credentials needed at all, confirmed live) external reference-matrix corpus lookup, doc/DESIGN.md §14 M2.5 item 2's deferred half. Walks `mvermeulen.org/workload`'s published page hierarchy directly (own minimal anonymous HTTP client), reuses `vendor/wspy`'s `web/counter_text.py` (direct pinned-submodule import, a deliberate narrow exception to "stable CLI only") to parse recovered `counters.txt` blocks, then scores the result via the real `wspy-archetype --run-guest` CLI. Degrades to `None` on any failure — no network, no matching page, nothing recoverable — never raises; `_characterize_baseline()`'s local `deep-cpu` trial is still the fallback. See CLAUDE.md's Non-obvious traps below for the anonymous-access/`.rendered`-vs-`.raw` finding and the (now-resolved) [wspy#278](https://github.com/mvermeulen/wspy/issues/278) `vectorization_density`/`allocation_pressure` gap. |
 | `cfm/cli.py` | `cfm measure`/`cfm init-db`/`cfm mine`. `mine` wires all five orchestrator phases in sequence, `--max-trials` best-effort-caps Phase 2's candidate list (the widest fan-out point — Phase 4/5's own trial count isn't separately capped yet), prints a plain JSON summary (winning flags, ratio, %gain) — no curated report yet, that's M3. |
