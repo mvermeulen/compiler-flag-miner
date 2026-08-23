@@ -6,10 +6,11 @@ build/validate failure is still a real trial record (doc/DESIGN.md sec. 6 Phase 
 "a documented negative result is exactly the kind of learning that should
 transfer"), never silently dropped.
 
-The other named agents in doc/DESIGN.md sec. 13's proposed layout
-(``knowledge_agent``, ``hypothesis_agent``, ``report_agent``) don't exist yet --
-they're M2/M3 scope, where there's an actual search loop and knowledge base for them
-to operate over.
+Of the other named agents in doc/DESIGN.md sec. 13's proposed layout,
+``knowledge_agent`` now exists (M4, cross-benchmark knowledge transfer --
+``agents/knowledge_agent.py``); ``hypothesis_agent``/``report_agent`` don't yet --
+they're M3 scope, where there's an actual LLM driver and report renderer for them
+to operate against.
 """
 
 from __future__ import annotations

@@ -201,3 +201,68 @@ def test_upsert_knowledge_null_compiler_version_and_target_arch_still_upserts(tm
         assert row["mean_delta_pct"] == pytest.approx(10.0)
     finally:
         conn.close()
+
+
+def test_get_knowledge_for_cluster_orders_by_mean_delta_pct_descending(tmp_path):
+    conn = db.connect(tmp_path / "cfm.db")
+    try:
+        db.upsert_knowledge(
+            conn, cluster_key="memory-bound", compiler="gcc", compiler_version=None,
+            target_arch=None, flag="-march=native", accepted=True, delta_pct=48.75,
+            last_benchmark="706.stockfish_r",
+        )
+        db.upsert_knowledge(
+            conn, cluster_key="memory-bound", compiler="gcc", compiler_version=None,
+            target_arch=None, flag="-fgraphite-identity", accepted=False, delta_pct=-4.22,
+            last_benchmark="706.stockfish_r",
+        )
+        db.upsert_knowledge(
+            conn, cluster_key="memory-bound", compiler="gcc", compiler_version=None,
+            target_arch=None, flag="-fprefetch-loop-arrays", accepted=False, delta_pct=3.29,
+            last_benchmark="782.lbm_r",
+        )
+
+        rows = db.get_knowledge_for_cluster(conn, cluster_key="memory-bound")
+
+        assert [r["flag"] for r in rows] == ["-march=native", "-fprefetch-loop-arrays", "-fgraphite-identity"]
+        assert rows[0]["n_accepted"] == 1
+        assert rows[1]["n_accepted"] == 0
+    finally:
+        conn.close()
+
+
+def test_get_knowledge_for_cluster_scoped_to_cluster_and_compiler(tmp_path):
+    conn = db.connect(tmp_path / "cfm.db")
+    try:
+        db.upsert_knowledge(
+            conn, cluster_key="memory-bound", compiler="gcc", compiler_version=None,
+            target_arch=None, flag="-march=native", accepted=True, delta_pct=48.75,
+            last_benchmark="706.stockfish_r",
+        )
+        db.upsert_knowledge(
+            conn, cluster_key="frontend-bound", compiler="gcc", compiler_version=None,
+            target_arch=None, flag="-flto", accepted=True, delta_pct=6.85,
+            last_benchmark="714.cpython_r",
+        )
+
+        assert [r["flag"] for r in db.get_knowledge_for_cluster(conn, cluster_key="memory-bound")] == ["-march=native"]
+        assert [r["flag"] for r in db.get_knowledge_for_cluster(conn, cluster_key="frontend-bound")] == ["-flto"]
+        assert db.get_knowledge_for_cluster(conn, cluster_key="compute-bound") == []
+    finally:
+        conn.close()
+
+
+def test_get_knowledge_for_cluster_matches_null_compiler_version_and_target_arch(tmp_path):
+    conn = db.connect(tmp_path / "cfm.db")
+    try:
+        db.upsert_knowledge(
+            conn, cluster_key="memory-bound", compiler="gcc", compiler_version=None,
+            target_arch=None, flag="-march=native", accepted=True, delta_pct=48.75,
+            last_benchmark="706.stockfish_r",
+        )
+        rows = db.get_knowledge_for_cluster(
+            conn, cluster_key="memory-bound", compiler_version=None, target_arch=None,
+        )
+        assert len(rows) == 1
+    finally:
+        conn.close()

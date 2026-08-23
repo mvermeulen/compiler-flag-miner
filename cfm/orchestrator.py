@@ -17,6 +17,7 @@ from typing import Optional
 
 from . import db
 from . import reference_matrix
+from .agents.knowledge_agent import KnownFlag
 from .agents.spec_agent import run_one_trial
 from .compilers.base import FlagCandidate
 from .compilers.gcc import GccCompiler, benchmark_languages
@@ -608,6 +609,69 @@ def confirm_candidates(
         )
         for outcome in screened
         if outcome.survived
+    ]
+
+
+def split_candidates_by_known_prior(
+    candidates: list[FlagCandidate], known_flags: dict[str, KnownFlag],
+) -> tuple[list[FlagCandidate], list[FlagCandidate]]:
+    """doc/DESIGN.md sec. 8 point 3 (M4): partitions Phase 2's candidate list
+    into ``(fast_tracked, remaining)`` -- ``fast_tracked`` is every candidate
+    whose flag has a real *accepted* prior in this cluster
+    (``KnownFlag.has_accepted_track_record``), sorted by that prior's own
+    ``mean_delta_pct`` descending (best-evidenced first, "seed Phase 2's
+    candidate queue with those flags first, ahead of the generic rule-based
+    catalog"). ``remaining`` is everything else, in original catalog order --
+    including candidates with a real but *rejected* prior, which still get a
+    full, real screening trial against this benchmark (a reject elsewhere
+    isn't trusted as a reject here without a real measurement, same posture
+    as accepts) -- unchanged from the pre-M4 pipeline.
+
+    ``known_flags`` is a ``{flag: KnownFlag}`` mapping, typically built from
+    ``knowledge_agent.known_flags_for_cluster()``'s own list -- kept as a plain
+    dict here (not that function's own return shape) so this stays testable
+    without a real ``cfm.db`` involved.
+    """
+    fast_tracked = sorted(
+        (c for c in candidates if known_flags.get(c.flag) and known_flags[c.flag].has_accepted_track_record),
+        key=lambda c: known_flags[c.flag].mean_delta_pct, reverse=True,
+    )
+    fast_tracked_flags = {c.flag for c in fast_tracked}
+    remaining = [c for c in candidates if c.flag not in fast_tracked_flags]
+    return fast_tracked, remaining
+
+
+def confirm_known_candidates(
+    cfg: CfmConfig,
+    *,
+    experiment_id: int,
+    benchmark: str,
+    baseline: BaselineResult,
+    candidates: list[FlagCandidate],
+    workload: Optional[WorkloadBackend] = None,
+    instrumentation: Optional[InstrumentationBackend] = None,
+) -> list[ConfirmationOutcome]:
+    """doc/DESIGN.md sec. 8 point 3 (M4): Phase 4 confirmation for candidates
+    ``split_candidates_by_known_prior()`` fast-tracked -- skips Phase 3's
+    screening trial entirely ("already been screened once, elsewhere"), going
+    straight to a full, real confirmation-grade re-measurement against *this*
+    benchmark's own baseline. Body is otherwise identical to
+    ``confirm_candidates()``'s own list comprehension (same ``baseline.flags +
+    [candidate.flag]`` shape, same ``phase="confirmation"`` -- a fast-tracked
+    flag is still exactly a Phase 4 confirmation, just reached by a different
+    route) -- a cross-benchmark prior changes *which* candidates get a trial
+    and in what order, never the correctness bar a trial has to clear to be
+    accepted (doc/DESIGN.md sec. 15's "external data is a hypothesis aid,
+    never a substitute measurement," applied here to cross-benchmark
+    knowledge exactly as it already is to the reference-matrix corpus).
+    """
+    return [
+        _confirm_flagset(
+            cfg, experiment_id=experiment_id, benchmark=benchmark, baseline=baseline,
+            flags=baseline.flags + [candidate.flag], phase="confirmation",
+            compare_ci=baseline.ci, workload=workload, instrumentation=instrumentation,
+        )
+        for candidate in candidates
     ]
 
 

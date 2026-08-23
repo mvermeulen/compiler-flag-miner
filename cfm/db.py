@@ -263,3 +263,26 @@ def upsert_knowledge(
             ),
         )
     conn.commit()
+
+
+def get_knowledge_for_cluster(
+    conn: sqlite3.Connection, *, cluster_key: str, compiler: str = "gcc",
+    compiler_version: Optional[str] = None, target_arch: Optional[str] = None,
+) -> list[dict]:
+    """The read side of doc/DESIGN.md sec. 8's cross-benchmark knowledge transfer
+    (M4) -- `upsert_knowledge()` above is what populates this table (has been
+    since M1), but nothing read it back for a new benchmark's own candidate
+    generation until now. Same ``IS`` (not ``=``) matching against
+    ``compiler_version``/``target_arch`` as `upsert_knowledge()` uses, for the
+    identical reason: both are legitimately ``NULL`` right now (no host/GCC
+    detection wired in yet), and ``NULL = NULL`` is never true in SQL, only
+    ``NULL IS NULL`` is. Ordered by ``mean_delta_pct`` descending -- doc/
+    DESIGN.md sec. 8 point 2's own ordering, best-evidenced flag first.
+    """
+    rows = conn.execute(
+        "SELECT * FROM knowledge WHERE cluster_key=? AND compiler=? "
+        "  AND compiler_version IS ? AND target_arch IS ? "
+        "ORDER BY mean_delta_pct DESC",
+        (cluster_key, compiler, compiler_version, target_arch),
+    ).fetchall()
+    return [dict(row) for row in rows]

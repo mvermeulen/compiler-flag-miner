@@ -10,6 +10,7 @@ import json
 import sys
 
 from . import db, orchestrator
+from .agents.knowledge_agent import known_flags_for_cluster
 from .agents.spec_agent import run_one_trial
 from .compilers.gcc import GccCompiler
 from .config import CfmConfig
@@ -137,22 +138,51 @@ def main(argv=None) -> int:
                 )
                 budget_exhausted = False
                 if args.max_trials is not None:
-                    remaining = max(args.max_trials - len(baseline.trial_ids), 0)
-                    if len(candidates) > remaining:
+                    remaining_budget = max(args.max_trials - len(baseline.trial_ids), 0)
+                    if len(candidates) > remaining_budget:
                         budget_exhausted = True
-                    candidates = candidates[:remaining]
+                    candidates = candidates[:remaining_budget]
+
+                # doc/DESIGN.md sec. 8 (M4): cross-benchmark knowledge transfer.
+                # A candidate with a real *accepted* prior in this benchmark's
+                # own cluster (baseline.resource_dominance) skips Phase 3's
+                # screening trial entirely -- "already been screened once,
+                # elsewhere" -- going straight to Phase 4 confirmation
+                # (confirm_known_candidates()); everything else (a rejected
+                # prior, or no prior at all) still goes through the normal
+                # screen-then-confirm flow unchanged.
+                cluster_key = baseline.resource_dominance or "unknown"
+                known_flags = {}
+                if candidates:  # skip the lookup entirely when there's nothing to split
+                    known_flags = {
+                        k.flag: k for k in known_flags_for_cluster(cfg, cluster_key=cluster_key)
+                    }
+                    for k in known_flags.values():
+                        print(
+                            f"info: known prior for {k.flag!r} in cluster {cluster_key!r} -- "
+                            f"{'accepted' if k.has_accepted_track_record else 'rejected'} before "
+                            f"(mean {k.mean_delta_pct:+.2f}%, n={k.n_trials}, last seen on "
+                            f"{k.last_benchmark!r})"
+                        )
+                fast_tracked, remaining_candidates = orchestrator.split_candidates_by_known_prior(
+                    candidates, known_flags,
+                )
 
                 screened = orchestrator.screen_candidates(
                     cfg, experiment_id=baseline.experiment_id, benchmark=args.benchmark,
-                    baseline=baseline, candidates=candidates,
+                    baseline=baseline, candidates=remaining_candidates,
                 )
                 confirmed = orchestrator.confirm_candidates(
                     cfg, experiment_id=baseline.experiment_id, benchmark=args.benchmark,
                     baseline=baseline, screened=screened,
                 )
+                confirmed_known = orchestrator.confirm_known_candidates(
+                    cfg, experiment_id=baseline.experiment_id, benchmark=args.benchmark,
+                    baseline=baseline, candidates=fast_tracked,
+                )
                 combination = orchestrator.greedy_combine(
                     cfg, experiment_id=baseline.experiment_id, benchmark=args.benchmark,
-                    baseline=baseline, confirmed=confirmed,
+                    baseline=baseline, confirmed=confirmed_known + confirmed,
                 )
 
                 pgo_result = None
@@ -214,7 +244,8 @@ def main(argv=None) -> int:
             "baseline_allocation_pressure": baseline.allocation_pressure,
             "baseline_characterization_source": baseline.characterization_source,
             "candidates_screened": len(screened),
-            "candidates_confirmed": sum(1 for c in confirmed if c.accepted),
+            "candidates_confirmed": sum(1 for c in confirmed + confirmed_known if c.accepted),
+            "candidates_fast_tracked_from_prior_knowledge": [c.flag for c in fast_tracked],
             "combination_winning_flags": combination.winning_flags,
             "combination_winning_ratio_mean": combination.winning_ci.mean,
             "pgo_attempted": pgo_result.attempted if pgo_result else False,
