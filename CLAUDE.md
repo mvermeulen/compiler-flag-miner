@@ -2,17 +2,27 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working in this repository.
 
-**Status: M0/M1's pipeline mechanics are real and working, but every prior "verified"/"real run"
-result before 2026-08-21 measured the wrong binary — retracted pending a fresh corrected run.** See
-`CLAUDE.md`'s Non-obvious traps log ("Resolved 2026-08-21: `generate_config()`'s per-trial `basepeak
-= no` override was silently ignored by SPEC since this project's very first commit") for the full
-story: every real trial ever run — M0's own original verification, and all four `doc/mining_results.
-*.md` write-ups (two `706.stockfish_r` runs, `782.lbm_r`, `714.cpython_r`) — silently built and
-measured the fixed *base*-tuning binary (`gcc_O3.cfg`'s own `-g -O3 -march=native`) regardless of
-which candidate flags `cfm` intended to test. The bug is now fixed and re-verified live through `cfm`'s
-own real `generate_config()`/`build()` code path (a genuinely different binary now gets built for a
-genuinely different flag set) — but no `cfm measure`/`cfm mine` run has been *re-run* end-to-end since
-the fix, so nothing should be treated as "shipped and verified" again until one has.
+**Status: M0/M1's pipeline mechanics are real and working. `doc/mining_results.782.lbm_r.2026-08-22.md`
+is the first genuinely trustworthy `cfm mine` result in this project's history** — a focused,
+budget-capped (`--max-trials 4`) run against `782.lbm_r`, completed after both real bugs below (the
+basepeak config-scoping bug and the isolated-candidate-flags bug) were fixed. Every prior
+"verified"/"real run" result before 2026-08-21 is still retracted (see both entries in the Non-obvious
+traps log below for the full stories) — this run is the fresh corrected re-run that retraction was
+pending on, verified end-to-end via a real `cfm mine` invocation, not an isolated ad hoc build. It only
+exercised 1 of 5 plausible candidate flags (budget-capped, deliberately, per the "more focused test"
+ask) and produced zero acceptances (a correct, CI-overlap-grounded reject, not a bug) — a larger/
+uncapped follow-up run, and a benchmark whose `resource_dominance` isn't memory-bound, are still open
+next steps (see that doc's own "Next steps" section). See `CLAUDE.md`'s Non-obvious traps log
+("Resolved 2026-08-21: `generate_config()`'s per-trial `basepeak = no` override was silently ignored
+by SPEC since this project's very first commit") for the full basepeak story: every real trial run
+before that fix — M0's own original verification, and all four `doc/mining_results.*.md` write-ups
+predating 2026-08-22 (two `706.stockfish_r` runs, the 2026-08-21 `782.lbm_r` run, `714.cpython_r`) —
+silently built and measured the fixed *base*-tuning binary (`gcc_O3.cfg`'s own `-g -O3 -march=native`)
+regardless of which candidate flags `cfm` intended to test. That bug is now fixed and re-verified live
+through `cfm`'s own real `generate_config()`/`build()` code path (a genuinely different binary now gets
+built for a genuinely different flag set) — and, as of 2026-08-22, so is the isolated-candidate-flags
+bug (the same traps log's 2026-08-22 entry), where screening/confirmation tested a candidate flag alone
+rather than layered on `baseline.flags`.
 What *is* still true and unaffected by this bug: the mechanical pipeline's plumbing itself (build →
 `wspy-run` → `wspy-validate`/`wspy-store`/`wspy-archetype` → `.rsf` ratio parsing → `cfm.db`
 recording) all genuinely works, since none of that cares which flags went into a binary, only that one
