@@ -107,6 +107,17 @@ class GccCompiler(CompilerBackend):
         for entry in self._flags():
             if not (wanted & set(entry["languages"])):
                 continue
+            if entry["category"] == "pgo":
+                # -fprofile-generate/-fprofile-use never belong in this ordinary
+                # one-flag-at-a-time candidate list: each is meaningless tested
+                # alone against a single OPTIMIZE line (see doc/mining_results.
+                # 714.cpython_r.2026-08-21.md's live illustration of exactly
+                # this -- "-fprofile-generate alone" just measures instrumentation
+                # overhead, "-fprofile-use alone" has no profile to apply). PGO is
+                # its own real two-pass Phase 6 multiplier (doc/DESIGN.md sec. 6),
+                # driven directly by cfm/orchestrator.py's PGO-specific code path,
+                # never sourced from this per-flag loop.
+                continue
             flag = _resolve_flag_or_none(entry["flag"])
             if flag is None:
                 continue

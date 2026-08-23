@@ -35,6 +35,44 @@ _ITERATION_FIELD_RE = re.compile(r"^\d{3}\.(\w+)$")
 _EXIT_RE = re.compile(r"\[runcpu (\w+) exited (\d+)\]")
 _LOG_PATH_RE = re.compile(r"The log for this run is in (\S+)")
 
+# Real two-pass PGO (doc/DESIGN.md sec. 6 Phase 6), driven through SPEC's own
+# native PASS1_OPTIMIZE/PASS2_OPTIMIZE mechanism (Docs/config.txt sec. VI,
+# confirmed live against this host's real SPEC install: `runcpu --action=build`
+# with these two config lines set genuinely runs the full build-instrumented ->
+# train -> rebuild-optimized sequence in one invocation, no hand-rolled
+# generate/run/use orchestration needed on cfm's side at all) rather than the
+# flat single-OPTIMIZE-line rendering every other candidate uses. Triggered by
+# literal presence of `-fprofile-use` in the caller's `flags` list -- the same
+# "flags is the trial's full logical identity" convention every other
+# candidate already uses (cfm/orchestrator.py layers baseline.flags + the
+# candidate under test, same as any other Phase 6 multiplier), so no separate
+# boolean parameter is needed here.
+_PGO_TRAIN_FLAG = "-fprofile-generate"
+_PGO_USE_FLAG = "-fprofile-use"
+# Defensive insurance always applied to the two-pass build below, never
+# independently screened/ranked flags of their own (doc/DESIGN.md's "safety
+# over cleverness" principle, sec. 15):
+#   - -fprofile-update=atomic: confirmed live (Docs/config.txt sec. VIII.C's own
+#     worked FDO log example) that SPEC's own FDO training step runs as a
+#     single serial copy ("Copy 0 of 782.lbm_r (peak train) run 1...") --
+#     never fanned out across SPECrate's own `copies` parameter regardless of
+#     how many copies the real timed reference run uses -- so there is no
+#     concurrent-process .gcda-write hazard from SPEC's own mechanism as
+#     currently used here. Kept anyway as cheap, correctness-preserving
+#     insurance against any future path that does introduce concurrency
+#     (e.g. `parallel_test` turned on, or a benchmark that spawns worker
+#     threads independently of the OMP_NUM_THREADS=1 SPEC forces during
+#     training) -- negligible overhead, no downside, and this project has
+#     already been burned once by trusting an assumption about SPEC's own
+#     mechanics without verifying it (CLAUDE.md's basepeak trap).
+#   - -fprofile-correction: guards against the real, common GCC PGO failure
+#     mode of profile-count inconsistencies (not a hypothetical -- GCC's own
+#     docs describe this as expected whenever the profiled run's control flow
+#     can differ even slightly from what pass 1 recorded) causing a hard
+#     pass-2 build failure rather than a silent bad result.
+_PGO_PASS1_EXTRA = "-fprofile-update=atomic"
+_PGO_PASS2_EXTRA = "-fprofile-correction"
+
 
 class SpecCpu2026Workload(WorkloadBackend):
     def __init__(self, spec_dir, base_config: str = "gcc_O3.cfg"):
@@ -62,8 +100,26 @@ class SpecCpu2026Workload(WorkloadBackend):
                 f"tune={tune!r} not supported -- v1 mines peak-only "
                 "(doc/DESIGN.md sec. 15; uniform base-tuning is M6, not yet built)"
             )
-        optimize_string = " ".join(flags)
-        digest = hashlib.sha1(optimize_string.encode()).hexdigest()[:10]
+        # Digest covers the full requested flags list, including -fprofile-use
+        # when present -- a PGO trial's config must hash differently from a
+        # non-PGO trial sharing the same non-PGO flags, even though the two
+        # render very differently below.
+        digest = hashlib.sha1(" ".join(flags).encode()).hexdigest()[:10]
+        pgo = _PGO_USE_FLAG in flags
+        # -fprofile-generate/-fprofile-use never belong on the flat OPTIMIZE
+        # line itself when PGO is requested -- they're supplied via
+        # PASS1_OPTIMIZE/PASS2_OPTIMIZE below instead, one per pass, each
+        # combined with the shared OPTIMIZE flags at build time (SPEC's own
+        # documented behavior: both variables' flags are concatenated per
+        # pass, confirmed against Docs/config.txt's own worked gcc/lbm
+        # example -- OPTIMIZE=-O2 + PASS1_OPTIMIZE=-fprofile-generate compiled
+        # pass 1 as literally "-O2 -fprofile-generate"). Putting either flag
+        # on the flat line too would apply it uniformly to *both* passes,
+        # which is simply wrong (pass 1 needs -generate, pass 2 needs -use,
+        # never both at once -- they're each other's catalog `conflicts`
+        # entry for exactly this reason).
+        rendered_flags = [f for f in flags if f not in (_PGO_TRAIN_FLAG, _PGO_USE_FLAG)]
+        optimize_string = " ".join(rendered_flags)
         # -frecord-gcc-switches, always appended (doc/DESIGN.md's non-
         # comparability decision doesn't apply -- this only adds a small ELF
         # metadata section, never touches codegen, so it can't affect the
@@ -103,12 +159,22 @@ class SpecCpu2026Workload(WorkloadBackend):
         # `build_base_gcc_O3.NNNN` and reporting "Build successes for ...:
         # <bench>(base)" -- the *only* externally-visible sign anything was
         # wrong, easy to miss without specifically checking for it.
-        config_path.write_text(
-            f"include: {self.base_config}\n\n"
-            f"{bench}=peak:\n"
-            f"   basepeak = no\n"
-            f"   OPTIMIZE = {render_string}\n"
-        )
+        if pgo:
+            config_path.write_text(
+                f"include: {self.base_config}\n\n"
+                f"{bench}=peak:\n"
+                f"   basepeak = no\n"
+                f"   OPTIMIZE = {render_string}\n"
+                f"   PASS1_OPTIMIZE = {_PGO_TRAIN_FLAG} {_PGO_PASS1_EXTRA}\n"
+                f"   PASS2_OPTIMIZE = {_PGO_USE_FLAG} {_PGO_PASS2_EXTRA}\n"
+            )
+        else:
+            config_path.write_text(
+                f"include: {self.base_config}\n\n"
+                f"{bench}=peak:\n"
+                f"   basepeak = no\n"
+                f"   OPTIMIZE = {render_string}\n"
+            )
         return config_path
 
     def audit_compiled_flags(self, bench: str, tune: str) -> Optional[str]:

@@ -60,6 +60,52 @@ def test_generate_config_is_deterministic_for_same_flags(tmp_path):
     assert a == b  # same flag set -> same trial config name, safe to regenerate
 
 
+# -- PGO (real two-pass PASS1_OPTIMIZE/PASS2_OPTIMIZE rendering) ---------------
+
+def test_generate_config_renders_pass1_pass2_when_fprofile_use_present(tmp_path):
+    # -fprofile-use's mere presence in flags -- the same "flags is the trial's
+    # full logical identity" convention every other candidate already uses --
+    # is what triggers the real two-pass PGO rendering, no separate parameter.
+    workload = _make_workload(tmp_path)
+    config_path = workload.generate_config("782.lbm_r", "peak", ["-O3", "-fprofile-use"])
+    text = config_path.read_text()
+    assert "PASS1_OPTIMIZE = -fprofile-generate -fprofile-update=atomic" in text
+    assert "PASS2_OPTIMIZE = -fprofile-use -fprofile-correction" in text
+
+
+def test_generate_config_pgo_flat_optimize_line_excludes_pgo_flags(tmp_path):
+    # -fprofile-generate/-fprofile-use must never land on the flat OPTIMIZE
+    # line too -- that would apply one pass's flag to *both* passes uniformly,
+    # which is simply wrong (see cfm/workloads/spec_cpu2026.py's own comment).
+    workload = _make_workload(tmp_path)
+    config_path = workload.generate_config("782.lbm_r", "peak", ["-O3", "-fprefetch-loop-arrays", "-fprofile-use"])
+    text = config_path.read_text()
+    optimize_line = next(line for line in text.splitlines() if line.strip().startswith("OPTIMIZE ="))
+    assert "-fprofile-use" not in optimize_line
+    assert "-fprofile-generate" not in optimize_line
+    assert "-O3" in optimize_line and "-fprefetch-loop-arrays" in optimize_line
+
+
+def test_generate_config_without_fprofile_use_renders_no_pass_lines(tmp_path):
+    # A normal (non-PGO) trial must render exactly as before -- no regression
+    # to the flat single-OPTIMIZE-line shape every other candidate still uses.
+    workload = _make_workload(tmp_path)
+    config_path = workload.generate_config("782.lbm_r", "peak", ["-O3", "-fprefetch-loop-arrays"])
+    text = config_path.read_text()
+    assert "PASS1_OPTIMIZE" not in text
+    assert "PASS2_OPTIMIZE" not in text
+
+
+def test_generate_config_pgo_and_non_pgo_trials_hash_differently(tmp_path):
+    # Same non-PGO flags, but one trial adds -fprofile-use -- these render
+    # very differently (flat vs. two-pass) and must not collide on the same
+    # config filename.
+    workload = _make_workload(tmp_path)
+    non_pgo = workload.generate_config("782.lbm_r", "peak", ["-O3"])
+    pgo = workload.generate_config("782.lbm_r", "peak", ["-O3", "-fprofile-use"])
+    assert non_pgo != pgo
+
+
 def test_audit_compiled_flags_returns_none_when_no_build_dir(tmp_path):
     workload = _make_workload(tmp_path)
     assert workload.audit_compiled_flags("706.stockfish_r", "peak") is None

@@ -56,11 +56,23 @@ def compiler(fixture_catalog):
 def test_candidate_flags_filters_by_language(compiler):
     # -mbranch-cost=N is in the fixture catalog but is an unresolved template
     # placeholder (tested separately below), so it never reaches this result.
+    # -fprofile-generate/-fprofile-use are category="pgo" -- excluded from this
+    # ordinary per-flag list entirely (tested separately below too).
     candidates = {c.flag for c in compiler.candidate_flags_for_signature(None, ["cxx"])}
-    assert candidates == {"-shared-flag", "-cxx-only-flag", "-fprofile-generate", "-fprofile-use"}
+    assert candidates == {"-shared-flag", "-cxx-only-flag"}
     assert "-c-only-flag" not in candidates
     assert "-fortran-only-flag" not in candidates
     assert "-mbranch-cost=N" not in candidates
+
+
+def test_candidate_flags_excludes_pgo_category(compiler):
+    # -fprofile-generate/-fprofile-use are never proposed as ordinary single-flag
+    # candidates -- each is meaningless tested alone (see cfm/compilers/gcc.py's
+    # own comment, and doc/mining_results.714.cpython_r.2026-08-21.md's live
+    # illustration of exactly why). PGO is Phase 6's own dedicated two-pass flow.
+    candidates = {c.flag for c in compiler.candidate_flags_for_signature(None, ["c", "cxx"])}
+    assert "-fprofile-generate" not in candidates
+    assert "-fprofile-use" not in candidates
 
 
 def test_candidate_flags_ignores_signature_argument(compiler):

@@ -363,6 +363,31 @@ PGO trial marked with an explicit representativeness caveat, §15), and a small 
 `cpu_info.c` vendor/model detection rather than an open-ended search over every `-march` value GCC
 knows).
 
+**PGO's real two-step build/train/rebuild sub-flow: rendering implemented and live-verified
+(2026-08-22), orchestrator wiring not yet built.** `cfm/workloads/spec_cpu2026.py`'s `generate_config()`
+now recognizes `-fprofile-use`'s presence in the requested `flags` (the same "flags is the trial's full
+logical identity" convention every other candidate already uses — no separate parameter) and renders
+SPEC's own native `PASS1_OPTIMIZE`/`PASS2_OPTIMIZE` config mechanism (Docs/config.txt sec. VI) instead
+of the flat single-`OPTIMIZE`-line shape every other candidate uses — `runcpu` itself then drives the
+whole build-instrumented → train (using the benchmark's own SPEC-provided train workload, automatically
+— no cfm-side orchestration of the training run needed at all) → rebuild-optimized sequence internally,
+inside one `--action=build` invocation. Confirmed live end to end against `782.lbm_r` on this host: the
+real SPEC log shows pass 1 compiling with `-fprofile-generate -fprofile-update=atomic`, `"Copy 0 of
+782.lbm_r (peak train) run 1 finished"` (a single serial training copy, never fanned out across
+SPECrate's own `copies` parameter — see §15's decision on why `-fprofile-update=atomic` is applied
+anyway despite this), pass 2 recompiling with `-fprofile-use -fprofile-correction`, and the final
+linked binary's own `.GCC.command.line` audit section showing `-fprofile-use -fprofile-correction`
+compiled in (never `-fprofile-generate`, confirming the PASS2 rebuild is what actually got linked, not a
+silently-reused PASS1 binary — exactly the class of failure the basepeak trap (CLAUDE.md) taught this
+project to check for directly rather than trust `runcpu`'s own success report alone). `-fprofile-generate`/
+`-fprofile-use` are also now excluded from `cfm/compilers/gcc.py`'s ordinary per-flag candidate list
+entirely (`category == "pgo"`) — neither is meaningful tested alone against a single OPTIMIZE line (see
+the now-retracted `doc/mining_results.714.cpython_r.2026-08-21.md`'s live illustration of exactly why).
+**Still open**: a dedicated Phase 6 orchestrator function that actually calls this rendering path with
+the Phase 5 winning set, decides when a PGO trial is worth spending (given its ~2x build-time cost, per
+`782.lbm_r`'s own confirmed pass1+train+pass2 timings), and records its accept/reject the same way
+Phase 4 does — not yet wired into `cfm mine`'s automatic phase sequence.
+
 ### Phase 7 — Finalize and report
 Winning flag set assembled into a real `runcpu` peak config; one final confirmation run at higher
 repetition count (locks in the number being reported); Report agent renders a curated Markdown report
@@ -900,3 +925,39 @@ code was written so M0-M4 have no ambiguity to stall on.
   noise alone). A missed small-but-real win is comparatively cheap — recoverable later (a future M2.5
   refinement, or Phase 5's own combination search catching it alongside other flags), an incorrectly
   accepted one is not.
+- **PGO mechanism: SPEC's own native `PASS1_OPTIMIZE`/`PASS2_OPTIMIZE`, not a hand-rolled
+  generate/run/use flow (2026-08-22).** Confirmed live that `runcpu` already drives the whole
+  build-instrumented → train → rebuild-optimized sequence internally, using the benchmark's own
+  SPEC-provided train workload automatically, given just these two config lines (Docs/config.txt sec.
+  VI) — asking cfm to re-implement that sequencing itself (a separate instrumented build, its own
+  `wspy-run` invocation against the train input, manual profile-directory bookkeeping between the two
+  compiles) would be real, unnecessary work duplicating something SPEC's own tooling already does
+  correctly. §6 Phase 6 and `cfm/workloads/spec_cpu2026.py` implement this.
+  - **Concurrency (`-fprofile-update`): confirmed live, not assumed, that SPEC's own FDO training step
+    is not a concurrency hazard as currently used here.** The natural worry — SPECrate's own methodology
+    runs many parallel copies of the benchmark binary for the real timed measurement, and GCC's default
+    `-fprofile-update=single` corrupts profile counters under concurrent writers to the same `.gcda`
+    file — turned out not to apply to the *training* step specifically: a real build against
+    `782.lbm_r` on this host logged `"Copy 0 of 782.lbm_r (peak train) run 1 finished"` — a single
+    serial training copy, never fanned out across `copies` regardless of how many copies the real
+    reference-size run uses (Docs/config.txt sec. VIII.C's own worked FDO example shows the identical
+    `"Copy 0"` shape). `-fprofile-update=atomic` is applied to the pass-1 (instrumented) build anyway,
+    as cheap, correctness-preserving insurance rather than a fix for an observed corruption — this
+    project has already been burned once by trusting an assumption about SPEC's own mechanics without
+    directly verifying it (CLAUDE.md's basepeak trap), and the insurance costs nothing measurable here
+    while covering a real future risk this hasn't been checked against: `parallel_test` being turned on
+    (SPEC's own switch for running multiple simultaneous test/train verification copies, off by default
+    for cfm's `--noreportable` invocations but a real config knob nonetheless), or a benchmark spawning
+    worker threads during training independently of the `OMP_NUM_THREADS=1` SPEC forces automatically
+    for a SPECrate run's OpenMP parallelism specifically (not necessarily every thread a benchmark might
+    spawn on its own).
+  - **`-fprofile-correction` is applied to the pass-2 (optimized) build unconditionally too** — GCC's
+    own documentation describes profile-count inconsistencies (whenever the profiled run's control flow
+    can differ even slightly from what pass 1 recorded) as a real, common cause of a hard pass-2 build
+    failure, not a hypothetical edge case worth skipping.
+  - **Catalog wiring**: `-fprofile-generate`/`-fprofile-use` are excluded from
+    `compilers/gcc.py`'s ordinary per-flag candidate list (`category == "pgo"`) — Phase 6's PGO trial is
+    its own dedicated two-pass flow, never sourced from the same per-flag loop Phase 2/3 use for every
+    other candidate, since testing either flag alone against a single OPTIMIZE line is meaningless (the
+    now-retracted `doc/mining_results.714.cpython_r.2026-08-21.md` is a live illustration of exactly
+    this mistake, made before this decision existed).
