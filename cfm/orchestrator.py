@@ -2,9 +2,10 @@
 
 M1 scope (doc/DESIGN.md sec. 14): Phases 1 (baseline), 2 (candidate generation --
 trivial, no signature-based filtering yet), 3 (screening), 4 (confirmation), and 5
-(greedy combination). Phase 0 (preflight)/6 (LTO/PGO/microarch multipliers)/7
-(finalize+report) are M1-adjacent or later milestones, not this module's concern
-yet. No `cfm mine` CLI wiring here either -- that's PR 6.
+(greedy combination). Phase 0 (preflight)/7 (finalize+report) are M1-adjacent or
+later milestones, not this module's concern yet. Phase 6 (compounding
+multipliers) has one slice implemented so far -- `run_pgo_multiplier()`'s real
+two-pass PGO trial, 2026-08-22; LTO/microarch multipliers are still open.
 """
 
 from __future__ import annotations
@@ -72,6 +73,16 @@ SCREENING_PRUNE_THRESHOLD_PCT = 5.0
 # regardless of how many flags survived confirmation, "so it doesn't blow the
 # budget" (doc/DESIGN.md sec. 6 Phase 5).
 MAX_PAIR_TOURNAMENT_TRIALS = 10
+
+# Phase 6's real two-pass PGO trial (doc/DESIGN.md sec. 6/15). Must match
+# cfm/workloads/spec_cpu2026.py's own `_PGO_USE_FLAG` -- that module's
+# generate_config() is what actually keys off this literal's presence to render
+# the real PASS1_OPTIMIZE/PASS2_OPTIMIZE two-pass config instead of the flat
+# single-OPTIMIZE-line shape; this constant just needs the same string, not an
+# import of that module's own concrete-workload internals into this
+# backend-agnostic orchestrator (cfm/workloads/base.py's `WorkloadBackend`
+# abstraction is deliberately never assumed to be the SPEC one here).
+PGO_FLAG = "-fprofile-use"
 
 # doc/DESIGN.md sec. 14 M2.5 item 3: Phase 4/5's accept bar requires not just a
 # statistically non-overlapping CI but a *practically* significant delta -- a
@@ -533,23 +544,27 @@ def _confirm_flagset(
                     )
 
         # Cross-benchmark knowledge transfer (doc/DESIGN.md sec. 8) is keyed by a
-        # single flag -- only meaningful for Phase 4's one-flag-at-a-time
-        # confirmations, not Phase 5's multi-flag cumulative/pair sets, and only
-        # when there's a real numeric delta to aggregate (a total-failure
-        # confirmation is still persisted above, as trials + hypotheses, just not
-        # folded into this numeric aggregate). compiler_version/target_arch are
-        # both None -- no host/GCC detection wired in yet (CLAUDE.md's traps log).
+        # single flag -- meaningful for Phase 4's one-flag-at-a-time
+        # confirmations and Phase 6's own single-flag PGO multiplier trial
+        # (added 2026-08-22 -- run_pgo_multiplier() always calls this with
+        # exactly one flag, PGO_FLAG, appended last, same "flags[-1] is the
+        # thing under test" shape Phase 4 already has), but never Phase 5's
+        # multi-flag cumulative/pair sets, and only when there's a real numeric
+        # delta to aggregate (a total-failure confirmation is still persisted
+        # above, as trials + hypotheses, just not folded into this numeric
+        # aggregate). compiler_version/target_arch are both None -- no
+        # host/GCC detection wired in yet (CLAUDE.md's traps log).
         #
-        # phase == "confirmation" (not len(flags) == 1) is what actually
-        # distinguishes Phase 4 from Phase 5 here: flags is now always
-        # baseline.flags + [the one candidate under test] (confirmed live,
+        # phase in ("confirmation", "multiplier") -- not len(flags) == 1 -- is
+        # what actually distinguishes Phase 4/6 from Phase 5 here: flags is now
+        # always baseline.flags + [the one thing under test] (confirmed live,
         # 2026-08-22 -- see confirm_candidates()'s own comment for why it's no
         # longer just [candidate.flag] alone), so it's never length 1 by
         # itself, and Phase 5's own greedy-walk first step has the identical
         # length/shape (baseline.flags + [flag]) -- phase is the only reliable
         # signal. The candidate itself is flags[-1] (the newly-added one), not
         # flags[0] (now baseline's own first flag, e.g. "-O3").
-        if phase == "confirmation" and ratios:
+        if phase in ("confirmation", "multiplier") and ratios:
             db.upsert_knowledge(
                 conn, cluster_key=baseline.resource_dominance or "unknown", compiler="gcc",
                 compiler_version=None, target_arch=None, flag=flags[-1], accepted=accepted,
@@ -692,4 +707,90 @@ def greedy_combine(
 
     return CombinationResult(
         winning_flags=current_flags, winning_ci=current_ci, steps=steps, pair_trials=pair_trials,
+    )
+
+
+@dataclass
+class MultiplierResult:
+    """Phase 6's output for a single compounding multiplier -- PGO here (real
+    two-pass `-fprofile-use`, cfm/workloads/spec_cpu2026.py's PASS1/PASS2
+    rendering); LTO/microarch multipliers are still open, doc/DESIGN.md sec.
+    14. ``attempted`` is False when the multiplier was skipped as implausible
+    against the baseline's characterized shape (doc/DESIGN.md sec. 14 M2.5
+    item 3's same reasoning applied here, since Phase 6 bypasses Phase 2's own
+    filtering entirely -- PGO_FLAG's catalog entry is excluded from
+    `candidate_flags_for_signature()`'s ordinary per-flag list, so nothing else
+    ever checks its plausibility) -- ``outcome`` is then ``None`` and no trial
+    was spent. ``winning_flags``/``winning_ci`` are always populated: the
+    incoming ``combination``'s own winning set/CI when PGO wasn't attempted or
+    wasn't accepted, or the PGO trial's own flags/CI when it was.
+    """
+
+    attempted: bool
+    winning_flags: list[str]
+    winning_ci: ConfidenceInterval
+    skip_reason: Optional[str] = None
+    outcome: Optional[ConfirmationOutcome] = None
+
+
+def run_pgo_multiplier(
+    cfg: CfmConfig,
+    *,
+    experiment_id: int,
+    benchmark: str,
+    baseline: BaselineResult,
+    combination: CombinationResult,
+    compiler: Optional[GccCompiler] = None,
+    workload: Optional[WorkloadBackend] = None,
+    instrumentation: Optional[InstrumentationBackend] = None,
+) -> MultiplierResult:
+    """doc/DESIGN.md sec. 6 Phase 6 (PGO slice): real two-pass PGO layered on top
+    of Phase 5's winning flagset (``combination.winning_flags``), compared
+    against Phase 5's own winning CI -- not the original baseline -- same
+    "compare against the current running set" principle `greedy_combine()`'s own
+    cumulative steps already use via `_confirm_flagset()`'s `compare_ci` param.
+
+    Cheap plausibility check first, mirroring `_filter_implausible_candidates()`
+    (Phase 2): skip PGO entirely, spending no trial, when *every one* of the
+    `-fprofile-use` catalog entry's own `topdown_signals` is confidently
+    contradicted by ``baseline``'s characterized shape (unknown/absent signal
+    data never counts as implausible, same as Phase 2's own rule) -- PGO is a
+    real two-compile-plus-training-run trial (roughly 2x a normal confirmation's
+    build cost), not free, so this is worth the same cheap check every other
+    catalog entry already gets, even though PGO itself was deliberately excluded
+    from that shared per-flag path (`compilers/gcc.py`'s `category == "pgo"`
+    exclusion) since testing it standalone there would be meaningless.
+
+    Always renders `flags = combination.winning_flags + [PGO_FLAG]` --
+    `generate_config()` keys off `PGO_FLAG`'s literal presence to render the
+    real PASS1_OPTIMIZE/PASS2_OPTIMIZE two-pass config, and this is the same
+    "flags is the trial's full logical identity" convention every other
+    candidate in this module already uses.
+    """
+    compiler = compiler or GccCompiler()
+    signals = compiler.pgo_topdown_signals()
+    if signals and all(_signal_is_implausible(s, baseline) for s in signals):
+        reason = (
+            f"skipping PGO -- topdown_signals {signals} implausible given baseline shape "
+            f"(resource_dominance={baseline.resource_dominance!r}, "
+            f"vectorization_density={baseline.vectorization_density!r})"
+        )
+        print(f"info: {reason}")
+        return MultiplierResult(
+            attempted=False, winning_flags=combination.winning_flags,
+            winning_ci=combination.winning_ci, skip_reason=reason,
+        )
+
+    outcome = _confirm_flagset(
+        cfg, experiment_id=experiment_id, benchmark=benchmark, baseline=baseline,
+        flags=combination.winning_flags + [PGO_FLAG], phase="multiplier",
+        compare_ci=combination.winning_ci, workload=workload, instrumentation=instrumentation,
+    )
+    if outcome.accepted:
+        return MultiplierResult(
+            attempted=True, winning_flags=outcome.flags, winning_ci=outcome.ci, outcome=outcome,
+        )
+    return MultiplierResult(
+        attempted=True, winning_flags=combination.winning_flags,
+        winning_ci=combination.winning_ci, outcome=outcome,
     )

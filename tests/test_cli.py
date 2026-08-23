@@ -14,7 +14,7 @@ import json
 import pytest
 
 import cfm.cli as cli
-from cfm.orchestrator import BaselineResult, CombinationResult
+from cfm.orchestrator import BaselineResult, CombinationResult, ConfirmationOutcome, MultiplierResult
 from cfm.stats import confidence_interval
 
 
@@ -23,6 +23,18 @@ def _fake_baseline(exp_id=1):
         experiment_id=exp_id, flags=["-O3"], ratios=[100.0, 100.0, 100.0],
         ci=confidence_interval([100.0, 100.0, 100.0]), resource_dominance="memory-bound",
         trial_ids=[1, 2, 3],
+    )
+
+
+def _fake_pgo_not_attempted(combination):
+    """Default stand-in for orchestrator.run_pgo_multiplier() in tests that
+    aren't themselves about Phase 6 -- collapses straight back to combination's
+    own winning flags/CI, matching a skipped-as-implausible or --skip-pgo run,
+    so every pre-existing assertion about "the winning flagset" continues to
+    mean Phase 5's own output unless a test opts into exercising Phase 6."""
+    return MultiplierResult(
+        attempted=False, winning_flags=combination.winning_flags, winning_ci=combination.winning_ci,
+        skip_reason="fake: not exercising Phase 6 in this test",
     )
 
 
@@ -37,6 +49,10 @@ def test_mine_reports_a_winning_flagset(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(cli.orchestrator, "screen_candidates", lambda *a, **k: [])
     monkeypatch.setattr(cli.orchestrator, "confirm_candidates", lambda *a, **k: [])
     monkeypatch.setattr(cli.orchestrator, "greedy_combine", lambda *a, **k: combination)
+    monkeypatch.setattr(
+        cli.orchestrator, "run_pgo_multiplier",
+        lambda *a, combination, **k: _fake_pgo_not_attempted(combination),
+    )
     # db.connect() is left real (a throwaway sqlite file under tmp_path) rather
     # than faked -- cli.py's mine handler still calls db.finish_experiment()
     # directly (not through orchestrator), and a real, cheap sqlite connection is
@@ -71,6 +87,10 @@ def test_mine_max_trials_truncates_candidate_list_and_flags_budget_exhausted(tmp
     monkeypatch.setattr(
         cli.orchestrator, "greedy_combine",
         lambda *a, **k: CombinationResult(winning_flags=baseline.flags, winning_ci=baseline.ci),
+    )
+    monkeypatch.setattr(
+        cli.orchestrator, "run_pgo_multiplier",
+        lambda *a, combination, **k: _fake_pgo_not_attempted(combination),
     )
 
     # --max-trials 5, 3 already spent on baseline -> only 2 of the 4 candidates
@@ -115,6 +135,110 @@ def test_mine_calls_finish_experiment_with_the_right_experiment_id_and_status(tm
         cli.orchestrator, "greedy_combine",
         lambda *a, **k: CombinationResult(winning_flags=["-O3"], winning_ci=confidence_interval([100.0] * 3)),
     )
+    monkeypatch.setattr(
+        cli.orchestrator, "run_pgo_multiplier",
+        lambda *a, combination, **k: _fake_pgo_not_attempted(combination),
+    )
 
     cli.main(["mine", "fake_r", "--db", str(tmp_path / "cfm.db"), "--lock-file", str(tmp_path / "test.lock")])
     assert calls == [(42, "converged")]
+
+
+# -- Phase 6 (PGO multiplier) wiring -------------------------------------------
+
+def _mine_common_mocks(monkeypatch, baseline, combination):
+    monkeypatch.setattr(cli.orchestrator, "run_baseline", lambda *a, **k: baseline)
+    monkeypatch.setattr(cli.orchestrator, "generate_candidates", lambda *a, **k: [])
+    monkeypatch.setattr(cli.orchestrator, "screen_candidates", lambda *a, **k: [])
+    monkeypatch.setattr(cli.orchestrator, "confirm_candidates", lambda *a, **k: [])
+    monkeypatch.setattr(cli.orchestrator, "greedy_combine", lambda *a, **k: combination)
+
+
+def test_mine_skip_pgo_never_calls_run_pgo_multiplier(tmp_path, monkeypatch, capsys):
+    baseline = _fake_baseline()
+    combination = CombinationResult(winning_flags=["-O3"], winning_ci=baseline.ci)
+    _mine_common_mocks(monkeypatch, baseline, combination)
+    calls = []
+    monkeypatch.setattr(
+        cli.orchestrator, "run_pgo_multiplier", lambda *a, **k: calls.append(1) or None,
+    )
+
+    exit_code = cli.main([
+        "mine", "fake_r", "--skip-pgo",
+        "--db", str(tmp_path / "cfm.db"), "--lock-file", str(tmp_path / "test.lock"),
+    ])
+    assert exit_code == 0
+    assert calls == []  # never invoked at all
+
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["pgo_attempted"] is False
+    assert summary["pgo_skip_reason"] == "--skip-pgo"
+    assert summary["winning_flags"] == combination.winning_flags  # unchanged, PGO never ran
+
+
+def test_mine_pgo_accepted_becomes_the_final_winning_flagset(tmp_path, monkeypatch, capsys):
+    baseline = _fake_baseline()
+    combination = CombinationResult(winning_flags=["-O3", "-flto"], winning_ci=baseline.ci)
+    pgo_ci = confidence_interval([130.0, 130.0, 130.0])
+    pgo_result = MultiplierResult(
+        attempted=True, winning_flags=["-O3", "-flto", "-fprofile-use"], winning_ci=pgo_ci,
+        outcome=ConfirmationOutcome(
+            flags=["-O3", "-flto", "-fprofile-use"], trial_ids=[10, 11, 12], ratios=[130.0] * 3,
+            ci=pgo_ci, delta_vs_baseline_pct=30.0, accepted=True, reason="fake accept",
+        ),
+    )
+    _mine_common_mocks(monkeypatch, baseline, combination)
+    monkeypatch.setattr(cli.orchestrator, "run_pgo_multiplier", lambda *a, **k: pgo_result)
+
+    exit_code = cli.main(["mine", "fake_r", "--db", str(tmp_path / "cfm.db"), "--lock-file", str(tmp_path / "test.lock")])
+    assert exit_code == 0
+
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["combination_winning_flags"] == ["-O3", "-flto"]  # Phase 5's own, unmodified
+    assert summary["pgo_attempted"] is True
+    assert summary["pgo_accepted"] is True
+    assert summary["winning_flags"] == ["-O3", "-flto", "-fprofile-use"]  # PGO's, not Phase 5's
+    assert summary["winning_ratio_mean"] == pytest.approx(130.0)
+
+
+def test_mine_pgo_rejected_keeps_phase5s_winning_flagset(tmp_path, monkeypatch, capsys):
+    baseline = _fake_baseline()
+    combination = CombinationResult(winning_flags=["-O3", "-flto"], winning_ci=baseline.ci)
+    pgo_result = MultiplierResult(
+        attempted=True, winning_flags=combination.winning_flags, winning_ci=combination.winning_ci,
+        outcome=ConfirmationOutcome(
+            flags=["-O3", "-flto", "-fprofile-use"], trial_ids=[10, 11, 12], ratios=[95.0] * 3,
+            ci=confidence_interval([95.0] * 3), delta_vs_baseline_pct=-5.0,
+            accepted=False, reason="fake reject",
+        ),
+    )
+    _mine_common_mocks(monkeypatch, baseline, combination)
+    monkeypatch.setattr(cli.orchestrator, "run_pgo_multiplier", lambda *a, **k: pgo_result)
+
+    exit_code = cli.main(["mine", "fake_r", "--db", str(tmp_path / "cfm.db"), "--lock-file", str(tmp_path / "test.lock")])
+    assert exit_code == 0
+
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["pgo_attempted"] is True
+    assert summary["pgo_accepted"] is False
+    assert summary["winning_flags"] == ["-O3", "-flto"]  # Phase 5's, PGO rejected
+
+
+def test_mine_pgo_skipped_as_implausible(tmp_path, monkeypatch, capsys):
+    baseline = _fake_baseline()
+    combination = CombinationResult(winning_flags=["-O3"], winning_ci=baseline.ci)
+    pgo_result = MultiplierResult(
+        attempted=False, winning_flags=combination.winning_flags, winning_ci=combination.winning_ci,
+        skip_reason="skipping PGO -- topdown_signals [...] implausible given baseline shape (...)",
+    )
+    _mine_common_mocks(monkeypatch, baseline, combination)
+    monkeypatch.setattr(cli.orchestrator, "run_pgo_multiplier", lambda *a, **k: pgo_result)
+
+    exit_code = cli.main(["mine", "fake_r", "--db", str(tmp_path / "cfm.db"), "--lock-file", str(tmp_path / "test.lock")])
+    assert exit_code == 0
+
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["pgo_attempted"] is False
+    assert "implausible" in summary["pgo_skip_reason"]
+    assert summary["pgo_accepted"] is False
+    assert summary["winning_flags"] == ["-O3"]

@@ -363,8 +363,8 @@ PGO trial marked with an explicit representativeness caveat, §15), and a small 
 `cpu_info.c` vendor/model detection rather than an open-ended search over every `-march` value GCC
 knows).
 
-**PGO's real two-step build/train/rebuild sub-flow: rendering implemented and live-verified
-(2026-08-22), orchestrator wiring not yet built.** `cfm/workloads/spec_cpu2026.py`'s `generate_config()`
+**PGO's real two-step build/train/rebuild sub-flow: rendering implemented and live-verified, orchestrator
+wiring implemented (both 2026-08-22).** `cfm/workloads/spec_cpu2026.py`'s `generate_config()`
 now recognizes `-fprofile-use`'s presence in the requested `flags` (the same "flags is the trial's full
 logical identity" convention every other candidate already uses — no separate parameter) and renders
 SPEC's own native `PASS1_OPTIMIZE`/`PASS2_OPTIMIZE` config mechanism (Docs/config.txt sec. VI) instead
@@ -383,10 +383,25 @@ project to check for directly rather than trust `runcpu`'s own success report al
 `-fprofile-use` are also now excluded from `cfm/compilers/gcc.py`'s ordinary per-flag candidate list
 entirely (`category == "pgo"`) — neither is meaningful tested alone against a single OPTIMIZE line (see
 the now-retracted `doc/mining_results.714.cpython_r.2026-08-21.md`'s live illustration of exactly why).
-**Still open**: a dedicated Phase 6 orchestrator function that actually calls this rendering path with
-the Phase 5 winning set, decides when a PGO trial is worth spending (given its ~2x build-time cost, per
-`782.lbm_r`'s own confirmed pass1+train+pass2 timings), and records its accept/reject the same way
-Phase 4 does — not yet wired into `cfm mine`'s automatic phase sequence.
+`cfm/orchestrator.py`'s `run_pgo_multiplier()` now calls this rendering path with the Phase 5 winning
+set (`combination.winning_flags + [PGO_FLAG]`), compared against Phase 5's own winning CI via the same
+`_confirm_flagset()` machinery Phase 4/5 already use (`phase="multiplier"`, the schema's own
+`trials.phase` CHECK constraint already anticipated this value). Two things keep an implausible or
+already-decided-against PGO trial from spending its real ~2x build-time cost for nothing: a cheap
+plausibility check mirroring `_filter_implausible_candidates()` (`compiler.pgo_topdown_signals()`, skip
+outright — no trial spent — only when *every* signal is confidently contradicted by baseline's
+characterized shape, same "absence of information is never implausible" rule as Phase 2's own check),
+and `cli.py`'s `--skip-pgo` escape hatch for a cheaper/faster focused run. Accepted, it becomes the
+final winning flagset (`cli.py`'s `mine` summary JSON's `winning_flags`/`winning_ratio_mean`, distinct
+from `combination_winning_flags`/`combination_winning_ratio_mean` which always show Phase 5's own,
+unmodified, result); rejected or skipped, Phase 5's own winning set is reported unchanged. Knowledge-
+table upsert now fires for `phase in ("confirmation", "multiplier")` (was `"confirmation"`-only),
+keyed on `PGO_FLAG` for the multiplier case. Verified against `tests/test_orchestrator.py`'s mocked-
+backend tier (accept/reject/skip-as-implausible/unknown-shape-not-excluded/knowledge-upsert cases) and
+`tests/test_cli.py`'s wiring tests — not yet exercised by a real end-to-end `cfm mine` run, since the
+higher-risk SPEC-interaction piece (does the rendered PASS1/PASS2 config actually do what it says) was
+already real-verified in isolation above; a full real run is the natural next verification step, same
+bar M1's own phases were held to before being called "shipped and verified."
 
 ### Phase 7 — Finalize and report
 Winning flag set assembled into a real `runcpu` peak config; one final confirmation run at higher

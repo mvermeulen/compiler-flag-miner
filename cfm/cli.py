@@ -51,8 +51,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     mine = sub.add_parser(
         "mine",
-        help="rule-based flag search (doc/DESIGN.md sec. 6 Phases 1-5): baseline, "
-             "screen, confirm, greedy-combine",
+        help="rule-based flag search (doc/DESIGN.md sec. 6 Phases 1-6): baseline, "
+             "screen, confirm, greedy-combine, PGO multiplier",
     )
     mine.add_argument("benchmark", help="e.g. 706.stockfish_r")
     mine.add_argument(
@@ -67,6 +67,13 @@ def build_parser() -> argparse.ArgumentParser:
              "screening, not separately capped yet. Omit for no cap.",
     )
     mine.add_argument("--catalog", default=None, help="override the GCC flag catalog path")
+    mine.add_argument(
+        "--skip-pgo", action="store_true",
+        help="skip Phase 6's real two-pass PGO multiplier trial (doc/DESIGN.md sec. 6) -- "
+             "roughly 2x a normal confirmation's build cost (an instrumented build, a "
+             "training run, and an optimized rebuild), useful for a cheaper/faster "
+             "focused run",
+    )
     mine.add_argument("--spec-dir", default=None)
     mine.add_argument("--spec-config", default=None)
     mine.add_argument("--wspy-dir", default=None)
@@ -141,6 +148,13 @@ def main(argv=None) -> int:
                     cfg, experiment_id=baseline.experiment_id, benchmark=args.benchmark,
                     baseline=baseline, confirmed=confirmed,
                 )
+
+                pgo_result = None
+                if not args.skip_pgo:
+                    pgo_result = orchestrator.run_pgo_multiplier(
+                        cfg, experiment_id=baseline.experiment_id, benchmark=args.benchmark,
+                        baseline=baseline, combination=combination, compiler=compiler,
+                    )
         except RuntimeError as exc:
             print(f"cfm mine: {exc}", file=sys.stderr)
             return 1
@@ -154,7 +168,14 @@ def main(argv=None) -> int:
         finally:
             conn.close()
 
-        gain_pct = (combination.winning_ci.mean - baseline.ci.mean) / baseline.ci.mean * 100.0
+        # pgo_result is None only when --skip-pgo was passed -- otherwise Phase 6
+        # always runs (possibly skipping the trial itself as implausible, still
+        # a MultiplierResult either way), so its own winning_flags/winning_ci
+        # already collapse back to combination's own when PGO wasn't attempted
+        # or wasn't accepted (run_pgo_multiplier()'s own docstring).
+        final_flags = pgo_result.winning_flags if pgo_result else combination.winning_flags
+        final_ci = pgo_result.winning_ci if pgo_result else combination.winning_ci
+        gain_pct = (final_ci.mean - baseline.ci.mean) / baseline.ci.mean * 100.0
         summary = {
             "experiment_id": baseline.experiment_id,
             "benchmark": args.benchmark,
@@ -166,8 +187,13 @@ def main(argv=None) -> int:
             "baseline_characterization_source": baseline.characterization_source,
             "candidates_screened": len(screened),
             "candidates_confirmed": sum(1 for c in confirmed if c.accepted),
-            "winning_flags": combination.winning_flags,
-            "winning_ratio_mean": combination.winning_ci.mean,
+            "combination_winning_flags": combination.winning_flags,
+            "combination_winning_ratio_mean": combination.winning_ci.mean,
+            "pgo_attempted": pgo_result.attempted if pgo_result else False,
+            "pgo_skip_reason": pgo_result.skip_reason if pgo_result else "--skip-pgo",
+            "pgo_accepted": bool(pgo_result and pgo_result.outcome and pgo_result.outcome.accepted),
+            "winning_flags": final_flags,
+            "winning_ratio_mean": final_ci.mean,
             "gain_vs_baseline_pct": gain_pct,
             "budget_exhausted": budget_exhausted,
         }

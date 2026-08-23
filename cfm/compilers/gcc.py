@@ -176,3 +176,21 @@ class GccCompiler(CompilerBackend):
 
     def render_optimize_string(self, flags: list[str]) -> str:
         return " ".join(flags)
+
+    def pgo_topdown_signals(self) -> list[str]:
+        """The `-fprofile-use` catalog entry's own ``topdown_signals`` -- used by
+        cfm/orchestrator.py's Phase 6 PGO multiplier to decide whether a real
+        two-pass PGO trial is even worth attempting against a given baseline
+        shape, reusing the exact same plausibility check Phase 2's
+        `_filter_implausible_candidates()` applies to every other catalog entry.
+        Phase 6 needs its own copy of this check because PGO bypasses Phase 2's
+        candidate list entirely (`category == "pgo"` entries are excluded from
+        `candidate_flags_for_signature()` above -- see that method's own
+        comment). Returns `[]` if the catalog has no `-fprofile-use` entry at
+        all (a caller should then always attempt PGO -- no signal to judge
+        implausibility against, not a catalog config error worth raising on).
+        """
+        for entry in self._flags():
+            if entry["flag"] == "-fprofile-use":
+                return entry.get("topdown_signals", [])
+        return []
