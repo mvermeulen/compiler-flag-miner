@@ -2,17 +2,21 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working in this repository.
 
-**Status: M0/M1's pipeline mechanics are real and working. `doc/mining_results.782.lbm_r.2026-08-22.md`
-is the first genuinely trustworthy `cfm mine` result in this project's history** — a focused,
-budget-capped (`--max-trials 4`) run against `782.lbm_r`, completed after both real bugs below (the
+**Status: M0/M1's pipeline mechanics are real and working, and this project has its first genuine
+accepted win.** `doc/mining_results.782.lbm_r.2026-08-22.md` was the first genuinely trustworthy `cfm
+mine` result (a focused, budget-capped run, zero acceptances — a correct reject, not a bug).
+`doc/mining_results.714.cpython_r.2026-08-23.md` is the first *uncapped* corrected run, and the first to
+land a real accept: `-flto` (+8.00%) then real two-pass PGO (+31.16% more) for **+41.65% overall vs.
+plain `-O3`**, Phase 6's `run_pgo_multiplier()` exercised for real for the first time outside mocks (see
+the Non-obvious traps log's 2026-08-23 entry for the full story, including a benign `-flto` audit
+false-negative found and fixed along the way). Both runs happened after both real bugs below (the
 basepeak config-scoping bug and the isolated-candidate-flags bug) were fixed. Every prior
 "verified"/"real run" result before 2026-08-21 is still retracted (see both entries in the Non-obvious
-traps log below for the full stories) — this run is the fresh corrected re-run that retraction was
-pending on, verified end-to-end via a real `cfm mine` invocation, not an isolated ad hoc build. It only
-exercised 1 of 5 plausible candidate flags (budget-capped, deliberately, per the "more focused test"
-ask) and produced zero acceptances (a correct, CI-overlap-grounded reject, not a bug) — a larger/
-uncapped follow-up run, and a benchmark whose `resource_dominance` isn't memory-bound, are still open
-next steps (see that doc's own "Next steps" section). See `CLAUDE.md`'s Non-obvious traps log
+traps log below for the full stories) — these two runs are the fresh corrected re-runs that retraction
+was pending on, verified end-to-end via real `cfm mine` invocations, not isolated ad hoc builds. Still
+open: a benchmark whose `resource_dominance` isn't memory-bound *or* frontend-bound, for real coverage
+of the compute-bound/backend-bound flag categories neither run has touched yet. See `CLAUDE.md`'s
+Non-obvious traps log
 ("Resolved 2026-08-21: `generate_config()`'s per-trial `basepeak = no` override was silently ignored
 by SPEC since this project's very first commit") for the full basepeak story: every real trial run
 before that fix — M0's own original verification, and all four `doc/mining_results.*.md` write-ups
@@ -602,6 +606,33 @@ Full branch/PR discipline, same shape as wspy's:
   logic on top using machinery (`_confirm_flagset()`, the accept/reject bar, knowledge upserts) already
   real-verified by M1's own shipped run. A full real `cfm mine` run is still the natural next step to
   exercise Phase 6 for real end to end, not a gap specific to this PR.
+- **Resolved 2026-08-23: the full real `cfm mine` run that entry called for happened, Phase 6 exercised
+  for real for the first time — and produced this project's first genuine accepted win. A benign audit
+  false-negative on `-flto` surfaced and was fixed along the way, not just noted.** `cfm mine
+  714.cpython_r` (uncapped), picked deliberately: it's the one previously-mined benchmark whose baseline
+  (`resource_dominance=frontend-bound`) actually clears `run_pgo_multiplier()`'s own plausibility check
+  (`-fprofile-use`'s catalog `topdown_signals` are `["frontend-bound", "speculation-bound"]` — stockfish/
+  lbm are both memory-bound, so PGO would be skipped outright for either). Real result: `-flto` accepted
+  at Phase 4/5 (+8.00% vs. baseline), then real two-pass PGO accepted on top at Phase 6 (+31.16% vs. the
+  `-flto`-including comparison), for **+41.65% overall vs. plain `-O3`** — matching CPython's own
+  real-world PGO+LTO story (`--enable-optimizations`) for exactly the reason `frontend-bound` predicts
+  (bytecode-dispatch's unpredictable indirect branches, poor icache locality). First accepted candidate
+  of any kind in this project's mining history; first real exercise of Phase 6 outside mocks.
+  **A real audit puzzle chased down before calling this clean, not waved off**: the PGO trials' own
+  compiled-flags audit reported `-flto` as `"NOT FOUND in compiled binary"` — worth taking seriously
+  given this project's basepeak history. Verified directly: the real SPEC build log shows `-flto`
+  genuinely on every per-translation-unit compile line, plus `lto-wrapper: warning: using serial
+  compilation of 51 LTRANS jobs` (real link-time optimization actually ran) — so the win itself was
+  never in doubt. The audit's false negative has a real, understood cause: on an LTO build,
+  `-frecord-gcc-switches`'s own recorded `.GCC.command.line` section captures GCC's **internal LTRANS
+  re-invocation** of itself at final-link time (`readelf` on the real linked binary showed `"GNU GIMPLE
+  15.2.0 ... -fltrans"`), not the original per-TU `-flto` flag — GCC's LTO backend transforms the
+  recorded invocation at that stage, so a literal `"-flto"` substring check reports "missing" on *every*
+  LTO build, correct or not. Same class of gap as `-march=native`/`-mtune=native` (GCC rewrites those
+  before recording too) — `-flto` is now added to `cfm/agents/spec_agent.py`'s
+  `_AUDIT_UNVERIFIABLE_LITERAL_FLAGS`, so a future LTO trial's audit reports "not independently
+  checkable" instead of a misleading "NOT FOUND" that could wrongly suggest LTO was silently dropped.
+  See `doc/mining_results.714.cpython_r.2026-08-23.md` for the full write-up.
 
 ## Build & test
 

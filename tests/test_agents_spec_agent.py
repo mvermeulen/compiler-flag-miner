@@ -84,14 +84,29 @@ def test_run_one_trial_marks_experiment_failed_on_unexpected_exception(tmp_path)
 # -- _summarize_compiled_flags_audit -------------------------------------------
 
 def test_summarize_compiled_flags_audit_reports_found_missing_and_skipped():
-    dump = "GNU C17 15.2.0 -march=znver5 -mmmx ... -flto -O3 -DDIAG_MARKER\n"
+    dump = "GNU C17 15.2.0 -march=znver5 -mmmx ... -fno-semantic-interposition -O3 -DDIAG_MARKER\n"
     summary = _summarize_compiled_flags_audit(
-        ["-flto", "-fno-semantic-interposition", "-march=native"], dump,
+        ["-fno-semantic-interposition", "-fprefetch-loop-arrays", "-march=native"], dump,
     )
-    assert "confirmed compiled in: ['-flto']" in summary
-    assert "NOT FOUND in compiled binary" in summary and "-fno-semantic-interposition" in summary
+    assert "confirmed compiled in: ['-fno-semantic-interposition']" in summary
+    assert "NOT FOUND in compiled binary" in summary and "-fprefetch-loop-arrays" in summary
     assert "not independently checkable" in summary and "-march=native" in summary
     assert "no -O optimization level" not in summary  # -O3 is right there in the dump
+
+
+def test_summarize_compiled_flags_audit_skips_flto_as_unverifiable():
+    # Real 2026-08-22 finding: on an LTO build, -frecord-gcc-switches's own
+    # recorded .GCC.command.line section reflects GCC's internal LTRANS
+    # re-invocation ("GNU GIMPLE ... -fltrans"), never the literal "-flto"
+    # flag -- confirmed against a real accepted 714.cpython_r PGO+LTO trial,
+    # where LTO genuinely ran (the real SPEC log's own "lto-wrapper: ... 51
+    # LTRANS jobs" line) but a literal substring check still said "missing."
+    # A false "NOT FOUND" on every LTO build would be actively misleading, so
+    # -flto is skipped the same way -march=native/-mtune=native already are.
+    dump = "GNU GIMPLE 15.2.0 -m64 -mtune=generic -march=x86-64 -O3 -fltrans\n"
+    summary = _summarize_compiled_flags_audit(["-O3", "-flto"], dump)
+    assert "not independently checkable" in summary and "-flto" in summary
+    assert "NOT FOUND" not in summary
 
 
 def test_summarize_compiled_flags_audit_warns_when_no_optimization_level_found():
