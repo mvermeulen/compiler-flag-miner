@@ -426,8 +426,13 @@ microarch flag on top would conflict, not compound). Verified live against a rea
 `-O3 -march=znver5`: compiled successfully, and — unlike `-march=native`, which GCC expands away before
 recording — the literal `-march=znver5` text survives straight into the compiled binary's own
 `.GCC.command.line` audit section, confirming both that the flag reached the compiler and that the audit
-can verify it directly for this one. Not yet exercised inside a real `cfm mine` run end to end — same
-deliberate posture PGO's own orchestrator-wiring entry took before its own real-run confirmation above.
+can verify it directly for this one. Exercised end to end the same day (2026-08-23): a real, uncapped
+`cfm mine 706.stockfish_r` run correctly fired the conflict-avoidance guard (`-march=native` won via the
+ordinary per-flag path first, confirmed byte-identical to `-march=znver5` on this host), and a separate,
+bounded ad hoc verification against `782.lbm_r` (a synthetic `combination` deliberately holding no arch
+flag, forcing the guard not to fire) exercised the actual trial path for real: both `-march=znver5`/
+`-mtune=znver5` ran genuine SPEC builds and were correctly rejected. See CLAUDE.md's matching traps-log
+entry and `doc/mining_results.706.stockfish_r.2026-08-23.md` for the full detail.
 
 ### Phase 7 — Finalize and report
 Winning flag set assembled into a real `runcpu` peak config; one final confirmation run at higher

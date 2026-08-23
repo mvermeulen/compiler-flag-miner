@@ -670,6 +670,30 @@ Full branch/PR discipline, same shape as wspy's:
   Not yet exercised inside a real `cfm mine` run end to end — same deliberate posture as the PGO
   orchestrator-wiring entry above (mocked-backend unit tests for the wiring logic itself, since the real-
   build risk was independently confirmed in isolation).
+- **Resolved 2026-08-23 (same day, follow-up): `run_microarch_multiplier()` exercised for real end to end,
+  both its skip guard and its actual trial path, in two separate real runs.** A full, uncapped `cfm mine
+  706.stockfish_r` run (this project's first genuinely completed, trustworthy result for this benchmark
+  since either bug fix — see `doc/mining_results.706.stockfish_r.2026-08-23.md`) landed a second real
+  accepted win, `-march=native` at +48.75% (confirmed directly from the compiled binary: `-march=native`
+  expands to `-march=znver5` plus the full AVX-512 feature set, matching well-known real-world Stockfish
+  behavior). That run's own microarch multiplier correctly fired its conflict-avoidance guard
+  (`"winning set ['-O3', '-march=native'] already has an -march=/-mtune= flag..."`) rather than running a
+  trial — real evidence the guard works, since `-march=native` and `-march=znver5` are confirmed
+  byte-identical on this host, but it meant the multiplier's *other* code path (the actual
+  `_confirm_flagset()` trial) still hadn't run against real SPEC.
+  Verified separately, same day: a bounded, single-purpose ad hoc call to `run_microarch_multiplier()`
+  against `782.lbm_r`, with a synthetic `combination` deliberately holding no `-march=`/`-mtune=` flag (so
+  the guard wouldn't fire) and `CONFIRMATION_REPETITIONS` temporarily reduced to 1 for just this
+  verification script (not the module's own real default — this was explicitly about proving the
+  mechanism works, not producing a statistically load-bearing result). Real, clean outcome: both detected
+  candidates ran genuine SPEC builds and measurements — `-march=znver5` (ratio 15.866, +1.59%) and
+  `-mtune=znver5` (ratio 16.017, +2.56%) — both correctly rejected (CI overlaps the wide comparison CI
+  reused from `782.lbm_r`'s own real 2026-08-22 baseline data), `phase="multiplier"` trials recorded
+  correctly in `cfm.db`, `knowledge` table upserted for both flags under the `memory-bound` cluster, and
+  the compiled-flags audit confirmed both flags genuinely reached the compiler (`-march=znver5`/
+  `-mtune=znver5` aren't rewritten by GCC the way `-march=native` is, so the literal substring check
+  applies directly here, unlike the `native` case). Together, both real runs now cover both of
+  `run_microarch_multiplier()`'s code paths with real evidence, not mocks alone.
 
 ## Build & test
 
