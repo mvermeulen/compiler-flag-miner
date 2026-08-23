@@ -21,6 +21,7 @@ from .agents.spec_agent import run_one_trial
 from .compilers.base import FlagCandidate
 from .compilers.gcc import GccCompiler, benchmark_languages
 from .config import CfmConfig
+from .hostinfo import detect_microarch_flags
 from .instrumentation.base import InstrumentationBackend
 from .stats import ConfidenceInterval, confidence_interval, non_overlapping
 from .workloads.base import WorkloadBackend
@@ -712,18 +713,28 @@ def greedy_combine(
 
 @dataclass
 class MultiplierResult:
-    """Phase 6's output for a single compounding multiplier -- PGO here (real
+    """Phase 6's output for a single compounding multiplier -- PGO (real
     two-pass `-fprofile-use`, cfm/workloads/spec_cpu2026.py's PASS1/PASS2
-    rendering); LTO/microarch multipliers are still open, doc/DESIGN.md sec.
-    14. ``attempted`` is False when the multiplier was skipped as implausible
-    against the baseline's characterized shape (doc/DESIGN.md sec. 14 M2.5
-    item 3's same reasoning applied here, since Phase 6 bypasses Phase 2's own
-    filtering entirely -- PGO_FLAG's catalog entry is excluded from
-    `candidate_flags_for_signature()`'s ordinary per-flag list, so nothing else
-    ever checks its plausibility) -- ``outcome`` is then ``None`` and no trial
-    was spent. ``winning_flags``/``winning_ci`` are always populated: the
-    incoming ``combination``'s own winning set/CI when PGO wasn't attempted or
-    wasn't accepted, or the PGO trial's own flags/CI when it was.
+    rendering) or the microarch multiplier (`cfm/hostinfo.py`'s detected
+    `-march=`/`-mtune=` pair); LTO isn't a separate multiplier here -- it
+    already flows through the ordinary Phase 2-5 per-flag path instead
+    (`config/gcc_flag_catalog.seed.json`'s own `-flto` entry). ``attempted``
+    is False when the multiplier was skipped entirely -- no trial spent --
+    either because it was implausible against baseline's characterized shape
+    (PGO's own check, mirroring Phase 2's `_filter_implausible_candidates()`)
+    or because nothing could be confidently detected/applicable (microarch's
+    own check: no `-march=`/`-mtune=` pair detected, or one already present in
+    the incoming winning set). ``winning_flags``/``winning_ci`` are always
+    populated: the incoming set/CI unchanged when nothing was attempted or
+    nothing won, or the accepted trial's own flags/CI when one did.
+    ``outcomes`` holds every individual trial actually attempted (PGO tries
+    at most one; microarch can try up to two independent candidates), for
+    traceability even when the winning one differs from the last attempted --
+    mirrors `CombinationResult.steps`/`pair_trials`' own "keep every attempt"
+    posture. ``outcome`` is the winning trial if one was accepted, otherwise
+    the last trial attempted -- never ``None`` once at least one trial ran
+    (only when ``attempted`` is ``False`` is it ``None``), kept for existing
+    single-outcome call sites that just want "the one relevant result."
     """
 
     attempted: bool
@@ -731,6 +742,7 @@ class MultiplierResult:
     winning_ci: ConfidenceInterval
     skip_reason: Optional[str] = None
     outcome: Optional[ConfirmationOutcome] = None
+    outcomes: list[ConfirmationOutcome] = field(default_factory=list)
 
 
 def run_pgo_multiplier(
@@ -788,9 +800,89 @@ def run_pgo_multiplier(
     )
     if outcome.accepted:
         return MultiplierResult(
-            attempted=True, winning_flags=outcome.flags, winning_ci=outcome.ci, outcome=outcome,
+            attempted=True, winning_flags=outcome.flags, winning_ci=outcome.ci,
+            outcome=outcome, outcomes=[outcome],
         )
     return MultiplierResult(
         attempted=True, winning_flags=combination.winning_flags,
-        winning_ci=combination.winning_ci, outcome=outcome,
+        winning_ci=combination.winning_ci, outcome=outcome, outcomes=[outcome],
+    )
+
+
+def run_microarch_multiplier(
+    cfg: CfmConfig,
+    *,
+    experiment_id: int,
+    benchmark: str,
+    baseline: BaselineResult,
+    combination,
+    workload: Optional[WorkloadBackend] = None,
+    instrumentation: Optional[InstrumentationBackend] = None,
+) -> MultiplierResult:
+    """doc/DESIGN.md sec. 6 Phase 6 (microarch slice): tries `cfm/hostinfo.py`'s
+    small, detected `-march=`/`-mtune=` pair, each independently layered on top
+    of the incoming winning flagset and compared against its winning CI -- same
+    "compare against the current running set" principle as `run_pgo_multiplier()`
+    and `greedy_combine()`'s own cumulative steps. ``combination`` is duck-typed
+    (only `.winning_flags`/`.winning_ci` are read) so this can chain directly
+    off either Phase 5's own `CombinationResult` or `run_pgo_multiplier()`'s own
+    `MultiplierResult` -- letting `cli.py` run PGO first, then microarch layered
+    on top of *whatever PGO left behind*, both real compounding multipliers
+    stacking the way doc/DESIGN.md sec. 6 Phase 6 describes.
+
+    Skips entirely -- no trial spent -- when `detect_microarch_flags()` returns
+    nothing (an unbuilt/missing `cpu_info`, or a host/core label it can't
+    confidently map without guessing, see that module's own docstring), or when
+    the incoming winning set already contains an `-march=`/`-mtune=` flag (most
+    likely `-march=native`, tried and possibly accepted via the ordinary Phase
+    2-5 per-flag path already -- adding a second, different `-march=`/`-mtune=`
+    choice on top would conflict rather than compound).
+
+    Both detected flags are tried independently (not combined with each other --
+    `-march=X` already implies `-mtune=X` as its own default, so pairing them
+    would be redundant, not a distinct third choice), each its own confirmation-
+    grade trial; if more than one is accepted, the larger delta wins, mirroring
+    `greedy_combine()`'s own pair-tournament "replace only if it clears the same
+    bar" logic.
+    """
+    detected = detect_microarch_flags(cfg.wspy_dir)
+    if not detected:
+        reason = "skipping microarch multiplier -- no confidently-detected -march=/-mtune= choice"
+        print(f"info: {reason}")
+        return MultiplierResult(
+            attempted=False, winning_flags=combination.winning_flags,
+            winning_ci=combination.winning_ci, skip_reason=reason,
+        )
+    if any(f.startswith("-march=") or f.startswith("-mtune=") for f in combination.winning_flags):
+        reason = (
+            f"skipping microarch multiplier -- winning set {combination.winning_flags} already "
+            "has an -march=/-mtune= flag, adding another would conflict rather than compound"
+        )
+        print(f"info: {reason}")
+        return MultiplierResult(
+            attempted=False, winning_flags=combination.winning_flags,
+            winning_ci=combination.winning_ci, skip_reason=reason,
+        )
+
+    current_flags = combination.winning_flags
+    current_ci = combination.winning_ci
+    outcomes: list[ConfirmationOutcome] = []
+    for flag in detected:
+        outcome = _confirm_flagset(
+            cfg, experiment_id=experiment_id, benchmark=benchmark, baseline=baseline,
+            flags=combination.winning_flags + [flag], phase="multiplier",
+            compare_ci=combination.winning_ci, workload=workload, instrumentation=instrumentation,
+        )
+        outcomes.append(outcome)
+        if outcome.accepted and outcome.ci.mean > current_ci.mean:
+            current_flags = outcome.flags
+            current_ci = outcome.ci
+
+    # The winning outcome if one was accepted, else the last one tried --
+    # never None once at least one trial ran, same contract run_pgo_multiplier()
+    # already has for its own (always exactly one) trial.
+    winner = next((o for o in outcomes if o.flags == current_flags), None) or outcomes[-1]
+    return MultiplierResult(
+        attempted=True, winning_flags=current_flags, winning_ci=current_ci,
+        outcome=winner, outcomes=outcomes,
     )

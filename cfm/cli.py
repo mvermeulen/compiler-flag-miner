@@ -52,7 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
     mine = sub.add_parser(
         "mine",
         help="rule-based flag search (doc/DESIGN.md sec. 6 Phases 1-6): baseline, "
-             "screen, confirm, greedy-combine, PGO multiplier",
+             "screen, confirm, greedy-combine, PGO + microarch multipliers",
     )
     mine.add_argument("benchmark", help="e.g. 706.stockfish_r")
     mine.add_argument(
@@ -73,6 +73,12 @@ def build_parser() -> argparse.ArgumentParser:
              "roughly 2x a normal confirmation's build cost (an instrumented build, a "
              "training run, and an optimized rebuild), useful for a cheaper/faster "
              "focused run",
+    )
+    mine.add_argument(
+        "--skip-microarch", action="store_true",
+        help="skip Phase 6's microarch multiplier trial (doc/DESIGN.md sec. 6) -- the "
+             "detected host's -march=/-mtune= pair, layered on top of whatever PGO left "
+             "behind",
     )
     mine.add_argument("--spec-dir", default=None)
     mine.add_argument("--spec-config", default=None)
@@ -155,6 +161,20 @@ def main(argv=None) -> int:
                         cfg, experiment_id=baseline.experiment_id, benchmark=args.benchmark,
                         baseline=baseline, combination=combination, compiler=compiler,
                     )
+
+                microarch_result = None
+                if not args.skip_microarch:
+                    # Chains off pgo_result when PGO ran (layering microarch on
+                    # top of *whatever PGO left behind*, both real compounding
+                    # multipliers stacking) -- falls back to combination
+                    # (Phase 5's own result) when --skip-pgo was passed.
+                    # run_microarch_multiplier() duck-types this argument, only
+                    # reading .winning_flags/.winning_ci -- both CombinationResult
+                    # and MultiplierResult expose them under the same names.
+                    microarch_result = orchestrator.run_microarch_multiplier(
+                        cfg, experiment_id=baseline.experiment_id, benchmark=args.benchmark,
+                        baseline=baseline, combination=pgo_result or combination,
+                    )
         except RuntimeError as exc:
             print(f"cfm mine: {exc}", file=sys.stderr)
             return 1
@@ -168,13 +188,21 @@ def main(argv=None) -> int:
         finally:
             conn.close()
 
-        # pgo_result is None only when --skip-pgo was passed -- otherwise Phase 6
-        # always runs (possibly skipping the trial itself as implausible, still
-        # a MultiplierResult either way), so its own winning_flags/winning_ci
-        # already collapse back to combination's own when PGO wasn't attempted
-        # or wasn't accepted (run_pgo_multiplier()'s own docstring).
-        final_flags = pgo_result.winning_flags if pgo_result else combination.winning_flags
-        final_ci = pgo_result.winning_ci if pgo_result else combination.winning_ci
+        # pgo_result/microarch_result are None only when their own --skip-* flag
+        # was passed -- otherwise Phase 6 always runs (possibly skipping the
+        # trial itself as implausible/inapplicable, still a MultiplierResult
+        # either way), so winning_flags/winning_ci already collapse back to the
+        # prior stage's own when a multiplier wasn't attempted or didn't win
+        # (run_pgo_multiplier()/run_microarch_multiplier()'s own docstrings).
+        # microarch_result chains off pgo_result (or combination, if PGO was
+        # skipped) already, so its own winning_flags/winning_ci is always the
+        # final answer once both multipliers have had their turn.
+        if microarch_result:
+            final_flags, final_ci = microarch_result.winning_flags, microarch_result.winning_ci
+        elif pgo_result:
+            final_flags, final_ci = pgo_result.winning_flags, pgo_result.winning_ci
+        else:
+            final_flags, final_ci = combination.winning_flags, combination.winning_ci
         gain_pct = (final_ci.mean - baseline.ci.mean) / baseline.ci.mean * 100.0
         summary = {
             "experiment_id": baseline.experiment_id,
@@ -192,6 +220,11 @@ def main(argv=None) -> int:
             "pgo_attempted": pgo_result.attempted if pgo_result else False,
             "pgo_skip_reason": pgo_result.skip_reason if pgo_result else "--skip-pgo",
             "pgo_accepted": bool(pgo_result and pgo_result.outcome and pgo_result.outcome.accepted),
+            "microarch_attempted": microarch_result.attempted if microarch_result else False,
+            "microarch_skip_reason": microarch_result.skip_reason if microarch_result else "--skip-microarch",
+            "microarch_accepted": bool(
+                microarch_result and microarch_result.outcome and microarch_result.outcome.accepted
+            ),
             "winning_flags": final_flags,
             "winning_ratio_mean": final_ci.mean,
             "gain_vs_baseline_pct": gain_pct,

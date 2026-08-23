@@ -398,10 +398,36 @@ unmodified, result); rejected or skipped, Phase 5's own winning set is reported 
 table upsert now fires for `phase in ("confirmation", "multiplier")` (was `"confirmation"`-only),
 keyed on `PGO_FLAG` for the multiplier case. Verified against `tests/test_orchestrator.py`'s mocked-
 backend tier (accept/reject/skip-as-implausible/unknown-shape-not-excluded/knowledge-upsert cases) and
-`tests/test_cli.py`'s wiring tests — not yet exercised by a real end-to-end `cfm mine` run, since the
-higher-risk SPEC-interaction piece (does the rendered PASS1/PASS2 config actually do what it says) was
-already real-verified in isolation above; a full real run is the natural next verification step, same
-bar M1's own phases were held to before being called "shipped and verified."
+`tests/test_cli.py`'s wiring tests, then confirmed for real end to end (2026-08-23): a full, uncapped
+`cfm mine 714.cpython_r` run landed the project's first genuine accepted candidate of any kind through
+this exact code path — `-flto` (+8.00%) then real two-pass PGO (+31.16% more) for +41.65% overall vs.
+plain `-O3`, `714.cpython_r` picked deliberately as the one previously-mined benchmark whose
+`frontend-bound` baseline actually clears `pgo_topdown_signals()`'s plausibility check. See
+`doc/mining_results.714.cpython_r.2026-08-23.md` for the full write-up, and CLAUDE.md's matching
+traps-log entry for a real audit false-negative (`-flto` on an LTO build) found and fixed along the way.
+
+**Microarch multiplier: implemented and live-verified (2026-08-23).** `cfm/hostinfo.py`'s
+`detect_microarch_flags()` shells out to `vendor/wspy`'s own `cpu_info` binary (a real, always-built
+Makefile target) and parses its plain-text core listing — deliberately narrow, mapping only the AMD
+`Zen5`/`Zen5c` core labels wspy can confidently distinguish to a concrete `-march=`/`-mtune=` value
+(`znver5`); the ambiguous bare `Zen` bucket (wspy's own enum has no per-generation Zen1-4 distinction at
+all, confirmed by reading `cpu_info.h` directly), Intel's generation-less buckets, and every ARM
+Cortex/Neoverse label are all left unmapped rather than guessed at, degrading to "nothing detected" — a
+clean skip, never a trial, matching this project's "never guess, verify or skip" discipline.
+`cfm/orchestrator.py`'s `run_microarch_multiplier()` mirrors `run_pgo_multiplier()`'s own shape: tries
+each detected flag independently (never combined with each other — `-march=X` already implies `-mtune=X`
+as GCC's own default), layered on top of whatever the *prior* Phase 6 stage left behind via a duck-typed
+`combination` argument (accepts either Phase 5's own `CombinationResult` or `run_pgo_multiplier()`'s own
+`MultiplierResult`, both exposing `.winning_flags`/`.winning_ci` under the same names — lets `cli.py`
+chain PGO → microarch without either function needing to know the other's return type). Skips entirely
+when nothing was detected, or when the incoming winning set already carries an `-march=`/`-mtune=` flag
+(most likely `-march=native`, already tried via the ordinary Phase 2-5 per-flag path — a second, different
+microarch flag on top would conflict, not compound). Verified live against a real `782.lbm_r` build with
+`-O3 -march=znver5`: compiled successfully, and — unlike `-march=native`, which GCC expands away before
+recording — the literal `-march=znver5` text survives straight into the compiled binary's own
+`.GCC.command.line` audit section, confirming both that the flag reached the compiler and that the audit
+can verify it directly for this one. Not yet exercised inside a real `cfm mine` run end to end — same
+deliberate posture PGO's own orchestrator-wiring entry took before its own real-run confirmation above.
 
 ### Phase 7 — Finalize and report
 Winning flag set assembled into a real `runcpu` peak config; one final confirmation run at higher
@@ -976,3 +1002,20 @@ code was written so M0-M4 have no ambiguity to stall on.
     other candidate, since testing either flag alone against a single OPTIMIZE line is meaningless (the
     now-retracted `doc/mining_results.714.cpython_r.2026-08-21.md` is a live illustration of exactly
     this mistake, made before this decision existed).
+- **Microarch multiplier: only map what wspy's own detection can distinguish *and* what this project can
+  verify — never guess (2026-08-23).** §6 Phase 6 calls for reusing wspy's own `cpu_info.c` vendor/model
+  detection rather than an open-ended `-march` search; reading `vendor/wspy/cpu_info.h`'s own core-vendor
+  enum directly (before writing any mapping code, not after) showed it only distinguishes AMD Zen cores
+  by generation for `CORE_AMD_ZEN5`/`CORE_AMD_ZEN5C` specifically — the bare `CORE_AMD_ZEN` bucket
+  (printed as plain `"Zen"`) covers Zen1 through Zen4 with no finer distinction at all, and Intel's own
+  buckets (`CORE_INTEL_ATOM`/`CORE_INTEL_CORE`) carry no generation information either. Mapping the
+  ambiguous `"Zen"` label to any specific `-march=znverN` would be a real, unverified guess — exactly the
+  class of mistake this project's own history (the basepeak trap, the isolated-candidate-flags bug) has
+  already been burned by more than once. `cfm/hostinfo.py`'s `_LABEL_TO_MARCH` therefore only maps
+  `Zen5`/`Zen5c` → `znver5` — the one case both confidently detectable by wspy *and* verifiable on this
+  project's own real AMD Zen5 mining host — and degrades to "nothing detected" (a clean skip, never a
+  trial) for every other label, including the ambiguous bare `Zen` bucket, an unbuilt/missing `cpu_info`,
+  a non-zero exit, or a genuinely mixed/hybrid host where the available cores disagree with each other.
+  A narrower real feature now than a broader guessed one — extending the mapping to more vendors/
+  generations is real future work, gated on having an actual host to verify each new entry against, not
+  on writing more mapping-table rows blind.
