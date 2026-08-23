@@ -542,6 +542,66 @@ Full branch/PR discipline, same shape as wspy's:
   itself claimed to want, so a *future* caller making this same class of mistake surfaces it
   automatically in `cfm.db`, without requiring a human to notice by manually diffing two trials' audit
   rows against each other (which is what actually happened this time).
+- **2026-08-22: real PGO support — SPEC's own native `PASS1_OPTIMIZE`/`PASS2_OPTIMIZE` mechanism, live-
+  verified against `782.lbm_r` on this host, including the concurrency question this project needed a
+  real answer to before trusting it.** Before writing any rendering code, checked SPEC's own
+  `Docs/config.txt` sec. VI first rather than hand-rolling a generate→train→use flow: `runcpu` already
+  drives the whole build-instrumented → train (automatically, using the benchmark's own SPEC-provided
+  train workload) → rebuild-optimized sequence internally, given just two config lines
+  (`PASS1_OPTIMIZE = -fprofile-generate`, `PASS2_OPTIMIZE = -fprofile-use`) — doc/DESIGN.md §15 records
+  the decision to use this instead of reimplementing SPEC's own sequencing.
+  **The concurrency question, answered with real evidence, not assumption**: SPECrate's own methodology
+  runs many parallel copies of a benchmark for the real timed measurement, so a real worry going in was
+  whether GCC's default `-fprofile-update=single` would let concurrent copies corrupt each other's
+  `.gcda` counters during the FDO training step. Confirmed live it doesn't apply here: a real build
+  against `782.lbm_r` logged `"Copy 0 of 782.lbm_r (peak train) run 1 finished"` — the FDO training step
+  runs as a single serial copy, never fanned out across SPECrate's own `copies` parameter regardless of
+  how many copies the real reference-size run uses (matching `Docs/config.txt` sec. VIII.C's own worked
+  FDO example, which shows the identical `"Copy 0"` shape — confirmed against this host's own real
+  install, not just trusted from the doc). `-fprofile-update=atomic` is still applied to the pass-1
+  build anyway, as cheap insurance against risks not directly ruled out here (`parallel_test` being
+  turned on, or a benchmark spawning threads independently of the `OMP_NUM_THREADS=1` SPEC forces for
+  OpenMP specifically) rather than a fix for an observed corruption — see doc/DESIGN.md §15 for the full
+  reasoning. `-fprofile-correction` is applied to the pass-2 build too, guarding against the real (not
+  hypothetical) GCC PGO failure mode of profile-count inconsistencies.
+  **Implementation**: `cfm/workloads/spec_cpu2026.py`'s `generate_config()` now renders the two-pass
+  config whenever `-fprofile-use` is present in the caller's `flags` — no new parameter, same "flags is
+  the trial's full logical identity" convention every other candidate already uses — stripping both PGO
+  flags from the flat `OPTIMIZE` line (each belongs on exactly one pass, never both: they're each
+  other's catalog `conflicts` entry for this reason) and emitting `PASS1_OPTIMIZE`/`PASS2_OPTIMIZE`
+  instead. `cfm/compilers/gcc.py`'s `candidate_flags_for_signature()` now excludes `category == "pgo"`
+  catalog entries from the ordinary per-flag candidate list entirely — neither flag is meaningful tested
+  alone against a single OPTIMIZE line, exactly the mistake the now-retracted
+  `doc/mining_results.714.cpython_r.2026-08-21.md` illustrates live.
+  **Verified for real, not just via the config text**: the actual SPEC build log for the confirming
+  `782.lbm_r` build shows pass 1 compiling with `-O3 -frecord-gcc-switches -fprofile-generate
+  -fprofile-update=atomic`, the training run completing, pass 2 recompiling with `-O3
+  -frecord-gcc-switches -fprofile-use -fprofile-correction`, and the final linked binary's own
+  `.GCC.command.line` audit section (`audit_compiled_flags()`, same mechanism the basepeak trap taught
+  this project to trust over `runcpu`'s own success report) showing `-fprofile-use -fprofile-correction`
+  compiled in — never `-fprofile-generate`, confirming the pass-2 rebuild is genuinely what got linked,
+  not a silently-reused pass-1 binary.
+- **2026-08-22 (same day, follow-up): Phase 6 orchestrator wiring for the PGO slice above.**
+  `cfm/orchestrator.py`'s new `run_pgo_multiplier()` calls the PASS1/PASS2 rendering above with Phase
+  5's own winning flagset (`combination.winning_flags + [PGO_FLAG]`), reusing `_confirm_flagset()`'s
+  existing measure/accept/reject/knowledge-upsert machinery with `phase="multiplier"` (the
+  `trials.phase` schema CHECK already had this value, unused until now). A cheap plausibility check
+  (`GccCompiler.pgo_topdown_signals()`, mirroring `_filter_implausible_candidates()`'s own "only a
+  confident mismatch counts, absence of information never does" rule) skips the trial entirely — no
+  ~2x-build-time cost spent — when baseline's characterized shape confidently contradicts every one of
+  `-fprofile-use`'s own catalog `topdown_signals`. `cli.py`'s `mine` command gained `--skip-pgo` and
+  reports `combination_winning_flags`/`combination_winning_ratio_mean` (Phase 5's own, always) alongside
+  `winning_flags`/`winning_ratio_mean` (PGO's result when accepted, Phase 5's unchanged otherwise) plus
+  `pgo_attempted`/`pgo_skip_reason`/`pgo_accepted`, so a mining run's JSON summary makes clear whether
+  PGO ran, why it didn't if not, and whether it actually won.
+  **Verification tier for this PR, deliberately**: the mocked-backend unit-test tier
+  (`tests/test_orchestrator.py`'s accept/reject/skip-as-implausible/unknown-shape-not-excluded/
+  knowledge-upsert cases, `tests/test_cli.py`'s wiring cases) — not a fresh real `cfm mine` run. The
+  higher-risk piece (does the rendered PASS1/PASS2 config actually make SPEC do a genuine two-pass PGO
+  build) was already real-verified in isolation by the previous entry; this PR only adds orchestration
+  logic on top using machinery (`_confirm_flagset()`, the accept/reject bar, knowledge upserts) already
+  real-verified by M1's own shipped run. A full real `cfm mine` run is still the natural next step to
+  exercise Phase 6 for real end to end, not a gap specific to this PR.
 
 ## Build & test
 
@@ -590,8 +650,10 @@ ratio → one row each in `cfm.db`'s `experiments`/`trials` tables (`db.py`), re
 1× `run_one_trial()` per candidate at the `quick` profile, prunes clearly-worse) →
 `orchestrator.confirm_candidates()` (Phase 4, 3× `run_one_trial()` per survivor, `cfm/stats.py`'s CI
 accept/reject vs. baseline, `knowledge` table upsert) → `orchestrator.greedy_combine()` (Phase 5,
-cumulative re-confirmation plus a bounded random-pair tournament) → a plain JSON summary on stdout,
-every trial along the way still landing in `cfm.db` regardless of phase or outcome, same as M0.
+cumulative re-confirmation plus a bounded random-pair tournament) → `orchestrator.run_pgo_multiplier()`
+(Phase 6's PGO slice, real two-pass `-fprofile-use` layered on Phase 5's winning set, skippable via
+`--skip-pgo`) → a plain JSON summary on stdout, every trial along the way still landing in `cfm.db`
+regardless of phase or outcome, same as M0.
 
 | File | Responsibility |
 |---|---|
@@ -601,15 +663,15 @@ every trial along the way still landing in `cfm.db` regardless of phase or outco
 | `cfm/db.py` | Applies `schema/cfm_schema.sql` (idempotent) and provides typed `create_experiment`/`record_trial`/`update_trial_verdict`/`get_experiment`/`list_trials`/`list_trials_by_phase`/`finish_experiment`/`set_baseline_run_ref`/`record_hypothesis`/`upsert_knowledge` accessors. No ORM. |
 | `cfm/stats.py` | Confidence-interval statistics for Phase 4's confirmation stage — `confidence_interval()`/`non_overlapping()`, replicating `wspy-summary`'s own documented CI formula (mean, sample stddev, Student's t 95%) applied to `cfm.db`'s own `trials.ratio` values, since `wspy-summary` itself has no way to see SPEC's `ratio` field (doc/DESIGN.md §6 Phase 4). |
 | `cfm/compilers/base.py` | `CompilerBackend` interface + `FlagCandidate`/`ValidationResult` dataclasses (doc/DESIGN.md §4.3/§12). |
-| `cfm/compilers/gcc.py` | The only implementation: `candidate_flags_for_signature()` (M1: ignores its own `signature` arg, returns the whole applicable-language catalog uniformly), `validate_flagset()` (unknown-flag/conflict checks against `config/gcc_flag_catalog.seed.json`), `render_optimize_string()`, plus `benchmark_languages()` (reads a benchmark's language from SPEC's own `Spec/object.pm`). |
+| `cfm/compilers/gcc.py` | The only implementation: `candidate_flags_for_signature()` (M1: ignores its own `signature` arg, returns the whole applicable-language catalog uniformly minus `category == "pgo"` entries — PGO is Phase 6's own dedicated two-pass flow, never an ordinary per-flag candidate, see Non-obvious traps' 2026-08-22 entry), `validate_flagset()` (unknown-flag/conflict checks against `config/gcc_flag_catalog.seed.json`), `render_optimize_string()`, plus `benchmark_languages()` (reads a benchmark's language from SPEC's own `Spec/object.pm`). |
 | `cfm/workloads/base.py` | `WorkloadBackend` interface + `BuildResult`/`RunResult` dataclasses (doc/DESIGN.md §4.1/§12). |
-| `cfm/workloads/spec_cpu2026.py` | The only implementation: renders a per-trial SPEC config via `include:` + a `<bench>=peak:` override section (`basepeak = no` scoped *inside* it — see Non-obvious traps above for why that scoping is load-bearing), always appends `-frecord-gcc-switches` to the rendered `OPTIMIZE` line, drives `runcpu --action=build`/`--action=validate` through a `shrc`-sourcing `bash -c` wrapper, parses the resulting `.rsf` file. `audit_compiled_flags()` independently reads a just-built binary's own `.GCC.command.line` section back via `readelf`, for `run_one_trial()`'s own compiled-flags audit (below). |
+| `cfm/workloads/spec_cpu2026.py` | The only implementation: renders a per-trial SPEC config via `include:` + a `<bench>=peak:` override section (`basepeak = no` scoped *inside* it — see Non-obvious traps above for why that scoping is load-bearing), always appends `-frecord-gcc-switches` to the rendered `OPTIMIZE` line, drives `runcpu --action=build`/`--action=validate` through a `shrc`-sourcing `bash -c` wrapper, parses the resulting `.rsf` file. When `-fprofile-use` is present in the requested flags, renders SPEC's native `PASS1_OPTIMIZE`/`PASS2_OPTIMIZE` two-pass PGO config instead of the flat line (`-fprofile-update=atomic`/`-fprofile-correction` always added — see Non-obvious traps' 2026-08-22 entry and doc/DESIGN.md §15). `audit_compiled_flags()` independently reads a just-built binary's own `.GCC.command.line` section back via `readelf`, for `run_one_trial()`'s own compiled-flags audit (below). |
 | `cfm/instrumentation/base.py` | `InstrumentationBackend` interface + `RunSignature` dataclass (doc/DESIGN.md §4.2/§12). |
 | `cfm/instrumentation/wspy.py` | The only implementation: `preflight()` checks all six wspy binaries exist; `characterize()` runs `wspy-run <profile> -- <command>`, then resolves the *real* run identity from the run-index file (see Non-obvious traps — single-pass and the `deep-cpu` multi-pass profile both work), then `wspy-validate`/`wspy-store`/`wspy-archetype`. `check_regression()` wraps `wspy-summary --check-regression` as a secondary environment/counter-sanity guardrail (never the accept/reject decision — that's `cfm/stats.py`, over `cfm.db`'s own data). |
 | `cfm/agents/spec_agent.py` | `run_one_trial()` — the M0 pipeline glue described above. `workload`/`instrumentation` backends and `profile` are injectable/overridable per call (`orchestrator.py` needs a different wspy profile per phase, and its own tests inject fakes — no real SPEC/wspy calls); all default to the real M0 behavior when omitted. Also records two best-effort, degrade-gracefully hypothesis notes per trial once a build succeeds: `_summarize_compiled_flags_audit()` (cross-checks the requested flags against `workload.audit_compiled_flags()`'s real compiled-binary readback) and `_extract_cpu_temp_c()` (parses `wspy`'s own already-collected `cpu temp` reading out of `RunSignature.raw_output` — see Non-obvious traps below for why both were added the same day). The only agent module that exists; `knowledge_agent`/`hypothesis_agent`/`report_agent` are M2-M3. |
-| `cfm/orchestrator.py` | Phase state machine (doc/DESIGN.md §5-6). `run_baseline()` (Phase 1, sec. 14 M2.5 item 2: shape — resource_dominance/vectorization_density/allocation_pressure — via `_characterize_baseline()`, which now tries `cfm/reference_matrix.py`'s external corpus lookup first and falls back to one local `deep-cpu --iterations 1` characterization trial only when no matching published entry exists, plus `CONFIRMATION_REPETITIONS` cheap `quick`-profile calibration trials feeding `cfm/stats.py`'s CI either way; `_characterize_baseline()` stays the one isolated seam either shape source flows through), `generate_candidates()` (Phase 2, M1's whole-catalog read from `compilers/gcc.py` still ignores `resource_dominance` per that module's own M1-vs-M2 boundary, but sec. 14 M2.5 item 3 layers `_filter_implausible_candidates()` on top — drops a candidate only when *every* `topdown_signals` entry is confidently contradicted by the baseline's characterized shape, never on unknown/absent data), `screen_candidates()` (Phase 3, one cheap `quick`-profile trial per candidate, prunes only a clearly-worse point estimate), `confirm_candidates()` (Phase 4, re-confirms each survivor against the baseline's CI via `_confirm_flagset()`'s calibration-profile reps — accept requires both non-overlapping CI *and* a delta clearing `MIN_PRACTICAL_SIGNIFICANCE_PCT`, M2.5 item 3's asymmetric bar — `check_regression()` as a sanity-only guardrail on accept, `knowledge` table upsert per single flag), `greedy_combine()` (Phase 5, cumulative greedy walk re-confirmed against the *current* running set each step via the same `_confirm_flagset()`, plus a bounded random-pair tournament evaluated against baseline that can still replace the greedy winner). |
+| `cfm/orchestrator.py` | Phase state machine (doc/DESIGN.md §5-6). `run_baseline()` (Phase 1, sec. 14 M2.5 item 2: shape — resource_dominance/vectorization_density/allocation_pressure — via `_characterize_baseline()`, which now tries `cfm/reference_matrix.py`'s external corpus lookup first and falls back to one local `deep-cpu --iterations 1` characterization trial only when no matching published entry exists, plus `CONFIRMATION_REPETITIONS` cheap `quick`-profile calibration trials feeding `cfm/stats.py`'s CI either way; `_characterize_baseline()` stays the one isolated seam either shape source flows through), `generate_candidates()` (Phase 2, M1's whole-catalog read from `compilers/gcc.py` still ignores `resource_dominance` per that module's own M1-vs-M2 boundary, but sec. 14 M2.5 item 3 layers `_filter_implausible_candidates()` on top — drops a candidate only when *every* `topdown_signals` entry is confidently contradicted by the baseline's characterized shape, never on unknown/absent data), `screen_candidates()` (Phase 3, one cheap `quick`-profile trial per candidate, prunes only a clearly-worse point estimate), `confirm_candidates()` (Phase 4, re-confirms each survivor against the baseline's CI via `_confirm_flagset()`'s calibration-profile reps — accept requires both non-overlapping CI *and* a delta clearing `MIN_PRACTICAL_SIGNIFICANCE_PCT`, M2.5 item 3's asymmetric bar — `check_regression()` as a sanity-only guardrail on accept, `knowledge` table upsert per single flag), `greedy_combine()` (Phase 5, cumulative greedy walk re-confirmed against the *current* running set each step via the same `_confirm_flagset()`, plus a bounded random-pair tournament evaluated against baseline that can still replace the greedy winner), `run_pgo_multiplier()` (Phase 6's PGO slice, 2026-08-22: real two-pass PGO layered on Phase 5's winning set via `_confirm_flagset()`'s same machinery with `phase="multiplier"`, skipped — no trial spent — when `GccCompiler.pgo_topdown_signals()` is confidently contradicted by baseline's shape; LTO/microarch multipliers still open). |
 | `cfm/reference_matrix.py` | `fetch_shape()` — read-only, fully anonymous (no WordPress login/credentials needed at all, confirmed live) external reference-matrix corpus lookup, doc/DESIGN.md §14 M2.5 item 2's deferred half. Walks `mvermeulen.org/workload`'s published page hierarchy directly (own minimal anonymous HTTP client), reuses `vendor/wspy`'s `web/counter_text.py` (direct pinned-submodule import, a deliberate narrow exception to "stable CLI only") to parse recovered `counters.txt` blocks, then scores the result via the real `wspy-archetype --run-guest` CLI. Degrades to `None` on any failure — no network, no matching page, nothing recoverable — never raises; `_characterize_baseline()`'s local `deep-cpu` trial is still the fallback. See CLAUDE.md's Non-obvious traps below for the anonymous-access/`.rendered`-vs-`.raw` finding and the (now-resolved) [wspy#278](https://github.com/mvermeulen/wspy/issues/278) `vectorization_density`/`allocation_pressure` gap. |
-| `cfm/cli.py` | `cfm measure`/`cfm init-db`/`cfm mine`. `mine` wires all five orchestrator phases in sequence, `--max-trials` best-effort-caps Phase 2's candidate list (the widest fan-out point — Phase 4/5's own trial count isn't separately capped yet), prints a plain JSON summary (winning flags, ratio, %gain) — no curated report yet, that's M3. |
+| `cfm/cli.py` | `cfm measure`/`cfm init-db`/`cfm mine`. `mine` wires all five orchestrator phases plus Phase 6's PGO multiplier (`run_pgo_multiplier()`, skippable via `--skip-pgo`) in sequence, `--max-trials` best-effort-caps Phase 2's candidate list (the widest fan-out point — Phase 4/5/6's own trial count isn't separately capped yet), prints a plain JSON summary (`winning_flags`/`winning_ratio_mean` reflect PGO's result when accepted, `combination_winning_flags`/`combination_winning_ratio_mean` always show Phase 5's own unmodified result, plus `pgo_attempted`/`pgo_skip_reason`/`pgo_accepted`) — no curated report yet, that's M3. |
 | `scripts/bootstrap_wspy.sh` | Initializes + builds the `vendor/wspy` submodule ("wspy dependency" above). |
 | `vendor/wspy` | Pinned wspy submodule — not part of this project's own code, never edited here. |
 

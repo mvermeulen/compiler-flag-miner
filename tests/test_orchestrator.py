@@ -21,7 +21,9 @@ from cfm.instrumentation.base import InstrumentationBackend, RunSignature
 from cfm.orchestrator import (
     MAX_PAIR_TOURNAMENT_TRIALS,
     MIN_PRACTICAL_SIGNIFICANCE_PCT,
+    PGO_FLAG,
     BaselineResult,
+    CombinationResult,
     ConfirmationOutcome,
     ScreeningOutcome,
     _filter_implausible_candidates,
@@ -29,6 +31,7 @@ from cfm.orchestrator import (
     generate_candidates,
     greedy_combine,
     run_baseline,
+    run_pgo_multiplier,
     screen_candidates,
 )
 from cfm.stats import confidence_interval
@@ -759,4 +762,156 @@ def test_full_pipeline_reports_baseline_when_nothing_helps(tmp_path):
     assert all(not o.survived for o in screened)
     assert confirmed == []
     assert combination.winning_flags == baseline.flags
+
+
+# -- run_pgo_multiplier (Phase 6, PGO slice) ------------------------------------
+
+def _pgo_catalog(tmp_path, topdown_signals):
+    """A minimal catalog with just a `-fprofile-use` entry -- lets a test control
+    exactly which topdown_signals run_pgo_multiplier()'s plausibility check sees,
+    without depending on the real seed catalog's own current values.
+    """
+    catalog_path = tmp_path / "pgo_catalog.json"
+    catalog_path.write_text(json.dumps({
+        "schema_version": 1, "source": "test", "note": "test",
+        "flags": [
+            {"flag": "-fprofile-generate", "languages": ["c"], "category": "pgo", "risk": "needs_validation",
+             "requires": [], "conflicts": ["-fprofile-use"], "notes": "", "topdown_signals": []},
+            {"flag": "-fprofile-use", "languages": ["c"], "category": "pgo", "risk": "needs_validation",
+             "requires": ["-fprofile-generate (prior training run)"], "conflicts": ["-fprofile-generate"],
+             "notes": "", "topdown_signals": topdown_signals},
+        ],
+    }))
+    return GccCompiler(catalog_path=catalog_path)
+
+
+def test_run_pgo_multiplier_accepts_a_real_improvement(tmp_path):
+    cfg = _cfg(tmp_path)
+    conn = db.connect(cfg.db_path)
+    exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
+    conn.close()
+
+    baseline = _baseline(mean_ratio=100.0)
+    combination = CombinationResult(winning_flags=["-O3"], winning_ci=baseline.ci)
+    backends = ScriptedBackends(ratio_sequences={
+        ("-O3", PGO_FLAG): [130.0, 130.0, 130.0],
+    })
+
+    result = run_pgo_multiplier(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline, combination=combination,
+        compiler=_pgo_catalog(tmp_path, []), workload=backends, instrumentation=backends,
+    )
+
+    assert result.attempted is True
+    assert result.outcome.accepted is True
+    assert result.winning_flags == ["-O3", PGO_FLAG]
+    assert result.winning_ci.mean == pytest.approx(130.0)
+
+
+def test_run_pgo_multiplier_rejects_when_not_better(tmp_path):
+    cfg = _cfg(tmp_path)
+    conn = db.connect(cfg.db_path)
+    exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
+    conn.close()
+
+    baseline = _baseline(mean_ratio=100.0)
+    combination = CombinationResult(winning_flags=["-O3"], winning_ci=baseline.ci)
+    backends = ScriptedBackends(ratio_sequences={
+        ("-O3", PGO_FLAG): [99.0, 100.0, 101.0],  # flat -- no real improvement
+    })
+
+    result = run_pgo_multiplier(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline, combination=combination,
+        compiler=_pgo_catalog(tmp_path, []), workload=backends, instrumentation=backends,
+    )
+
+    assert result.attempted is True
+    assert result.outcome.accepted is False
+    assert result.winning_flags == combination.winning_flags  # unchanged -- PGO didn't win
+    assert result.winning_ci is combination.winning_ci
+
+
+def test_run_pgo_multiplier_skips_when_implausible_against_baseline_shape(tmp_path):
+    cfg = _cfg(tmp_path)
+    conn = db.connect(cfg.db_path)
+    exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
+    conn.close()
+
+    # baseline is confidently memory-bound; -fprofile-use here only claims
+    # frontend-bound/speculation-bound relevance -- a confident mismatch, same
+    # rule _filter_implausible_candidates() applies to every other candidate.
+    baseline = _baseline(mean_ratio=100.0, resource_dominance="memory-bound")
+    combination = CombinationResult(winning_flags=["-O3"], winning_ci=baseline.ci)
+    # Deliberately no ratio_sequences entry for the PGO flags tuple -- if the
+    # implausibility check failed to skip, run_one_trial() would hit an empty
+    # queue (a real, distinguishable failure) rather than this test's own
+    # assertions silently passing for the wrong reason.
+    backends = ScriptedBackends(ratio_sequences={})
+
+    result = run_pgo_multiplier(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline, combination=combination,
+        compiler=_pgo_catalog(tmp_path, ["frontend-bound", "speculation-bound"]),
+        workload=backends, instrumentation=backends,
+    )
+
+    assert result.attempted is False
+    assert result.outcome is None
+    assert "implausible" in result.skip_reason
+    assert result.winning_flags == combination.winning_flags
+    assert result.winning_ci is combination.winning_ci
+
+
+def test_run_pgo_multiplier_attempts_when_baseline_shape_is_unknown(tmp_path):
+    # doc/DESIGN.md sec. 14 M2.5 item 3's rule, applied to PGO too: absence of
+    # information never counts as implausible -- only a *confident* mismatch
+    # does. resource_dominance=None here must not be treated as "implausible."
+    cfg = _cfg(tmp_path)
+    conn = db.connect(cfg.db_path)
+    exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
+    conn.close()
+
+    baseline = _baseline(mean_ratio=100.0, resource_dominance=None)
+    combination = CombinationResult(winning_flags=["-O3"], winning_ci=baseline.ci)
+    backends = ScriptedBackends(ratio_sequences={("-O3", PGO_FLAG): [110.0, 110.0, 110.0]})
+
+    result = run_pgo_multiplier(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline, combination=combination,
+        compiler=_pgo_catalog(tmp_path, ["frontend-bound"]),
+        workload=backends, instrumentation=backends,
+    )
+
+    assert result.attempted is True
+    assert result.outcome.accepted is True
+
+
+def test_run_pgo_multiplier_upserts_knowledge_keyed_by_pgo_flag(tmp_path):
+    cfg = _cfg(tmp_path)
+    conn = db.connect(cfg.db_path)
+    exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
+    conn.close()
+
+    baseline = _baseline(mean_ratio=100.0, resource_dominance="frontend-bound")
+    combination = CombinationResult(winning_flags=["-O3"], winning_ci=baseline.ci)
+    backends = ScriptedBackends(ratio_sequences={("-O3", PGO_FLAG): [130.0, 130.0, 130.0]})
+
+    run_pgo_multiplier(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline, combination=combination,
+        compiler=_pgo_catalog(tmp_path, []), workload=backends, instrumentation=backends,
+    )
+
+    conn = db.connect(cfg.db_path)
+    try:
+        row = conn.execute(
+            "SELECT * FROM knowledge WHERE flag=? AND cluster_key=?", (PGO_FLAG, "frontend-bound"),
+        ).fetchone()
+        assert row is not None
+        assert row["n_trials"] == 1
+        assert row["n_accepted"] == 1
+
+        trial_rows = conn.execute(
+            "SELECT DISTINCT phase FROM trials WHERE experiment_id=?", (exp_id,),
+        ).fetchall()
+        assert {r["phase"] for r in trial_rows} == {"multiplier"}
+    finally:
+        conn.close()
     assert combination.winning_ci is baseline.ci
