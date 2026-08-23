@@ -888,8 +888,31 @@ compiler-flag-miner/
   quantitative reasoning reliably is the risk that principle guards against). The LLM's own narrative
   job can still *reference* a pre-classified signal ("this workload showed elevated FP density") as
   color once it's a real, computed field — it just never does the thresholding itself.
-- **M4 — cross-benchmark knowledge transfer** (§8): mine a second, differently-shaped benchmark and
-  confirm its starting hypothesis queue is visibly informed by the first benchmark's results.
+- **M4 — cross-benchmark knowledge transfer** (§8): implemented 2026-08-23. The write side
+  (`orchestrator._confirm_flagset()`'s own `upsert_knowledge()` calls) has existed since M1; this
+  milestone builds the read side. `cfm/agents/knowledge_agent.py`'s `known_flags_for_cluster()` queries
+  `cfm.db`'s own `knowledge` table by `cluster_key` (`BaselineResult.resource_dominance` itself, already
+  a consistent string vocabulary shared across every benchmark's own characterization since M1/M2.5 --
+  no separate `wspy-archetype --nearest`/`--kmeans` discovery step needed, since the "which benchmarks
+  does this one resemble" question §8 point 1 originally posed is already answered for free by the
+  cluster key every benchmark already computes). `cfm/orchestrator.py`'s
+  `split_candidates_by_known_prior()` partitions Phase 2's candidate list into flags with a real
+  *accepted* prior in this cluster (fast-tracked straight to Phase 4 via `confirm_known_candidates()`,
+  skipping Phase 3's screening trial entirely -- "already been screened once, elsewhere," §8 point 3) and
+  everything else (a rejected prior, or no prior at all -- unchanged, still goes through the normal
+  screen-then-confirm flow). `cli.py`'s `mine` command prints an `"info: known prior for ..."` line per
+  known flag either way, and the summary JSON's own `candidates_fast_tracked_from_prior_knowledge` field
+  makes the transfer directly visible in a run's own output -- satisfying this milestone's own stated
+  bar ("confirm its starting hypothesis queue is visibly informed by the first benchmark's results")
+  concretely rather than just in principle. A fast-tracked flag still gets a full, real confirmation-
+  grade trial against *this* benchmark's own baseline before anything is accepted -- a cross-benchmark
+  prior changes which candidates get tried and in what order, never the correctness bar itself (§15's
+  "external data is a hypothesis aid, never a substitute measurement," the same posture already applied
+  to the reference-matrix corpus). Verified against the mocked-backend tier
+  (`tests/test_agents_knowledge_agent.py`, `tests/test_orchestrator.py`'s split/confirm-known cases,
+  `tests/test_cli.py`'s wiring cases); real end-to-end confirmation is a re-mined `782.lbm_r` run (both
+  it and `706.stockfish_r` are already real `memory-bound`-cluster benchmarks with real knowledge rows
+  from each other, so a fresh `782.lbm_r` run should fast-track `-march=native` directly).
 - **M5 — expand the modularity seams** (§12): a second compiler or workload backend, proving the
   interfaces actually held.
 - **M6 — uniform base-tuning search** (deferred per §15's peak-only decision): once enough peak-mining

@@ -14,6 +14,7 @@ import json
 import pytest
 
 import cfm.cli as cli
+from cfm.compilers.base import FlagCandidate
 from cfm.orchestrator import BaselineResult, CombinationResult, ConfirmationOutcome, MultiplierResult
 from cfm.stats import confidence_interval
 
@@ -88,7 +89,13 @@ def test_mine_reports_a_winning_flagset(tmp_path, monkeypatch, capsys):
 
 def test_mine_max_trials_truncates_candidate_list_and_flags_budget_exhausted(tmp_path, monkeypatch):
     baseline = _fake_baseline()  # 3 baseline trial_ids already "spent"
-    candidates = [object(), object(), object(), object()]  # 4 candidates, opaque is fine -- mocked below
+    # 4 candidates -- real FlagCandidate instances (not opaque objects) since
+    # split_candidates_by_known_prior() now reads .flag off each one; no
+    # prior knowledge exists for any of them in this test's fresh db, so
+    # they all land in "remaining" unchanged, same as before M4.
+    candidates = [
+        FlagCandidate(flag=f"-fake-{i}", category="misc", risk="safe") for i in range(4)
+    ]
     seen = {}
 
     def fake_screen(cfg, *, experiment_id, benchmark, baseline, candidates, **kwargs):
@@ -359,3 +366,102 @@ def test_mine_microarch_chains_off_an_accepted_pgo_result(tmp_path, monkeypatch,
     cli.main(["mine", "fake_r", "--db", str(tmp_path / "cfm.db"), "--lock-file", str(tmp_path / "test.lock")])
 
     assert seen["combination_winning_flags"] == ["-O3", "-fprofile-use"]  # pgo_result's, not Phase 5's
+
+
+# -- M4 (cross-benchmark knowledge transfer) wiring ----------------------------
+
+def test_mine_fast_tracks_a_flag_with_a_real_accepted_prior(tmp_path, monkeypatch, capsys):
+    baseline = _fake_baseline()  # resource_dominance="memory-bound"
+    db_path = tmp_path / "cfm.db"
+    conn = cli.db.connect(str(db_path))
+    cli.db.upsert_knowledge(
+        conn, cluster_key="memory-bound", compiler="gcc", compiler_version=None,
+        target_arch=None, flag="-march=native", accepted=True, delta_pct=48.75,
+        last_benchmark="706.stockfish_r",
+    )
+    conn.close()
+
+    candidates = [
+        FlagCandidate(flag="-march=native", category="target-tuning", risk="needs_validation"),
+        FlagCandidate(flag="-new-flag", category="misc", risk="safe"),
+    ]
+    combination = CombinationResult(winning_flags=["-O3"], winning_ci=baseline.ci)
+    seen = {}
+
+    def fake_screen(cfg, *, experiment_id, benchmark, baseline, candidates, **kwargs):
+        seen["screened_flags"] = [c.flag for c in candidates]
+        return []
+
+    def fake_confirm_known(cfg, *, experiment_id, benchmark, baseline, candidates, **kwargs):
+        seen["fast_tracked_flags"] = [c.flag for c in candidates]
+        return []
+
+    monkeypatch.setattr(cli.orchestrator, "run_baseline", lambda *a, **k: baseline)
+    monkeypatch.setattr(cli.orchestrator, "generate_candidates", lambda *a, **k: candidates)
+    monkeypatch.setattr(cli.orchestrator, "screen_candidates", fake_screen)
+    monkeypatch.setattr(cli.orchestrator, "confirm_candidates", lambda *a, **k: [])
+    monkeypatch.setattr(cli.orchestrator, "confirm_known_candidates", fake_confirm_known)
+    monkeypatch.setattr(cli.orchestrator, "greedy_combine", lambda *a, **k: combination)
+    monkeypatch.setattr(
+        cli.orchestrator, "run_pgo_multiplier",
+        lambda *a, combination, **k: _fake_pgo_not_attempted(combination),
+    )
+    monkeypatch.setattr(
+        cli.orchestrator, "run_microarch_multiplier",
+        lambda *a, combination, **k: _fake_microarch_not_attempted(combination),
+    )
+
+    exit_code = cli.main(["mine", "706.stockfish_r", "--db", str(db_path), "--lock-file", str(tmp_path / "test.lock")])
+    assert exit_code == 0
+
+    # -march=native has a real accepted prior -- fast-tracked straight to
+    # confirm_known_candidates(), never reaches screen_candidates() at all.
+    assert seen["fast_tracked_flags"] == ["-march=native"]
+    assert seen["screened_flags"] == ["-new-flag"]
+
+    # "info: known prior..." lines share stdout with the trailing JSON summary.
+    out = capsys.readouterr().out
+    summary = json.loads(out[out.index("{"):])
+    assert summary["candidates_fast_tracked_from_prior_knowledge"] == ["-march=native"]
+
+
+def test_mine_prints_known_priors_including_a_rejected_one(tmp_path, monkeypatch, capsys):
+    baseline = _fake_baseline()
+    db_path = tmp_path / "cfm.db"
+    conn = cli.db.connect(str(db_path))
+    cli.db.upsert_knowledge(
+        conn, cluster_key="memory-bound", compiler="gcc", compiler_version=None,
+        target_arch=None, flag="-fgraphite-identity", accepted=False, delta_pct=-4.22,
+        last_benchmark="706.stockfish_r",
+    )
+    conn.close()
+
+    candidates = [FlagCandidate(flag="-fgraphite-identity", category="misc", risk="safe")]
+    combination = CombinationResult(winning_flags=["-O3"], winning_ci=baseline.ci)
+
+    monkeypatch.setattr(cli.orchestrator, "run_baseline", lambda *a, **k: baseline)
+    monkeypatch.setattr(cli.orchestrator, "generate_candidates", lambda *a, **k: candidates)
+    monkeypatch.setattr(cli.orchestrator, "screen_candidates", lambda *a, **k: [])
+    monkeypatch.setattr(cli.orchestrator, "confirm_candidates", lambda *a, **k: [])
+    monkeypatch.setattr(cli.orchestrator, "confirm_known_candidates", lambda *a, **k: [])
+    monkeypatch.setattr(cli.orchestrator, "greedy_combine", lambda *a, **k: combination)
+    monkeypatch.setattr(
+        cli.orchestrator, "run_pgo_multiplier",
+        lambda *a, combination, **k: _fake_pgo_not_attempted(combination),
+    )
+    monkeypatch.setattr(
+        cli.orchestrator, "run_microarch_multiplier",
+        lambda *a, combination, **k: _fake_microarch_not_attempted(combination),
+    )
+
+    cli.main(["mine", "706.stockfish_r", "--db", str(db_path), "--lock-file", str(tmp_path / "test.lock")])
+
+    out = capsys.readouterr().out
+    assert "known prior for '-fgraphite-identity'" in out
+    assert "rejected before" in out
+    # The "info:" prior line and the final JSON summary share stdout -- the
+    # summary is the trailing "{...}" block (json.dumps(..., indent=2) spans
+    # multiple lines, so split on the first "{" rather than take one line).
+    summary = json.loads(out[out.index("{"):])
+    # A rejected prior still gets a real screening trial -- never fast-tracked.
+    assert summary["candidates_fast_tracked_from_prior_knowledge"] == []

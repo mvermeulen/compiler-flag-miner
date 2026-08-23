@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 import cfm.db as db
+from cfm.agents.knowledge_agent import KnownFlag
 from cfm.compilers.base import FlagCandidate
 from cfm.compilers.gcc import GccCompiler
 from cfm.config import CfmConfig
@@ -29,12 +30,14 @@ from cfm.orchestrator import (
     ScreeningOutcome,
     _filter_implausible_candidates,
     confirm_candidates,
+    confirm_known_candidates,
     generate_candidates,
     greedy_combine,
     run_baseline,
     run_microarch_multiplier,
     run_pgo_multiplier,
     screen_candidates,
+    split_candidates_by_known_prior,
 )
 from cfm.stats import confidence_interval
 from cfm.workloads.base import BuildResult, RunResult, WorkloadBackend
@@ -1060,3 +1063,82 @@ def test_run_microarch_multiplier_chains_off_a_prior_multiplier_result(tmp_path)
     assert result.attempted is True
     assert result.winning_flags == ["-O3", PGO_FLAG, "-march=znver5"]
     assert result.winning_ci.mean == pytest.approx(150.0)
+
+
+# -- M4: split_candidates_by_known_prior / confirm_known_candidates ------------
+
+def _known(flag, mean_delta_pct, n_accepted, n_trials=1, last_benchmark="706.stockfish_r"):
+    return KnownFlag(
+        flag=flag, mean_delta_pct=mean_delta_pct, n_trials=n_trials,
+        n_accepted=n_accepted, last_benchmark=last_benchmark,
+    )
+
+
+def test_split_candidates_by_known_prior_fast_tracks_only_accepted_priors(tmp_path):
+    candidates = [_candidate("-march=native"), _candidate("-fgraphite-identity"), _candidate("-new-flag")]
+    known_flags = {
+        "-march=native": _known("-march=native", mean_delta_pct=48.75, n_accepted=1),
+        "-fgraphite-identity": _known("-fgraphite-identity", mean_delta_pct=-4.22, n_accepted=0),
+        # "-new-flag" has no prior at all -- not in known_flags.
+    }
+
+    fast_tracked, remaining = split_candidates_by_known_prior(candidates, known_flags)
+
+    assert [c.flag for c in fast_tracked] == ["-march=native"]  # only the accepted prior
+    assert {c.flag for c in remaining} == {"-fgraphite-identity", "-new-flag"}  # rejected + unknown both stay
+
+
+def test_split_candidates_by_known_prior_orders_fast_tracked_by_best_evidence_first(tmp_path):
+    candidates = [_candidate("-flag-a"), _candidate("-flag-b")]
+    known_flags = {
+        "-flag-a": _known("-flag-a", mean_delta_pct=5.0, n_accepted=1),
+        "-flag-b": _known("-flag-b", mean_delta_pct=40.0, n_accepted=1),
+    }
+
+    fast_tracked, remaining = split_candidates_by_known_prior(candidates, known_flags)
+
+    assert [c.flag for c in fast_tracked] == ["-flag-b", "-flag-a"]  # 40% before 5%
+    assert remaining == []
+
+
+def test_split_candidates_by_known_prior_no_priors_leaves_everything_in_remaining(tmp_path):
+    candidates = [_candidate("-a"), _candidate("-b")]
+    fast_tracked, remaining = split_candidates_by_known_prior(candidates, known_flags={})
+    assert fast_tracked == []
+    assert [c.flag for c in remaining] == ["-a", "-b"]
+
+
+def test_confirm_known_candidates_skips_screening_and_confirms_directly(tmp_path):
+    cfg = _cfg(tmp_path)
+    conn = db.connect(cfg.db_path)
+    exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
+    conn.close()
+
+    baseline = _baseline(mean_ratio=100.0)
+    candidates = [_candidate("-march=native")]
+    # No screening-trial ratio queued at all for ("-O3", "-march=native") --
+    # only a confirmation-grade queue with 3 entries. If this accidentally
+    # went through screen_candidates() first, it would consume one of these
+    # early and the 3rd confirmation rep would find an empty queue.
+    backends = ScriptedBackends(ratio_sequences={
+        ("-O3", "-march=native"): [148.0, 147.0, 146.0],
+    })
+
+    outcomes = confirm_known_candidates(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline,
+        candidates=candidates, workload=backends, instrumentation=backends,
+    )
+
+    assert len(outcomes) == 1
+    assert outcomes[0].flags == ["-O3", "-march=native"]
+    assert outcomes[0].accepted is True
+    assert len(outcomes[0].ratios) == 3  # all 3 confirmation reps consumed, none wasted on screening
+
+    conn = db.connect(cfg.db_path)
+    try:
+        phases = {r["phase"] for r in conn.execute(
+            "SELECT phase FROM trials WHERE experiment_id=?", (exp_id,),
+        ).fetchall()}
+        assert phases == {"confirmation"}  # never "screening"
+    finally:
+        conn.close()
