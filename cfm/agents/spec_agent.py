@@ -41,7 +41,20 @@ def new_run_id() -> str:
 # against these two specifically would always report "missing" even on a
 # perfectly correct build, so audit_compiled_flags()'s check skips them rather
 # than raising a false alarm.
-_AUDIT_UNVERIFIABLE_LITERAL_FLAGS = frozenset({"-march=native", "-mtune=native"})
+#
+# -flto joins this set for a different reason, confirmed live 2026-08-22
+# against a real accepted 714.cpython_r PGO+LTO trial: on an LTO build,
+# -frecord-gcc-switches's own recorded ".GCC.command.line" section reflects
+# GCC's *internal LTRANS re-invocation* of itself at final-link time ("GNU
+# GIMPLE 15.2.0 ... -fltrans"), not the original per-translation-unit -flto
+# flag -- so a literal "-flto" substring check always reports "missing" on an
+# LTO build too, even though LTO genuinely ran (independently confirmed via
+# the real SPEC log's own "lto-wrapper: ... using serial compilation of 51
+# LTRANS jobs" line, and via -flto appearing on every real per-TU compile
+# command in that same log -- just not in the final linked binary's own
+# recorded-switches section). Caught by this exact audit output on a real,
+# otherwise-correct accepted trial -- see CLAUDE.md's Non-obvious traps log.
+_AUDIT_UNVERIFIABLE_LITERAL_FLAGS = frozenset({"-march=native", "-mtune=native", "-flto"})
 
 
 # Confirmed live, 2026-08-22 (CLAUDE.md's Non-obvious traps log): a real GCC
@@ -62,8 +75,8 @@ def _summarize_compiled_flags_audit(flags: list[str], audit_dump: str) -> str:
     actually compiled with, independent of runcpu's own "Build successes"
     report (CLAUDE.md's Non-obvious traps log, 2026-08-21 basepeak entry, on
     why that report alone isn't sufficient). Not a hard pass/fail signal: every
-    catalog flag *other* than the two in _AUDIT_UNVERIFIABLE_LITERAL_FLAGS
-    (-flto, -fprofile-*, -freorder-*, -fno-semantic-interposition,
+    catalog flag *other* than the three in _AUDIT_UNVERIFIABLE_LITERAL_FLAGS
+    (-fprofile-use/-generate, -freorder-*, -fno-semantic-interposition,
     -mprefer-vector-width=N, ...) is recorded by GCC verbatim, so a real
     substring match is meaningful for them.
 
