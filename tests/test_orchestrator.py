@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import random
+import stat
 from collections import deque
 from pathlib import Path
 
@@ -31,6 +32,7 @@ from cfm.orchestrator import (
     generate_candidates,
     greedy_combine,
     run_baseline,
+    run_microarch_multiplier,
     run_pgo_multiplier,
     screen_candidates,
 )
@@ -915,3 +917,146 @@ def test_run_pgo_multiplier_upserts_knowledge_keyed_by_pgo_flag(tmp_path):
     finally:
         conn.close()
     assert combination.winning_ci is baseline.ci
+
+
+# -- run_microarch_multiplier (Phase 6, microarch slice) ------------------------
+
+def _fake_cpu_info_dir(tmp_path, stdout: str, exit_code: int = 0) -> Path:
+    """A wspy_dir containing just a fake `cpu_info` script -- reuses the same
+    technique tests/test_hostinfo.py uses for that module's own direct tests.
+    """
+    wspy_dir = tmp_path / "wspy-unused"
+    wspy_dir.mkdir(exist_ok=True)
+    script = wspy_dir / "cpu_info"
+    script.write_text(f"#!/bin/sh\ncat <<'EOF'\n{stdout}\nEOF\nexit {exit_code}\n")
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+    return wspy_dir
+
+
+_ZEN5_CPU_INFO_OUTPUT = "CPU information:\n\tAMD family 1a model 70\n\t   * 0 Zen5\n\t   * 1 Zen5\n"
+
+
+def test_run_microarch_multiplier_accepts_march_over_baseline(tmp_path):
+    cfg = _cfg(tmp_path)
+    _fake_cpu_info_dir(tmp_path, _ZEN5_CPU_INFO_OUTPUT)
+    conn = db.connect(cfg.db_path)
+    exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
+    conn.close()
+
+    baseline = _baseline(mean_ratio=100.0)
+    combination = CombinationResult(winning_flags=["-O3"], winning_ci=baseline.ci)
+    backends = ScriptedBackends(ratio_sequences={
+        ("-O3", "-march=znver5"): [115.0, 115.0, 115.0],
+        ("-O3", "-mtune=znver5"): [102.0, 102.0, 102.0],  # worse than -march=, shouldn't win
+    })
+
+    result = run_microarch_multiplier(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline, combination=combination,
+        workload=backends, instrumentation=backends,
+    )
+
+    assert result.attempted is True
+    assert result.winning_flags == ["-O3", "-march=znver5"]
+    assert result.winning_ci.mean == pytest.approx(115.0)
+    assert len(result.outcomes) == 2  # both candidates tried, even though only one won
+
+
+def test_run_microarch_multiplier_rejects_when_neither_helps(tmp_path):
+    cfg = _cfg(tmp_path)
+    _fake_cpu_info_dir(tmp_path, _ZEN5_CPU_INFO_OUTPUT)
+    conn = db.connect(cfg.db_path)
+    exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
+    conn.close()
+
+    baseline = _baseline(mean_ratio=100.0)
+    combination = CombinationResult(winning_flags=["-O3"], winning_ci=baseline.ci)
+    backends = ScriptedBackends(ratio_sequences={
+        ("-O3", "-march=znver5"): [99.0, 100.0, 101.0],
+        ("-O3", "-mtune=znver5"): [98.0, 99.0, 100.0],
+    })
+
+    result = run_microarch_multiplier(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline, combination=combination,
+        workload=backends, instrumentation=backends,
+    )
+
+    assert result.attempted is True
+    assert result.winning_flags == combination.winning_flags  # unchanged
+    assert result.winning_ci is combination.winning_ci
+    assert all(not o.accepted for o in result.outcomes)
+
+
+def test_run_microarch_multiplier_skips_when_nothing_detected(tmp_path):
+    # _cfg()'s own wspy_dir ("wspy-unused") has no cpu_info at all -- the
+    # default, no fake binary set up here.
+    cfg = _cfg(tmp_path)
+    conn = db.connect(cfg.db_path)
+    exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
+    conn.close()
+
+    baseline = _baseline(mean_ratio=100.0)
+    combination = CombinationResult(winning_flags=["-O3"], winning_ci=baseline.ci)
+    backends = ScriptedBackends(ratio_sequences={})  # must never be reached
+
+    result = run_microarch_multiplier(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline, combination=combination,
+        workload=backends, instrumentation=backends,
+    )
+
+    assert result.attempted is False
+    assert result.outcomes == []
+    assert "no confidently-detected" in result.skip_reason
+    assert result.winning_flags == combination.winning_flags
+
+
+def test_run_microarch_multiplier_skips_when_march_already_present(tmp_path):
+    cfg = _cfg(tmp_path)
+    _fake_cpu_info_dir(tmp_path, _ZEN5_CPU_INFO_OUTPUT)
+    conn = db.connect(cfg.db_path)
+    exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
+    conn.close()
+
+    baseline = _baseline(mean_ratio=100.0)
+    # e.g. -march=native already accepted via the ordinary Phase 2-5 per-flag path.
+    combination = CombinationResult(winning_flags=["-O3", "-march=native"], winning_ci=baseline.ci)
+    backends = ScriptedBackends(ratio_sequences={})  # must never be reached
+
+    result = run_microarch_multiplier(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline, combination=combination,
+        workload=backends, instrumentation=backends,
+    )
+
+    assert result.attempted is False
+    assert "already" in result.skip_reason
+    assert result.winning_flags == ["-O3", "-march=native"]
+
+
+def test_run_microarch_multiplier_chains_off_a_prior_multiplier_result(tmp_path):
+    # combination is duck-typed -- confirms this accepts run_pgo_multiplier()'s
+    # own MultiplierResult (as cli.py's real chained wiring does), not just a
+    # Phase 5 CombinationResult.
+    from cfm.orchestrator import MultiplierResult
+
+    cfg = _cfg(tmp_path)
+    _fake_cpu_info_dir(tmp_path, _ZEN5_CPU_INFO_OUTPUT)
+    conn = db.connect(cfg.db_path)
+    exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
+    conn.close()
+
+    baseline = _baseline(mean_ratio=100.0)
+    prior = MultiplierResult(
+        attempted=True, winning_flags=["-O3", PGO_FLAG], winning_ci=confidence_interval([130.0] * 3),
+    )
+    backends = ScriptedBackends(ratio_sequences={
+        (("-O3", PGO_FLAG, "-march=znver5")): [150.0, 150.0, 150.0],
+        (("-O3", PGO_FLAG, "-mtune=znver5")): [131.0, 131.0, 131.0],
+    })
+
+    result = run_microarch_multiplier(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline, combination=prior,
+        workload=backends, instrumentation=backends,
+    )
+
+    assert result.attempted is True
+    assert result.winning_flags == ["-O3", PGO_FLAG, "-march=znver5"]
+    assert result.winning_ci.mean == pytest.approx(150.0)
