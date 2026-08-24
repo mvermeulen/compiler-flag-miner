@@ -22,6 +22,7 @@ from typing import Optional
 
 from .. import db
 from ..config import CfmConfig
+from ..hostinfo import read_package_power_watts
 from ..instrumentation.base import InstrumentationBackend
 from ..instrumentation.wspy import WspyInstrumentation
 from ..workloads.base import WorkloadBackend
@@ -150,6 +151,7 @@ def run_one_trial(
     parent_trial_id: Optional[int] = None,
     workload: Optional[WorkloadBackend] = None,
     instrumentation: Optional[InstrumentationBackend] = None,
+    power_reader=read_package_power_watts,
 ) -> dict:
     """``workload``/``instrumentation`` are injectable (defaulting to the real
     ``SpecCpu2026Workload``/``WspyInstrumentation`` backends built from ``cfg``) so
@@ -165,6 +167,15 @@ def run_one_trial(
     ``CfmConfig``. ``parent_trial_id`` is passed straight through to
     ``db.record_trial()`` -- doc/DESIGN.md sec. 6 Phase 5's greedy-combination
     lineage (``trials.parent_trial_id``), unused before M1's confirmation stage.
+    ``power_reader`` is injectable too, same reasoning as ``workload``/
+    ``instrumentation`` -- unlike those two, ``read_package_power_watts()``
+    reads *this actual host's* live sysfs state directly, regardless of which
+    workload/instrumentation backend is in play, so a test running on a real
+    machine with a real `amdgpu` hwmon (e.g. this project's own mining host)
+    would otherwise get a real, non-deterministic hypothesis row even with
+    fully faked workload/instrumentation backends -- confirmed live, 2026-08-24
+    (a real test failure caught this the same day the feature was added, not
+    inspection). Tests pass ``lambda: None`` to suppress it deterministically.
     """
     workload = workload or SpecCpu2026Workload(cfg.spec_dir, cfg.spec_config)
     run_index_path = cfg.output_root / "cpu2026" / "run-index.jsonl"
@@ -250,6 +261,21 @@ def run_one_trial(
                     rationale=f"host cpu_temp at measurement: {cpu_temp_c:.1f} C",
                 )
 
+            # Per-trial package-power record -- added 2026-08-24 to test
+            # doc/settling_baseline_drift_investigation.2026-08-24.md's
+            # hypothesis 2 directly (a STAPM-style sustained power limit
+            # easing upward over a run's own real wall-clock minutes), rather
+            # than only inferring it from the elapsed-time-vs-cpu_temp_c
+            # correlation gap that hypothesis was first raised from. Same
+            # "squirrel it away, don't gate on it" posture as cpu_temp_c above
+            # -- see read_package_power_watts()'s own docstring.
+            package_power_w = power_reader()
+            if package_power_w is not None:
+                db.record_hypothesis(
+                    conn, trial_id=trial_id, proposed_by="rule",
+                    rationale=f"host package_power at measurement: {package_power_w:.2f} W",
+                )
+
             return {
                 "experiment_id": experiment_id, "trial_id": trial_id,
                 "build_status": build_status, "wspy_run_ref": signature.wspy_run_ref,
@@ -259,6 +285,7 @@ def run_one_trial(
                 "allocation_pressure": signature.allocation_pressure,
                 "ratio": run_result.ratio,
                 "cpu_temp_c": cpu_temp_c,
+                "package_power_w": package_power_w,
             }
         except Exception:
             # An unhandled exception here (not a build/validate *failure*, which

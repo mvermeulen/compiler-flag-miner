@@ -258,3 +258,55 @@ def test_run_one_trial_skips_cpu_temp_hypothesis_when_absent(tmp_path):
         assert rows == []
     finally:
         conn.close()
+
+
+# -- read_package_power_watts / per-trial power record -------------------------
+# power_reader is always passed explicitly in these tests -- run_one_trial()'s
+# own default reads this actual host's real amdgpu hwmon sensor if present
+# (confirmed live, 2026-08-24: a real test failure in test_orchestrator.py,
+# not inspection, caught this the same day the feature was added), so an
+# un-overridden call here would be non-deterministic depending on whatever
+# real hardware happens to run the suite.
+
+def test_run_one_trial_records_package_power_as_a_hypothesis(tmp_path):
+    cfg = CfmConfig.from_env(
+        db_path=str(tmp_path / "cfm.db"), output_root=str(tmp_path / "results"),
+    )
+    result = run_one_trial(
+        cfg, benchmark="fake_r", flags=["-O3"],
+        workload=_FullySucceedingWorkload(audit_dump=None), instrumentation=_FullySucceedingInstrumentation(),
+        power_reader=lambda: 42.5,
+    )
+    assert result["package_power_w"] == pytest.approx(42.5)
+
+    conn = db.connect(cfg.db_path)
+    try:
+        rows = conn.execute(
+            "SELECT rationale FROM hypotheses WHERE trial_id=? AND rationale LIKE 'host package_power%'",
+            (result["trial_id"],),
+        ).fetchall()
+        assert len(rows) == 1
+        assert "42.50" in rows[0][0]
+    finally:
+        conn.close()
+
+
+def test_run_one_trial_skips_package_power_hypothesis_when_absent(tmp_path):
+    cfg = CfmConfig.from_env(
+        db_path=str(tmp_path / "cfm.db"), output_root=str(tmp_path / "results"),
+    )
+    result = run_one_trial(
+        cfg, benchmark="fake_r", flags=["-O3"],
+        workload=_FullySucceedingWorkload(audit_dump=None), instrumentation=_FullySucceedingInstrumentation(),
+        power_reader=lambda: None,
+    )
+    assert result["package_power_w"] is None
+    conn = db.connect(cfg.db_path)
+    try:
+        rows = conn.execute(
+            "SELECT rationale FROM hypotheses WHERE trial_id=? AND rationale LIKE 'host package_power%'",
+            (result["trial_id"],),
+        ).fetchall()
+        assert rows == []
+    finally:
+        conn.close()

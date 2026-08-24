@@ -329,8 +329,15 @@ def test_screen_candidates_persists_a_hypothesis_row_per_trial(tmp_path):
 
     conn = db.connect(cfg.db_path)
     try:
+        # Filtered by rationale prefix, not "the only row" -- run_one_trial()
+        # also best-effort-records a host package_power reading per trial
+        # (2026-08-24, cfm/hostinfo.py's read_package_power_watts()) whenever
+        # this test happens to run on a host with a real amdgpu hwmon sensor,
+        # same "a hand-rolled test shouldn't assume incidental host hardware
+        # state" lesson as several other tests in this file already apply.
         row = conn.execute(
-            "SELECT * FROM hypotheses WHERE trial_id=?", (outcomes[0].trial_id,)
+            "SELECT * FROM hypotheses WHERE trial_id=? AND rationale LIKE 'screening ratio%'",
+            (outcomes[0].trial_id,),
         ).fetchone()
         assert row is not None
         assert row["proposed_by"] == "rule"
