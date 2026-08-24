@@ -150,6 +150,70 @@ behavior; if it's a desktop or server Zen5 part, hypothesis 2 doesn't apply and 
    most expensive option and shouldn't be reached for before the analysis above has been tried on data
    that already exists.
 
+## Update, same day: run against the real mining host
+
+Step 1 and step 2 of the "concrete next steps" above, actually done.
+
+**`scripts/analyze_trial_drift.py --db cfm.db`, run against all 17 real experiments.** Confirms the
+by-eye reads from every affected doc, now systematically: `Pearson r(ratio, elapsed_min)` is
+moderate-to-strong (`+0.48` to `+0.82`) in every real, undisturbed run long enough to have more than a
+few points, while `r(ratio, cpu_temp_c)` is consistently weaker wherever both are available (e.g.
+experiment 13: `+0.479` vs `+0.165`; experiment 16: `+0.651` vs `+0.256`; experiment 17: `+0.572` vs
+`+0.239`) — the script's own per-experiment note ("ratio tracks elapsed time much more tightly than it
+tracks `cpu_temp_c` ... NOT primarily thermal") fires on five separate experiments independently, not
+just the one (`750.sealcrypto_r`) that had already been checked by eye.
+
+**The sign is the important new piece of information this cross-experiment view surfaces that no single
+run's own doc emphasized: ratio rises with elapsed time in every one of these, not falls.** Higher
+`ratio` means *faster* (fewer seconds per copy). A monotonic *improvement* over a run's own duration is
+the opposite of what thermal throttling or component wear-in would predict (both degrade performance
+over time as heat/stress accumulates) — it's exactly the shape a **sustained power limit that eases
+upward over real wall-clock minutes** would produce, which is hypothesis 2's own specific prediction,
+not hypothesis 3's or 4's.
+
+**Host identity and configuration, confirmed directly (not assumed) — hypothesis 3 is now ruled out,
+hypothesis 2 is now the best-supported remaining explanation:**
+
+```
+Model name:        AMD RYZEN AI MAX+ PRO 395 w/ Radeon 8060S      (Strix Halo, mobile/workstation APU)
+chassis_type:      10                                              (Notebook)
+scaling_governor:  performance
+energy_performance_preference: performance
+scaling_driver:    amd-pstate-epp
+power_supply:      AC (online=1), BAT0 (98%, not charging)
+hwmon sensors present: k10temp (die temp -- the source `_extract_cpu_temp_c()` already reads),
+                       amdgpu (exposes `power1_average`, currently ~9W at idle -- APU package power,
+                       not yet monitored during a real trial)
+```
+
+- **Hypothesis 3 (governor/EPP ramp) is directly ruled out**: both the governor and EPP hint are
+  already pinned to `performance`, not a `powersave`-style setting that would need real wall-clock time
+  to settle into a steady-state frequency. Nothing here is ramping *because* of a governor policy.
+- **Hypothesis 2 (STAPM-style skin-temperature-aware power management) is now the best-supported
+  remaining explanation, not just a plausible guess**: this is confirmed a real mobile/notebook-chassis
+  AMD part (`chassis_type=10`), AC-powered with a battery present — exactly the class of hardware STAPM
+  targets. `k10temp` (die temp) already confirmed uncorrelated with the ratio pattern (the
+  `750.sealcrypto_r` finding) is consistent with STAPM's own internal skin-temperature model being a
+  *different, unexposed* variable from anything `k10temp` reports — die temp can stay flat while a
+  firmware-modeled skin temperature (which STAPM actually gates the sustained power limit on) still
+  climbs and eases the power ceiling upward over real minutes, matching the observed shape exactly.
+- **Not yet directly observed**: the actual power limit (PPT) ramping in real time. No `power1_cap`
+  readback is exposed via the `amdgpu` hwmon path checked here (a dedicated tool like `ryzenadj` would
+  be needed to read it directly) — but `amdgpu`'s own `power1_average` sensor *is* already present and
+  readable, and would be a cheap thing to sample alongside `cpu_temp_c` on a future run's own trials
+  (the same pattern `_extract_cpu_temp_c()` already uses) to check directly whether package power draw
+  itself ramps upward over a run's early minutes, which would be much more direct confirmation of
+  hypothesis 2 than the elapsed-time correlation alone.
+
+**Hypothesis 1 (pure baseline-window sampling artifact, no real physical cause)** looks weaker after
+this cross-experiment view than it did considering any single run alone: the same upward-with-elapsed-
+time shape recurs across five independent experiments, multiple benchmarks, and timescales from ~15
+minutes (`750.sealcrypto_r`) to ~7.8 hours (`782.lbm_r`'s 2026-08-21 run) — a coincidence of baseline
+sampling wouldn't be expected to recur this consistently in the same direction across genuinely
+unrelated benchmarks and run durations. This doesn't rule out hypothesis 1 contributing some of the
+*apparent* magnitude in any one run, but a purely physical cause (most likely hypothesis 2) now looks
+like the dominant driver, not baseline noise alone.
+
 ## What this doesn't change
 
 No conclusion in any of the four `doc/mining_results.*.md` accept/reject verdicts is being revisited here
