@@ -123,6 +123,28 @@ class BaselineResult:
     # mining run's output visibly says which shape source it actually used, not just the values.
     characterization_source: Optional[str] = None
 
+    @property
+    def most_recent_ratio(self) -> float:
+        """The chronologically most recent calibration-grade ratio (``ratios[-1]``
+        -- ``run_baseline()`` builds ``ratios`` via sequential appends, so this is
+        genuinely the last-measured rep, not just the last list element by
+        convention). ``screen_candidates()`` (Phase 3) compares against this
+        instead of ``ci.mean`` -- confirmed live, 2026-08-24 (CLAUDE.md's
+        Non-obvious traps log, the `750.sealcrypto_r` entry): baseline's own reps
+        can still be visibly settling (e.g. 56.18 -> 54.80 -> 52.09) by the time
+        Phase 3 starts immediately afterward, and comparing every screening trial
+        against the full-run *mean* (pulled up by the earlier, higher reps) rather
+        than wherever the benchmark's throughput had actually settled to biases
+        every subsequent screening delta negative, regardless of the candidate
+        flag's own real effect -- a real, non-hypothetical cause of a false prune,
+        not just added noise. Falls back to ``ci.mean`` if ``ratios`` is somehow
+        empty (`run_baseline()` itself never returns a `BaselineResult` with no
+        usable ratio -- see its own `raise RuntimeError` -- but a hand-rolled
+        `BaselineResult` built directly, e.g. in a test fixture, could still hit
+        this; degrade rather than crash).
+        """
+        return self.ratios[-1] if self.ratios else self.ci.mean
+
 
 @dataclass
 class ScreeningOutcome:
@@ -384,10 +406,13 @@ def screen_candidates(
 ) -> list[ScreeningOutcome]:
     """doc/DESIGN.md sec. 6 Phase 3: each candidate flag tried individually, one
     cheap run at the ``quick`` profile -- prunes only a *clearly* worse point
-    estimate against the baseline's mean; no CI needed at this stage ("exists to
-    prune, not conclude"). A build/validate failure survives=False too (a real,
-    persisted negative result), distinguished from a "measured but worse" reject
-    by its ``reason`` text and ``ratio is None``.
+    estimate against ``baseline.most_recent_ratio`` (not ``baseline.ci.mean`` --
+    see that property's own docstring for the real, live 2026-08-24 finding that
+    motivated the change: comparing against the full-run mean while baseline is
+    still settling systematically biases every screening delta negative); no CI
+    needed at this stage ("exists to prune, not conclude"). A build/validate
+    failure survives=False too (a real, persisted negative result), distinguished
+    from a "measured but worse" reject by its ``reason`` text and ``ratio is None``.
     """
     outcomes: list[ScreeningOutcome] = []
     conn = db.connect(cfg.db_path)
@@ -414,14 +439,15 @@ def screen_candidates(
                     reason=f"no usable ratio (build_status={result['build_status']!r})",
                 )
             else:
-                delta_pct = (ratio - baseline.ci.mean) / baseline.ci.mean * 100.0
+                reference = baseline.most_recent_ratio
+                delta_pct = (ratio - reference) / reference * 100.0
                 survived = delta_pct >= -SCREENING_PRUNE_THRESHOLD_PCT
                 outcome = ScreeningOutcome(
                     candidate=candidate, trial_id=result["trial_id"], ratio=ratio,
                     delta_vs_baseline_pct=delta_pct, survived=survived,
                     reason=(
-                        f"screening ratio {ratio:.6g} vs baseline mean "
-                        f"{baseline.ci.mean:.6g} ({delta_pct:+.2f}%)"
+                        f"screening ratio {ratio:.6g} vs baseline's most recent "
+                        f"calibration rep {reference:.6g} ({delta_pct:+.2f}%)"
                     ),
                 )
 

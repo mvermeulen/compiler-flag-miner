@@ -239,6 +239,12 @@ def main(argv=None) -> int:
             "benchmark": args.benchmark,
             "baseline_flags": baseline.flags,
             "baseline_ratio_mean": baseline.ci.mean,
+            # The actual reference point Phase 3 screening compares against
+            # (BaselineResult.most_recent_ratio, not the mean above) -- surfaced
+            # directly so a future stale-baseline suspicion is checkable from a
+            # run's own summary JSON, not just by querying cfm.db (CLAUDE.md's
+            # Non-obvious traps log, 2026-08-24 sealcrypto entry).
+            "baseline_most_recent_calibration_ratio": baseline.most_recent_ratio,
             "baseline_resource_dominance": baseline.resource_dominance,
             "baseline_vectorization_density": baseline.vectorization_density,
             "baseline_allocation_pressure": baseline.allocation_pressure,
