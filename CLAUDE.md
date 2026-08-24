@@ -781,9 +781,17 @@ Full branch/PR discipline, same shape as wspy's:
   2026-08-21 run) — that's a real, still-open, bigger design question (does every phase need periodic
   re-baselining, not just Phase 3's own reference point) deliberately left out of this fix's scope.
   Verified at the mocked-backend tier (`tests/test_orchestrator.py`'s new `most_recent_ratio`/
-  screening-comparison cases, using the real sealcrypto numbers directly as the fixture) — not yet
-  re-confirmed by an actual real mining run showing a previously-pruned flag surviving for real; that's
-  the natural next verification once a benchmark with real settling-baseline behavior gets re-mined.
+  screening-comparison cases, using the real sealcrypto numbers directly as the fixture).
+  **Confirmed for real the same day**: a fresh, uncapped re-mine of `750.sealcrypto_r` itself (the exact
+  benchmark that exposed the bug) showed baseline settling again (`56.15 → 53.53 → 50.70`, an even
+  bigger ~10% spread than the original run), and this time all 5 previously-pruned flags correctly
+  survived screening (deltas within ±1% against the new `most_recent_ratio` reference, vs. the original
+  run's own ~−6.6% to −7.0% against the stale mean) and reached real Phase 4 confirmation trials. All 5
+  were then genuinely, cleanly rejected there (−5.5% to −5.8%, unambiguous — nowhere near the accept
+  bar) — the original run's own open "settling or genuine reject?" question is now resolved: genuine
+  reject, once measured properly. `-march=native` (fast-tracked via M4 on its own prior from the earlier
+  run) was confirmed a third time, +15.63%. See `doc/mining_results.750.sealcrypto_r.2026-08-24b.md` for
+  the full write-up.
 
 ## Build & test
 

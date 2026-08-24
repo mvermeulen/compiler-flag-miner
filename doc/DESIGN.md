@@ -344,7 +344,11 @@ by the time Phase 3 starts immediately afterward; comparing every screening tria
 all 3 (pulled up by the earlier, higher reps) systematically biases every delta negative regardless of
 the candidate's own real effect, not just adding noise. The most-recent rep is free — it's already
 collected — and directly reflects wherever the benchmark had actually settled to by the time screening
-begins.
+begins. Confirmed for real the same day: a fresh re-mine of `750.sealcrypto_r` itself reproduced the
+same real baseline-settling pattern, and this time all 5 previously-pruned flags correctly survived
+screening and reached real Phase 4 confirmation, resolving the original run's own open question for
+real (a genuine, clean reject, not a screening artifact) — see
+`doc/mining_results.750.sealcrypto_r.2026-08-24b.md`.
 
 ### Phase 4 — Confirmation (statistical)
 Surviving flags re-run individually with the `deep-cpu` profile, 3+ repetitions, and compared to the
