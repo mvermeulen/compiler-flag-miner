@@ -337,6 +337,15 @@ is *clearly* worse than baseline (large negative delta, not just noise) is dropp
 proceeds to confirmation. This bounds the expensive stage's input size — with, say, 30-60 flags in the
 catalog, screening at one run each is far cheaper than confirming all of them at 3+ reps.
 
+**Compared against baseline's most recent calibration rep, not its full-run mean** (`BaselineResult.
+most_recent_ratio`, changed 2026-08-24 — real finding, not a hypothetical: see CLAUDE.md's Non-obvious
+traps log's `750.sealcrypto_r` entry). Baseline's own 3 calibration reps can still be visibly settling
+by the time Phase 3 starts immediately afterward; comparing every screening trial against the mean of
+all 3 (pulled up by the earlier, higher reps) systematically biases every delta negative regardless of
+the candidate's own real effect, not just adding noise. The most-recent rep is free — it's already
+collected — and directly reflects wherever the benchmark had actually settled to by the time screening
+begins.
+
 ### Phase 4 — Confirmation (statistical)
 Surviving flags re-run individually with the `deep-cpu` profile, 3+ repetitions, and compared to the
 baseline via wspy-summary's CI logic: accept only if the improvement's 95% CI doesn't overlap the

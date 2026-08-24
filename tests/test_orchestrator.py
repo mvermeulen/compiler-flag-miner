@@ -239,6 +239,57 @@ def test_screen_candidates_prunes_clearly_worse_keeps_better_and_marginal(tmp_pa
     assert by_flag["-bad"].delta_vs_baseline_pct == pytest.approx(-20.0)
 
 
+def test_screen_candidates_compares_against_most_recent_baseline_rep_not_the_mean(tmp_path):
+    # Real 2026-08-24 finding (750.sealcrypto_r, CLAUDE.md's Non-obvious traps
+    # log): baseline settling downward across its own 3 reps (56.18 -> 54.80 ->
+    # 52.09, mean 54.35) meant every screening trial right afterward was
+    # compared against a stale, too-high mean, biasing every delta negative
+    # regardless of the candidate's own real effect. A candidate scoring 50.6
+    # looks clearly worse against the mean (-6.9%, past the 5% prune bar) but
+    # only mildly worse against baseline's own last, most-recent rep (-2.8%,
+    # well inside it) -- most_recent_ratio is what screen_candidates() must use.
+    cfg = _cfg(tmp_path)
+    conn = db.connect(cfg.db_path)
+    exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
+    conn.close()
+
+    ratios = [56.18, 54.80, 52.09]
+    baseline = BaselineResult(
+        experiment_id=exp_id, flags=["-O3"], ratios=ratios, ci=confidence_interval(ratios),
+        resource_dominance="compute-bound", trial_ids=[1, 2, 3],
+    )
+    candidates = [_candidate("-ofast-like")]
+    backends = ScriptedBackends(ratio_sequences={("-O3", "-ofast-like"): [50.6]})
+
+    outcomes = screen_candidates(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline,
+        candidates=candidates, workload=backends, instrumentation=backends,
+    )
+
+    assert outcomes[0].survived is True  # would have been pruned against the 54.35 mean
+    assert outcomes[0].delta_vs_baseline_pct == pytest.approx((50.6 - 52.09) / 52.09 * 100.0)
+    assert "most recent" in outcomes[0].reason
+    assert "52.09" in outcomes[0].reason
+
+
+def test_baseline_result_most_recent_ratio_is_the_last_rep_chronologically(tmp_path):
+    ratios = [56.18, 54.80, 52.09]
+    baseline = BaselineResult(
+        experiment_id=1, flags=["-O3"], ratios=ratios, ci=confidence_interval(ratios),
+        resource_dominance="compute-bound",
+    )
+    assert baseline.most_recent_ratio == pytest.approx(52.09)
+    assert baseline.most_recent_ratio != pytest.approx(baseline.ci.mean)  # mean would be 54.35...
+
+
+def test_baseline_result_most_recent_ratio_falls_back_to_ci_mean_when_ratios_empty(tmp_path):
+    baseline = BaselineResult(
+        experiment_id=1, flags=["-O3"], ratios=[], ci=confidence_interval([100.0, 100.0, 100.0]),
+        resource_dominance="memory-bound",
+    )
+    assert baseline.most_recent_ratio == pytest.approx(100.0)
+
+
 def test_screen_candidates_build_failure_does_not_survive(tmp_path):
     cfg = _cfg(tmp_path)
     conn = db.connect(cfg.db_path)
