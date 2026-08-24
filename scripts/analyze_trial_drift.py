@@ -19,20 +19,26 @@ Every past trial already carries what's needed to look at this systematically
 instead of by eye:
   - trials.created_at / trials.ratio / trials.phase / trials.flags_json --
     always present.
-  - hypotheses table, rationale text, two best-effort rows per trial
-    (agents/spec_agent.py's `_summarize_compiled_flags_audit()` and
-    `_extract_cpu_temp_c()`): a "compiled-flags audit -- ..." row and a
-    "host cpu_temp at measurement: XX.X C" row. Both were added 2026-08-21/22
-    for unrelated reasons (the basepeak/isolated-flags investigations) and
-    have been silently accumulating on every trial since, unread until now.
+  - hypotheses table, rationale text, three best-effort rows per trial
+    (agents/spec_agent.py's `_summarize_compiled_flags_audit()`,
+    `_extract_cpu_temp_c()`, and -- added 2026-08-24, directly motivated by
+    this investigation's own hypothesis 2 -- `read_package_power_watts()`): a
+    "compiled-flags audit -- ..." row, a "host cpu_temp at measurement: XX.X
+    C" row, and a "host package_power at measurement: XX.X W" row. The first
+    two were added 2026-08-21/22 for unrelated reasons (the basepeak/
+    isolated-flags investigations) and had been silently accumulating on
+    every trial since, unread until this script; the third exists
+    specifically so this script could read it.
 
-This script joins all three, per experiment, and reports:
+This script joins all four, per experiment, and reports:
   1. A chronological per-trial table (elapsed minutes since the experiment's
-     own `started_at`, phase, flags, ratio, cpu_temp_c, any audit WARNING).
-  2. Pearson correlation of ratio against elapsed time, and against cpu_temp_c,
-     per experiment (only computed when SciPy/NumPy aren't required -- plain
-     stdlib arithmetic, consistent with cfm/stats.py's own from-scratch
-     approach rather than adding a new dependency for this).
+     own `started_at`, phase, flags, ratio, cpu_temp_c, package_power_w, any
+     audit WARNING).
+  2. Pearson correlation of ratio against elapsed time and against
+     cpu_temp_c, and of package_power_w against elapsed time, per experiment
+     (only computed when SciPy/NumPy aren't required -- plain stdlib
+     arithmetic, consistent with cfm/stats.py's own from-scratch approach
+     rather than adding a new dependency for this).
   3. A flag on any trial whose audit row contains the "no -O optimization
      level found" warning, or where cpu_temp_c couldn't be parsed at all
      (missing data point, not a zero).
@@ -63,6 +69,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))  # see audit_flags_from_spec_results.py's own comment on why
 
 _CPU_TEMP_RATIONALE_RE = re.compile(r"host cpu_temp at measurement:\s*([\d.]+)\s*C")
+# Added 2026-08-24 alongside cfm/hostinfo.py's read_package_power_watts() --
+# the exact "sibling _extract_ipc()"-style follow-up this script's own module
+# docstring anticipated, just for package power instead of IPC (package power
+# turned out to be the cheaper, already-half-collected signal: read from a
+# live sysfs sensor at trial time rather than needing new raw_output parsing).
+_PACKAGE_POWER_RATIONALE_RE = re.compile(r"host package_power at measurement:\s*([\d.]+)\s*W")
 _AUDIT_WARNING_MARKER = "⚠ WARNING"  # "⚠ WARNING", matches spec_agent.py's own literal text
 
 
@@ -130,6 +142,14 @@ def _cpu_temp_from_rationales(rationales: list[str]) -> Optional[float]:
     return None
 
 
+def _package_power_from_rationales(rationales: list[str]) -> Optional[float]:
+    for r in rationales:
+        m = _PACKAGE_POWER_RATIONALE_RE.search(r)
+        if m:
+            return float(m.group(1))
+    return None
+
+
 def _audit_warning_from_rationales(rationales: list[str]) -> bool:
     return any(_AUDIT_WARNING_MARKER in r for r in rationales)
 
@@ -174,6 +194,7 @@ def analyze_experiment(conn: sqlite3.Connection, experiment_id: int, csv_dir: Op
     for t in trials:
         rationales = _fetch_hypotheses_for_trial(conn, t["id"])
         cpu_temp_c = _cpu_temp_from_rationales(rationales)
+        package_power_w = _package_power_from_rationales(rationales)
         audit_warning = _audit_warning_from_rationales(rationales)
         created_at = _parse_iso(t["created_at"])
         elapsed_min = (created_at - started_at).total_seconds() / 60.0
@@ -185,18 +206,20 @@ def analyze_experiment(conn: sqlite3.Connection, experiment_id: int, csv_dir: Op
             "flags": " ".join(flags),
             "ratio": t["ratio"],
             "cpu_temp_c": cpu_temp_c,
+            "package_power_w": package_power_w,
             "audit_warning": audit_warning,
             "verdict": t["verdict"],
         })
 
     print(f"{'trial':>6} {'elapsed_min':>11} {'phase':>12} {'ratio':>9} {'temp_c':>7} "
-          f"{'verdict':>8}  flags")
+          f"{'power_w':>7} {'verdict':>8}  flags")
     for r in rows:
         temp_str = f"{r['cpu_temp_c']:.1f}" if r["cpu_temp_c"] is not None else "  n/a"
+        power_str = f"{r['package_power_w']:.2f}" if r["package_power_w"] is not None else "  n/a"
         ratio_str = f"{r['ratio']:.3f}" if r["ratio"] is not None else "     n/a"
         warn = "  <-- ⚠ audit warning (no -O level found)" if r["audit_warning"] else ""
         print(f"{r['trial_id']:>6} {r['elapsed_min']:>11.1f} {r['phase']:>12} {ratio_str:>9} "
-              f"{temp_str:>7} {str(r['verdict']):>8}  {r['flags']}{warn}")
+              f"{temp_str:>7} {power_str:>7} {str(r['verdict']):>8}  {r['flags']}{warn}")
 
     # Correlations, using only trials with both a real ratio and (for the temp
     # one) a real parsed cpu_temp_c -- a null in either just drops that point,
@@ -204,21 +227,31 @@ def analyze_experiment(conn: sqlite3.Connection, experiment_id: int, csv_dir: Op
     ratio_pairs = [(r["elapsed_min"], r["ratio"]) for r in rows if r["ratio"] is not None]
     temp_pairs = [(r["cpu_temp_c"], r["ratio"]) for r in rows
                   if r["ratio"] is not None and r["cpu_temp_c"] is not None]
+    power_elapsed_pairs = [(r["elapsed_min"], r["package_power_w"]) for r in rows
+                           if r["package_power_w"] is not None]
 
     r_elapsed = _pearson([p[0] for p in ratio_pairs], [p[1] for p in ratio_pairs])
     r_temp = _pearson([p[0] for p in temp_pairs], [p[1] for p in temp_pairs])
+    r_power_elapsed = _pearson([p[0] for p in power_elapsed_pairs], [p[1] for p in power_elapsed_pairs])
 
     def _fmt(v: Optional[float]) -> str:
         return f"{v:+.3f}" if v is not None else "n/a (too few points or a flat series)"
 
     print(f"\nPearson r(ratio, elapsed_min)  = {_fmt(r_elapsed)}  (n={len(ratio_pairs)})")
     print(f"Pearson r(ratio, cpu_temp_c)   = {_fmt(r_temp)}  (n={len(temp_pairs)})")
+    print(f"Pearson r(package_power_w, elapsed_min) = {_fmt(r_power_elapsed)}  (n={len(power_elapsed_pairs)})")
     if r_elapsed is not None and abs(r_elapsed) >= 0.5 and (r_temp is None or abs(r_temp) < 0.3):
         print("  -> ratio tracks elapsed time much more tightly than it tracks cpu_temp_c: "
               "consistent with the settling/drift pattern documented in "
               "doc/mining_results.782.lbm_r.2026-08-21.md and "
               "doc/mining_results.750.sealcrypto_r.2026-08-24.md, and NOT primarily thermal "
               "(die-temp) -- see doc/settling_baseline_drift_investigation.2026-08-24.md.")
+    if r_power_elapsed is not None and r_power_elapsed >= 0.5:
+        print("  -> package_power_w rises with elapsed time: direct evidence for "
+              "doc/settling_baseline_drift_investigation.2026-08-24.md's hypothesis 2 "
+              "(a STAPM-style sustained power limit easing upward over the run's own real "
+              "wall-clock minutes), not just the elapsed-time-vs-cpu_temp_c correlation gap "
+              "that hypothesis was originally inferred from.")
 
     if csv_dir is not None:
         csv_dir.mkdir(parents=True, exist_ok=True)

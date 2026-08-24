@@ -20,6 +20,12 @@ Zen1 through Zen4 -- degrades to "nothing detected," never a guess. Matches
 this project's established "never guess, verify or skip" discipline
 (CLAUDE.md's Non-obvious traps log has several entries about exactly this
 class of mistake elsewhere in the pipeline).
+
+Also houses `read_package_power_watts()` (added 2026-08-24) -- an unrelated second piece of live host
+diagnostics: a best-effort per-trial package-power sample, added specifically to test
+`doc/settling_baseline_drift_investigation.2026-08-24.md`'s hypothesis 2 (a STAPM-style sustained power
+limit easing upward over a run's own real wall-clock minutes) directly, rather than only inferring it
+from the elapsed-time-vs-`cpu_temp_c` correlation gap that hypothesis was first raised from.
 """
 
 from __future__ import annotations
@@ -27,6 +33,7 @@ from __future__ import annotations
 import re
 import subprocess
 from pathlib import Path
+from typing import Optional
 
 # Only core labels wspy's own cpu_info.c can report with enough precision to
 # name one correct GCC -march= value -- see this module's own docstring for
@@ -87,3 +94,55 @@ def detect_microarch_flags(wspy_dir) -> list[str]:
     if uarch is None:
         return []
     return [f"-march={uarch}", f"-mtune={uarch}"]
+
+
+# The hwmon driver name for this host's own package-power sensor -- confirmed
+# live, 2026-08-24, by enumerating /sys/class/hwmon/hwmon*/name directly on
+# the real mining host: "amdgpu" is present alongside "k10temp" (the source
+# _extract_cpu_temp_c() already reads) and exposes a real power1_average
+# reading (~9W at idle, confirmed by hand). On this integrated APU (CPU+GPU
+# sharing one power budget, not a discrete GPU) that sensor reports combined
+# package power, not GPU-only draw -- exactly what a package-level power-limit
+# hypothesis needs. Discovered by driver *name* here too, not a hardcoded
+# "hwmonN" path: hwmon device numbering is assigned by kernel enumeration
+# order at boot, not stable across reboots or hosts (same reasoning as
+# detect_microarch_flags() never hardcoding a cpu_info path shape).
+_POWER_HWMON_DRIVER_NAME = "amdgpu"
+
+_DEFAULT_HWMON_ROOT = Path("/sys/class/hwmon")
+
+
+def read_package_power_watts(hwmon_root: Path = _DEFAULT_HWMON_ROOT) -> Optional[float]:
+    """Best-effort, single-point-in-time read of this host's own package power
+    draw, in watts, via the `amdgpu` hwmon driver's `power1_average` sensor
+    (microwatts, per the standard Linux hwmon ABI -- converted here). A single
+    snapshot taken once per trial, same precision level as
+    `_extract_cpu_temp_c()`'s own single reading -- not integrated over the
+    trial's own duration, just whatever the driver's own internal rolling
+    average happens to read at the moment this is called (typically shortly
+    after the trial's real measurement finishes, from `run_one_trial()`'s own
+    call site).
+
+    If this climbs across a sequence of same-flag trials the way `ratio`
+    already does, that's direct evidence for
+    `doc/settling_baseline_drift_investigation.2026-08-24.md`'s hypothesis 2;
+    if it doesn't, that hypothesis is weakened in favor of one of the others
+    still on the table there.
+
+    Returns `None` -- degrade, never raise -- if no `amdgpu` hwmon is found,
+    or its `power1_average` file can't be read (a non-AMD host, a driver
+    naming difference, permissions, a transient sysfs read failure): a
+    best-effort diagnostic sample, never load-bearing for the trial's own
+    correctness.
+    """
+    if not hwmon_root.is_dir():
+        return None
+    for entry in sorted(hwmon_root.iterdir()):
+        try:
+            if entry.joinpath("name").read_text().strip() != _POWER_HWMON_DRIVER_NAME:
+                continue
+            microwatts = int(entry.joinpath("power1_average").read_text().strip())
+        except (OSError, ValueError):
+            continue
+        return microwatts / 1_000_000.0
+    return None
