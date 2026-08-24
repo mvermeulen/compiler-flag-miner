@@ -711,8 +711,22 @@ Full branch/PR discipline, same shape as wspy's:
   skipping its own Phase 3 screening trial, which is exactly what a re-mining run is for verifying.
   Implemented at the mocked-backend tier so far (`tests/test_agents_knowledge_agent.py`,
   `tests/test_orchestrator.py`'s split/confirm-known cases, `tests/test_cli.py`'s wiring cases,
-  including a real pre-populated `cfm.db` fixture, not just fakes) — real end-to-end confirmation is
-  that pending `782.lbm_r` run.
+  including a real pre-populated `cfm.db` fixture, not just fakes).
+  **Resolved 2026-08-24 (same day category, real confirmation): a real, uncapped `cfm mine 782.lbm_r` run
+  proved the mechanism end to end — and it's genuinely more than "replay the last result."**
+  `-march=native` was fast-tracked straight to Phase 4 on `706.stockfish_r`'s real +48.75% prior — the
+  direct proof is mechanical, not just log text: trials 207-209 (`phase="confirmation"`) have no
+  preceding `phase="screening"` trial anywhere in the experiment, unlike every normally-screened
+  candidate. It was then **correctly rejected** (+1.79%, positive but inside this benchmark's own CI) —
+  a real, honest finding: stockfish's NNUE evaluation is extraordinarily AVX-512-dependent (confirmed
+  from its own compiled binary), `782.lbm_r`'s lattice-Boltzmann kernel far less so. The knowledge
+  table's own running mean for `-march=native` updated from `+48.82%` to `+25.31%` (Welford update
+  folding in the real `+1.79%`, `n_accepted` stays `1` of now `2` trials) — a materially more honest
+  prior for the *next* memory-bound benchmark than either single run alone would have given. The
+  microarch multiplier's own two candidates (`-march=znver5`/`-mtune=znver5`) ran for real in the same
+  experiment (the guard didn't fire, since nothing won ahead of them) and landed at consistent,
+  corroborating rejections via a completely independent code path. See
+  `doc/mining_results.782.lbm_r.2026-08-24.md` for the full write-up.
 
 ## Build & test
 

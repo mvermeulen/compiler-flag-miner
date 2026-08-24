@@ -910,9 +910,14 @@ compiler-flag-miner/
   "external data is a hypothesis aid, never a substitute measurement," the same posture already applied
   to the reference-matrix corpus). Verified against the mocked-backend tier
   (`tests/test_agents_knowledge_agent.py`, `tests/test_orchestrator.py`'s split/confirm-known cases,
-  `tests/test_cli.py`'s wiring cases); real end-to-end confirmation is a re-mined `782.lbm_r` run (both
-  it and `706.stockfish_r` are already real `memory-bound`-cluster benchmarks with real knowledge rows
-  from each other, so a fresh `782.lbm_r` run should fast-track `-march=native` directly).
+  `tests/test_cli.py`'s wiring cases), then confirmed for real end to end (2026-08-24): a re-mined
+  `782.lbm_r` run fast-tracked `-march=native` straight to Phase 4 on `706.stockfish_r`'s real +48.75%
+  prior (mechanically proven, not just logged -- its trials have no preceding screening trial, unlike
+  every normally-screened candidate), then correctly *rejected* it (+1.79%, inside this benchmark's own
+  CI) -- a real, honest result showing the mechanism promotes what's worth trying first without assuming
+  a prior's own magnitude transfers unchanged. The `knowledge` table's own running mean for
+  `-march=native` updated from `+48.82%` to `+25.31%` accordingly. See
+  `doc/mining_results.782.lbm_r.2026-08-24.md` for the full write-up.
 - **M5 — expand the modularity seams** (§12): a second compiler or workload backend, proving the
   interfaces actually held.
 - **M6 — uniform base-tuning search** (deferred per §15's peak-only decision): once enough peak-mining
