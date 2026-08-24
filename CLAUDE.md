@@ -2,21 +2,27 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working in this repository.
 
-**Status: M0/M1's pipeline mechanics are real and working, and this project has its first genuine
-accepted win.** `doc/mining_results.782.lbm_r.2026-08-22.md` was the first genuinely trustworthy `cfm
-mine` result (a focused, budget-capped run, zero acceptances — a correct reject, not a bug).
-`doc/mining_results.714.cpython_r.2026-08-23.md` is the first *uncapped* corrected run, and the first to
-land a real accept: `-flto` (+8.00%) then real two-pass PGO (+31.16% more) for **+41.65% overall vs.
-plain `-O3`**, Phase 6's `run_pgo_multiplier()` exercised for real for the first time outside mocks (see
-the Non-obvious traps log's 2026-08-23 entry for the full story, including a benign `-flto` audit
-false-negative found and fixed along the way). Both runs happened after both real bugs below (the
-basepeak config-scoping bug and the isolated-candidate-flags bug) were fixed. Every prior
-"verified"/"real run" result before 2026-08-21 is still retracted (see both entries in the Non-obvious
-traps log below for the full stories) — these two runs are the fresh corrected re-runs that retraction
-was pending on, verified end-to-end via real `cfm mine` invocations, not isolated ad hoc builds. Still
-open: a benchmark whose `resource_dominance` isn't memory-bound *or* frontend-bound, for real coverage
-of the compute-bound/backend-bound flag categories neither run has touched yet. See `CLAUDE.md`'s
-Non-obvious traps log
+**Status: M0/M1's pipeline mechanics are real and working, M4's cross-benchmark knowledge transfer is
+real-verified, and four real benchmarks have now been mined across three of the four `resource_dominance`
+clusters.** `doc/mining_results.782.lbm_r.2026-08-22.md` was the first genuinely trustworthy `cfm mine`
+result (a focused, budget-capped run, zero acceptances — a correct reject, not a bug).
+`doc/mining_results.714.cpython_r.2026-08-23.md` was the first *uncapped* corrected run and the first
+real accept: `-flto` then real two-pass PGO for **+41.65% overall vs. plain `-O3`**, Phase 6's
+`run_pgo_multiplier()` exercised for real for the first time outside mocks.
+`doc/mining_results.706.stockfish_r.2026-08-23.md` landed a second real accept, `-march=native` at
++48.75% (confirmed down to the actual AVX-512 feature set enabled), and both real-verified Phase 6
+multipliers. `doc/mining_results.782.lbm_r.2026-08-24.md` re-mined lbm to confirm M4 end to end — a real
+prior correctly fast-tracked `-march=native` past screening, then correctly rejected it on its own
+merits, a genuinely informative negative result. `doc/mining_results.750.sealcrypto_r.2026-08-24.md` is
+the first real **compute-bound** benchmark mined — a third real `-march=native` win (+14.17%), plus an
+honestly-documented screening-vs-settling-baseline ambiguity (thermal throttling directly ruled out as
+the cause with real data). All five runs happened after both real bugs below (the basepeak
+config-scoping bug and the isolated-candidate-flags bug) were fixed. Every prior "verified"/"real run"
+result before 2026-08-21 is still retracted (see both entries in the Non-obvious traps log below for the
+full stories) — these are the fresh corrected re-runs that retraction was pending on, verified
+end-to-end via real `cfm mine` invocations, not isolated ad hoc builds. Still open: a genuinely
+**backend-bound** benchmark — memory-bound, frontend-bound, and compute-bound are all covered by at
+least one real run now, backend-bound never has been. See `CLAUDE.md`'s Non-obvious traps log
 ("Resolved 2026-08-21: `generate_config()`'s per-trial `basepeak = no` override was silently ignored
 by SPEC since this project's very first commit") for the full basepeak story: every real trial run
 before that fix — M0's own original verification, and all four `doc/mining_results.*.md` write-ups
@@ -727,6 +733,34 @@ Full branch/PR discipline, same shape as wspy's:
   experiment (the guard didn't fire, since nothing won ahead of them) and landed at consistent,
   corroborating rejections via a completely independent code path. See
   `doc/mining_results.782.lbm_r.2026-08-24.md` for the full write-up.
+- **2026-08-24: first real compute-bound benchmark mined (`750.sealcrypto_r`) — a third real
+  `-march=native` win (+14.17%), plus a real, honestly-documented screening-vs-settling-baseline
+  ambiguity, with thermal throttling directly ruled out as the cause.** Picked deliberately: of 17 real
+  benchmarks checked against the external reference-matrix corpus, `750.sealcrypto_r` (SEAL homomorphic
+  encryption) was the only one whose real characterized shape actually came back `compute-bound` —
+  every prior real run was memory-bound or frontend-bound, leaving the catalog's compute-bound-targeted
+  flags (`-Ofast`, `-ffast-math`, `-funroll-loops`) completely untested against real signal until this
+  run. `-march=native` accepted again (+14.17%, joining real wins on `706.stockfish_r` and a real reject
+  on `782.lbm_r` — the same flag now has real evidence across two clusters). But the three flags this
+  run existed to finally test were all pruned at Phase 3 screening, alongside both `-mprefer-vector-
+  width` choices, landing in a suspiciously tight ~50.57-50.78 band — worth checking directly rather
+  than trusting, given this project's history. Root-caused as far as it goes: baseline's own 3 reps were
+  still visibly settling downward (56.18→54.80→52.09) when screening started immediately after, and
+  Phase 3 deliberately has no CI at all, comparing a single cheap trial against baseline's raw *mean*
+  (pulled up by the two earlier, higher reps) rather than wherever the benchmark's true steady-state
+  ratio actually was by the time screening ran — `-march=native`'s own screening trial, run right in the
+  middle of the same sequence, jumped to 62.14, proving a real large effect isn't swamped by this, but a
+  *small* real effect is exactly what a threshold-against-a-still-settling-mean can't cleanly separate
+  from noise. **Thermal throttling directly ruled out with real data, not assumed absent**: lining up
+  each trial's own recorded `cpu_temp_c` against its ratio shows temperature staying in a narrow
+  90.9-93.9°C band with no correlation to the pattern — trials 221→222→223 sit at 91.5°C→92.0°C→92.2°C
+  (flat, if anything rising) while their ratios go 50.65→62.14→50.60, a 23% swing fully explained by
+  which flag compiled in, not temperature; the `-march=native` confirmation reps show the same
+  disconnect in reverse (temp drops 93.4°C→91.6°C while ratio stays flat at ~62.0). A cooldown pause
+  between trials would not be expected to help — there's no thermal signal to wait out here; the real
+  cause (SPECrate per-copy startup variance, cache/TLB warm-up state, or something else not currently
+  instrumented) remains open. Left deliberately unresolved this run rather than spending another
+  ~20-30min/flag on an ad hoc re-check — see `doc/mining_results.750.sealcrypto_r.2026-08-24.md`.
 
 ## Build & test
 
