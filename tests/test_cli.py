@@ -23,6 +23,7 @@ def _fake_baseline(exp_id=1):
     return BaselineResult(
         experiment_id=exp_id, flags=["-O3"], ratios=[100.0, 100.0, 100.0],
         ci=confidence_interval([100.0, 100.0, 100.0]), resource_dominance="memory-bound",
+        resource_dominance_pct=80.0,
         trial_ids=[1, 2, 3],
     )
 
@@ -85,6 +86,7 @@ def test_mine_reports_a_winning_flagset(tmp_path, monkeypatch, capsys):
     assert summary["winning_ratio_mean"] == pytest.approx(110.0)
     assert summary["gain_vs_baseline_pct"] == pytest.approx(10.0)
     assert summary["budget_exhausted"] is False
+    assert summary["baseline_resource_dominance_pct"] == pytest.approx(80.0)
 
 
 def test_mine_max_trials_truncates_candidate_list_and_flags_budget_exhausted(tmp_path, monkeypatch):

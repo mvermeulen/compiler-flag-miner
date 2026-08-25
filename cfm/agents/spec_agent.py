@@ -281,6 +281,13 @@ def run_one_trial(
                 "build_status": build_status, "wspy_run_ref": signature.wspy_run_ref,
                 "wspy_validated": signature.validated, "spec_validated": run_result.validated,
                 "resource_dominance": signature.resource_dominance,
+                # resource_dominance_pct: how dominant that shape actually is (0-100) --
+                # wspy-archetype already computes this (RunSignature has carried it since
+                # M1), it just never reached this dict before. Threaded through so
+                # BaselineResult can carry it too -- M2's own signature-aware ranking
+                # (cfm/compilers/gcc.py) uses it as the "narrow margin" signal doc/DESIGN.md
+                # sec. 4.3's table calls for on the retiring-high-narrow-margin row.
+                "resource_dominance_pct": signature.resource_dominance_pct,
                 "vectorization_density": signature.vectorization_density,
                 "allocation_pressure": signature.allocation_pressure,
                 "ratio": run_result.ratio,

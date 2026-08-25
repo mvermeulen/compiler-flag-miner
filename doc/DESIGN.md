@@ -205,6 +205,13 @@ cycle — validated ahead of time, not discovered by trial-and-error:
 | `compute-bound`/`retiring` high, narrow margin, few misses anywhere  | Diminishing-returns signal — low priority for aggressive flags; `-march=<detected-uarch>` (from wspy's own `cpu_info.c` vendor/model detection) for the last few percent, then stop |
 | Any signature, once base flags plateau                              | `-flto` (whole-program IPA) and PGO as compounding multipliers, tried *after* single-flag search converges (§6.3) — both are bigger, slower trials (LTO changes build time materially; PGO needs a training run) so they're deliberately late-stage, not part of the cheap screening pass |
 
+This table's "candidate flags to try first" wording is now literal, not just descriptive prose: M2
+(§14) implements it as a real ranking pass in `compilers/gcc.py`, ordering Phase 2's returned candidate
+list by how many of a candidate's `topdown_signals` genuinely match the baseline's own characterized
+shape — the `compute-bound`/`retiring-high-narrow-margin` row specifically (`-march=<uarch>` outranking
+the other compute-bound-tagged flags when the margin really is narrow) was the row that motivated
+threading `resource_dominance_pct` through as a real "margin" signal, since it had none before M2.
+
 - **Validation**: before any flag reaches the SPEC Runner agent, this agent checks it against the
   catalog (spelling, GCC-version applicability, conflicts) and against the *detected* GCC version/target
   (`gcc -v`, `wspy`'s own `cpu_info` vendor/model detection for `-march=`/`-mtune=` choices) — this is
@@ -731,9 +738,36 @@ compiler-flag-miner/
   detailed in CLAUDE.md's Non-obvious traps log: a host-exclusivity lock (`cfm/lock.py`, after two
   concurrent `cfm mine` invocations crashed the host once) and a fix so a crashed/failed run's
   experiment row no longer gets stuck at `status='running'` forever.
-- **M2 — signature-aware candidate filtering.** Wire in `wspy-archetype`'s `resource_dominance`/
-  `memory_attribution` to drive Compiler Knowledge agent candidate selection (the table in §4.3),
-  instead of trying the whole catalog uniformly.
+- **M2 — signature-aware candidate *ranking*.** Implemented 2026-08-26. M1 returned the whole
+  applicable-language catalog uniformly ("static catalog priors only"); M2.5 item 3 later added
+  *exclude* filtering (`_filter_implausible_candidates()`) but explicitly left *ranking* -- "of what's
+  left, try the most relevant first" -- to this milestone, per `compilers/base.py`'s own M1-vs-M2 doc
+  boundary. `cfm/compilers/gcc.py`'s `candidate_flags_for_signature()` now genuinely reads its
+  `signature` argument (duck-typed -- accepts anything exposing `.resource_dominance`/
+  `.resource_dominance_pct`/`.vectorization_density`, the same precedent as Phase 6's
+  `CombinationResult`/`MultiplierResult` chaining; `orchestrator.py`'s `generate_candidates()` passes
+  `baseline` itself now, not just `baseline.resource_dominance`) and sorts candidates by a rank score --
+  the *count* of a candidate's `topdown_signals` that genuinely, confidently match that shape, not just
+  whether *any* do. Counting (not just presence) is what makes §4.3's `retiring-high-narrow-margin` row
+  concrete for the first time: `-march=<uarch>` carries both `compute-bound` and
+  `retiring-high-narrow-margin`, so it out-ranks the *other* compute-bound-tagged-only flags
+  (`-Ofast`/`-ffast-math`/`-funroll-loops`) exactly when the baseline's own `resource_dominance_pct`
+  (0-100, wspy-archetype's own scorecard field -- threaded through `BaselineResult` for the first time
+  by this same change) reads a "narrow margin" (below `_NARROW_MARGIN_MAX_PCT = 60.0`, a first-cut,
+  undocumented-elsewhere threshold, same posture as `MIN_PRACTICAL_SIGNIFICANCE_PCT` -- not yet
+  calibrated against real reference-matrix spread data) -- matching the table's own "diminishing
+  returns for aggressive flags; `-march` for the last few percent, then stop" guidance as an actual
+  reordering, not just prose. Ranking never excludes anything (that's still
+  `_filter_implausible_candidates()`'s separate job) and a candidate with no matching evidence, or no
+  `topdown_signals` at all, ranks neutrally (0) rather than being penalized -- absence of information
+  never counts against a candidate anywhere in this project, and ranking keeps that posture. Verified at
+  the mocked-tier only so far (`tests/test_compilers_gcc.py`'s dedicated ranking-fixture tests covering
+  every signal type and both narrow/wide-margin cases, plus `tests/test_orchestrator.py`'s wiring test
+  proving `generate_candidates()` really does pass the whole `baseline` through, not just the bare
+  `resource_dominance` string) -- a real mining run showing the reordering in practice (e.g. re-mining
+  `750.sealcrypto_r`, the one real compute-bound benchmark on record, to see whether `-march=native`
+  now visibly outranks `-Ofast`/`-ffast-math`/`-funroll-loops` in Phase 2's candidate order) is the
+  natural next real-verification step, not yet done as part of this change.
 - **M2.5 — generalized signature axes, external reference-matrix corpus, adaptive trial cost.**
   Motivated directly by two things confirmed live during M1's real end-to-end verification run
   (2026-08-09): the existing signature vocabulary is too coarse for some catalog entries (§4.3's new

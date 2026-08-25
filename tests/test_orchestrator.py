@@ -133,6 +133,19 @@ def _no_reference_matrix(cfg, benchmark):
     return None
 
 
+def _fake_reference_matrix_shape(cfg, benchmark):
+    """The other real _characterize_baseline() path -- a found reference-matrix
+    entry, no local trial needed at all. Same shape reference_matrix.fetch_shape()
+    itself returns (cfm/reference_matrix.py's own docstring)."""
+    return {
+        "resource_dominance": "frontend-bound",
+        "resource_dominance_pct": 71.0,
+        "vectorization_density": "low",
+        "allocation_pressure": "moderate",
+        "source_machine": "fake-ref-host",
+    }
+
+
 # -- run_baseline -------------------------------------------------------------
 
 def test_run_baseline_computes_ci_over_repeated_trials(tmp_path):
@@ -160,6 +173,7 @@ def test_run_baseline_computes_ci_over_repeated_trials(tmp_path):
     assert result.ci.mean == pytest.approx(100.0)
     assert result.ci.verdict == "PASS"
     assert result.resource_dominance == "memory-bound"
+    assert result.resource_dominance_pct == pytest.approx(80.0)  # ScriptedBackends.characterize()'s fixed value
     assert result.vectorization_density == "low"
     assert result.allocation_pressure == "moderate"
     assert len(result.trial_ids) == 6  # 1 characterization + 2 warm-up + 3 calibration
@@ -174,6 +188,31 @@ def test_run_baseline_computes_ci_over_repeated_trials(tmp_path):
         assert len(trials) == 6  # 1 characterization + 2 warm-up + 3 calibration
     finally:
         conn.close()
+
+
+def test_run_baseline_threads_resource_dominance_pct_through_the_reference_matrix_path(tmp_path):
+    # The *other* real _characterize_baseline() path -- a found reference-matrix
+    # entry, no local characterization trial at all -- had no orchestrator-level
+    # test coverage before this (only the local-trial fallback path, exercised by
+    # every other run_baseline() test via _no_reference_matrix, did). Confirms
+    # resource_dominance_pct (M2's own "margin" signal) survives this path too,
+    # not just the local-trial one.
+    cfg = _cfg(tmp_path)
+    backends = ScriptedBackends(ratio_sequences={("-O3",): [777.0, 777.0, 100.0, 102.0, 98.0]})
+
+    result = run_baseline(
+        cfg, benchmark="fake_r", base_flags=["-O3"],
+        workload=backends, instrumentation=backends,
+        reference_matrix_fetch=_fake_reference_matrix_shape,
+    )
+
+    assert result.resource_dominance == "frontend-bound"
+    assert result.resource_dominance_pct == pytest.approx(71.0)
+    assert result.vectorization_density == "low"
+    assert result.allocation_pressure == "moderate"
+    assert result.characterization_source == "reference-matrix:fake-ref-host"
+    assert result.ratios == [100.0, 102.0, 98.0]
+    assert len(result.trial_ids) == 5  # 0 characterization (found, no local trial) + 2 warm-up + 3 calibration
 
 
 def test_run_baseline_records_a_warmup_hypothesis_per_warmup_rep(tmp_path):
@@ -422,6 +461,45 @@ def test_generate_candidates_filters_by_language_regardless_of_shape(tmp_path):
 
     assert {c.flag for c in candidates_a} == {"-c-flag"}
     assert {c.flag for c in candidates_a} == {c.flag for c in candidates_b}
+
+
+def test_generate_candidates_passes_the_whole_baseline_through_for_m2_ranking(tmp_path):
+    # Protects the orchestrator-level wiring specifically: generate_candidates()
+    # must pass `baseline` itself (not just baseline.resource_dominance) as
+    # candidate_flags_for_signature()'s signature argument, since M2's ranking
+    # (cfm/compilers/gcc.py's own unit tests cover the ranking logic itself) needs
+    # resource_dominance_pct/vectorization_density too, not just resource_dominance.
+    cfg = _cfg(tmp_path)
+    _write_object_pm(Path(cfg.spec_dir), "fake_r", "C")
+
+    catalog_path = tmp_path / "catalog.json"
+    catalog_path.write_text(json.dumps({
+        "schema_version": 1, "source": "test", "note": "test",
+        "flags": [
+            # -no-signal-flag deliberately listed *first* -- if generate_candidates()
+            # regressed to passing baseline.resource_dominance alone (a bare string
+            # with no vectorization_density attribute), -vector-flag would never
+            # out-rank it and catalog order (this order) would show through
+            # unchanged. Only a real, correctly-wired vectorization_density read
+            # promotes -vector-flag ahead of it.
+            {"flag": "-no-signal-flag", "languages": ["c"], "category": "misc", "risk": "safe",
+             "requires": [], "conflicts": [], "notes": "", "topdown_signals": []},
+            {"flag": "-vector-flag", "languages": ["c"], "category": "vectorization", "risk": "safe",
+             "requires": [], "conflicts": [], "notes": "", "topdown_signals": ["vectorization-density-high"]},
+        ],
+    }))
+    compiler = GccCompiler(catalog_path=catalog_path)
+
+    baseline = _baseline(resource_dominance="memory-bound", vectorization_density="high")
+    candidates = generate_candidates(cfg, benchmark="fake_r", baseline=baseline, compiler=compiler)
+
+    assert [c.flag for c in candidates] == ["-vector-flag", "-no-signal-flag"]
+    # And the negative check: a baseline reporting vectorization_density="low"
+    # must NOT rank -vector-flag first (it's excluded by the M2.5 filter, not
+    # merely un-ranked -- confirming the signature really is read, not ignored).
+    low_density_baseline = _baseline(resource_dominance="memory-bound", vectorization_density="low")
+    filtered = generate_candidates(cfg, benchmark="fake_r", baseline=low_density_baseline, compiler=compiler)
+    assert "-vector-flag" not in {c.flag for c in filtered}
 
 
 # -- _filter_implausible_candidates (M2.5 item 3) --------------------------------

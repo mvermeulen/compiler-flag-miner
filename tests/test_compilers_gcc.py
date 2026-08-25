@@ -75,8 +75,12 @@ def test_candidate_flags_excludes_pgo_category(compiler):
     assert "-fprofile-use" not in candidates
 
 
-def test_candidate_flags_ignores_signature_argument(compiler):
-    # M1 scope: signature is accepted but has zero effect on the result.
+def test_candidate_flags_preserves_catalog_order_when_no_candidate_carries_signals(compiler):
+    # None of fixture_catalog's entries carry topdown_signals, so every candidate
+    # ranks neutrally (0) regardless of signature -- a stable sort on an all-tied
+    # key preserves catalog order. Real signature-driven reordering (M2) is tested
+    # separately below, against a fixture catalog whose entries actually carry
+    # topdown_signals to rank on.
     with_none = compiler.candidate_flags_for_signature(None, ["fortran"])
     with_dummy = compiler.candidate_flags_for_signature(object(), ["fortran"])
     assert {c.flag for c in with_none} == {c.flag for c in with_dummy} == {"-shared-flag", "-fortran-only-flag"}
@@ -158,6 +162,122 @@ def test_real_seed_catalog_loads_and_is_internally_consistent():
     # A known real conflicting pair.
     result = compiler.validate_flagset(["-mprefer-vector-width=256", "-mprefer-vector-width=512"])
     assert result.ok is False
+
+
+# -- M2: signature-aware ranking ------------------------------------------------
+#
+# doc/DESIGN.md sec. 4.3's signature-to-candidate table, made concrete: a
+# candidate whose topdown_signals genuinely match the baseline's characterized
+# shape should be returned before one that merely wasn't excluded. ``signature``
+# is duck-typed (compilers/base.py's interface docstring) -- this stand-in only
+# needs to expose the three attributes _candidate_rank() actually reads.
+
+class _FakeSignature:
+    def __init__(self, resource_dominance=None, resource_dominance_pct=None, vectorization_density=None):
+        self.resource_dominance = resource_dominance
+        self.resource_dominance_pct = resource_dominance_pct
+        self.vectorization_density = vectorization_density
+
+
+@pytest.fixture
+def ranking_catalog(tmp_path):
+    path = tmp_path / "ranking_catalog.json"
+    _write_catalog(path, [
+        {
+            "flag": "-frontend-flag", "languages": ["c"], "category": "codegen-layout",
+            "risk": "safe", "requires": [], "conflicts": [], "notes": "",
+            "topdown_signals": ["frontend-bound"],
+        },
+        {
+            "flag": "-memory-flag", "languages": ["c"], "category": "memory",
+            "risk": "safe", "requires": [], "conflicts": [], "notes": "",
+            "topdown_signals": ["memory-bound-corroborated"],
+        },
+        {
+            "flag": "-vector-flag", "languages": ["c"], "category": "vectorization",
+            "risk": "safe", "requires": [], "conflicts": [], "notes": "",
+            "topdown_signals": ["vectorization-density-high"],
+        },
+        {
+            "flag": "-ofast-like-flag", "languages": ["c"], "category": "fp-semantics",
+            "risk": "changes_fp_semantics", "requires": [], "conflicts": [], "notes": "",
+            "topdown_signals": ["compute-bound"],
+        },
+        {
+            "flag": "-march=<detected-uarch>", "languages": ["c"], "category": "target-tuning",
+            "risk": "needs_validation", "requires": [], "conflicts": [], "notes": "",
+            "topdown_signals": ["compute-bound", "retiring-high-narrow-margin"],
+        },
+        {
+            "flag": "-no-signal-flag", "languages": ["c"], "category": "misc",
+            "risk": "safe", "requires": [], "conflicts": [], "notes": "", "topdown_signals": [],
+        },
+    ])
+    return path
+
+
+@pytest.fixture
+def ranking_compiler(ranking_catalog):
+    return GccCompiler(catalog_path=ranking_catalog)
+
+
+def test_ranking_puts_matching_frontend_bound_flag_first(ranking_compiler):
+    signature = _FakeSignature(resource_dominance="frontend-bound")
+    flags = [c.flag for c in ranking_compiler.candidate_flags_for_signature(signature, ["c"])]
+    assert flags[0] == "-frontend-flag"
+    # Everything else ties at rank 0 (no matching signal) -- catalog order preserved.
+    assert flags[1:] == ["-memory-flag", "-vector-flag", "-ofast-like-flag", "-march=native", "-no-signal-flag"]
+
+
+def test_ranking_puts_matching_vectorization_density_flag_first(ranking_compiler):
+    signature = _FakeSignature(resource_dominance="memory-bound", vectorization_density="high")
+    flags = [c.flag for c in ranking_compiler.candidate_flags_for_signature(signature, ["c"])]
+    # Both -memory-flag (resource_dominance match) and -vector-flag (vectorization
+    # match) rank 1 -- catalog order (memory before vector) breaks the tie.
+    assert flags[:2] == ["-memory-flag", "-vector-flag"]
+
+
+def test_ranking_prioritizes_march_over_other_aggressive_flags_on_a_narrow_margin(ranking_compiler):
+    # The concrete case doc/DESIGN.md sec. 4.3's own table describes: compute-
+    # bound, narrow margin (retiring high, no single bottleneck dominates
+    # overwhelmingly) -- -march=<uarch> (2 matching signals) should outrank
+    # -ofast-like-flag (1 matching signal, compute-bound only).
+    signature = _FakeSignature(resource_dominance="compute-bound", resource_dominance_pct=45.0)
+    flags = [c.flag for c in ranking_compiler.candidate_flags_for_signature(signature, ["c"])]
+    assert flags[0] == "-march=native"
+    assert flags[1] == "-ofast-like-flag"
+
+
+def test_ranking_does_not_boost_march_when_margin_is_wide(ranking_compiler):
+    # A confidently, dominantly compute-bound shape (pct well above the narrow-
+    # margin threshold) -- -march=<uarch> and -ofast-like-flag both carry only
+    # one matching signal each (compute-bound); retiring-high-narrow-margin
+    # doesn't apply, so they tie and catalog order (-ofast-like-flag before
+    # -march=<uarch> in this fixture) decides, not a forced march-first boost --
+    # the opposite order from the narrow-margin case above, confirming the
+    # boost really is margin-conditional, not unconditional.
+    signature = _FakeSignature(resource_dominance="compute-bound", resource_dominance_pct=95.0)
+    flags = [c.flag for c in ranking_compiler.candidate_flags_for_signature(signature, ["c"])]
+    assert flags.index("-ofast-like-flag") < flags.index("-march=native")
+
+
+def test_ranking_treats_unknown_baseline_as_neutral_preserving_catalog_order(ranking_compiler):
+    flags = [c.flag for c in ranking_compiler.candidate_flags_for_signature(None, ["c"])]
+    assert flags == [
+        "-frontend-flag", "-memory-flag", "-vector-flag",
+        "-ofast-like-flag", "-march=native", "-no-signal-flag",
+    ]
+
+
+def test_ranking_treats_narrow_margin_signal_as_neutral_when_pct_unknown(ranking_compiler):
+    # A known compute-bound read with no pct at all (e.g. this benchmark's shape
+    # came from a reference-matrix corpus entry or local trial that didn't supply
+    # one) -- retiring-high-narrow-margin adds nothing (neither a match nor a
+    # penalty), so -march=<uarch> ties with -ofast-like-flag on the plain
+    # compute-bound match alone, same as the wide-margin case above.
+    signature = _FakeSignature(resource_dominance="compute-bound", resource_dominance_pct=None)
+    flags = [c.flag for c in ranking_compiler.candidate_flags_for_signature(signature, ["c"])]
+    assert flags.index("-ofast-like-flag") < flags.index("-march=native")  # catalog order, not a boost
 
 
 # -- benchmark_languages() ---------------------------------------------------------

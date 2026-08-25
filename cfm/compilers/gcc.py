@@ -1,10 +1,11 @@
 """GCC/GFortran Compiler Knowledge agent -- doc/DESIGN.md sec. 4.3.
 
-Loads config/gcc_flag_catalog.seed.json as its flag catalog. M1 scope: candidates
-are the whole applicable-language catalog, uniformly (no resource_dominance-based
-filtering yet -- that's M2, see compilers/base.py's module docstring), minus any
-entry whose flag is still an unresolved template placeholder rather than a
-concrete flag (see ``_resolve_flag_or_none()``).
+Loads config/gcc_flag_catalog.seed.json as its flag catalog: every applicable-
+language entry, minus any whose flag is still an unresolved template placeholder
+rather than a concrete flag (see ``_resolve_flag_or_none()``), ranked
+highest-priority-first against the caller's baseline shape (M2, see
+``_candidate_rank()`` and ``candidate_flags_for_signature()`` below;
+``compilers/base.py``'s module docstring has the M1-vs-M2 history).
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..util import catalog_flag_base, normalize_flag_base
-from .base import CompilerBackend, FlagCandidate, ValidationResult
+from .base import CompilerBackend, FlagCandidate, RESOURCE_DOMINANCE_SIGNALS, ValidationResult
 
 # config/gcc_flag_catalog.seed.json's default location, resolved relative to this
 # package's own location (matching db.py's schema/cfm_schema.sql trick and
@@ -54,6 +55,77 @@ def _resolve_flag_or_none(raw_flag: str) -> Optional[str]:
         )
         return None
     return flag
+
+
+# -- M2: signature-aware ranking (doc/DESIGN.md sec. 4.3/14) -------------------
+#
+# doc/DESIGN.md sec. 4.3's signature-to-candidate table is the spec: a candidate
+# whose topdown_signals genuinely match the baseline's characterized shape should
+# be tried before one that merely wasn't excluded (orchestrator.py's own
+# _filter_implausible_candidates() already handles "exclude the confidently
+# implausible" -- this is the separate, still-real "of what's left, try the most
+# relevant first" half M1/M2.5 explicitly deferred).
+#
+# resource_dominance_pct (0-100, wspy-archetype's own scorecard field, threaded
+# through BaselineResult since this same change) is the "margin" signal
+# doc/DESIGN.md sec. 4.3's "retiring-high-narrow-margin" row needs and
+# orchestrator.py's own _signal_is_implausible() explicitly said it didn't have.
+# A first-cut, undocumented-elsewhere threshold, same posture as
+# orchestrator.py's MIN_PRACTICAL_SIGNIFICANCE_PCT: not yet calibrated against
+# real reference-matrix spread data, open to revision once that's available.
+# Below this, no single topdown category dominates overwhelmingly -- "narrow
+# margin," per the catalog table's own wording -- above it, the shape is
+# confidently, dominantly one thing, and the "diminishing returns for aggressive
+# flags, -march for the last few percent" guidance doesn't apply the same way.
+_NARROW_MARGIN_MAX_PCT = 60.0
+
+
+def _signal_matches(signal: str, signature) -> bool:
+    """Does ``signal`` (one ``FlagCandidate.topdown_signals`` entry) genuinely,
+    confidently match ``signature``'s characterized shape? Duck-typed --
+    ``signature`` need only expose ``.resource_dominance``/
+    ``.resource_dominance_pct``/``.vectorization_density`` (``None`` for an
+    unknown/absent baseline is handled the same as everywhere else in this
+    project: it never counts as a match, but it's not a penalty either --
+    ``_candidate_rank()`` below just treats a non-match as neutral, same as no
+    signal at all).
+    """
+    resource_dominance = getattr(signature, "resource_dominance", None)
+    if signal == "vectorization-density-high":
+        return getattr(signature, "vectorization_density", None) == "high"
+    if signal == "memory-bound-corroborated":
+        return resource_dominance == "memory-bound"
+    if signal == "retiring-high-narrow-margin":
+        # A genuine match needs a *known* pct, not just a compute-bound read --
+        # unlike every other signal here, "narrow margin" is a specific extra
+        # claim on top of "compute-bound," not a fallback for missing data (an
+        # unknown pct means this signal simply adds nothing, it doesn't count
+        # against the candidate either -- the plain "compute-bound" signal most
+        # of these candidates also carry still applies on its own).
+        pct = getattr(signature, "resource_dominance_pct", None)
+        return resource_dominance == "compute-bound" and pct is not None and pct <= _NARROW_MARGIN_MAX_PCT
+    if signal in RESOURCE_DOMINANCE_SIGNALS:
+        return resource_dominance == signal
+    return False
+
+
+def _candidate_rank(candidate: FlagCandidate, signature) -> int:
+    """Higher ranks first. The count (not just presence) of a candidate's
+    ``topdown_signals`` that genuinely match ``signature`` -- not just whether
+    *any* do -- specifically so ``-march=<uarch>`` (tagged both `compute-bound`
+    and `retiring-high-narrow-margin`) outranks the other compute-bound-tagged-
+    only flags (`-Ofast`/`-ffast-math`/`-funroll-loops`) exactly when the margin
+    really is narrow -- matching doc/DESIGN.md sec. 4.3's own "low priority for
+    aggressive flags; -march ... for the last few percent" guidance concretely,
+    not just as prose. A candidate with no ``topdown_signals`` at all (e.g.
+    gfortran-specific flags with no topdown story) ranks neutrally, same as one
+    whose signals don't match anything -- absence of matching evidence is never a
+    penalty, only ever the absence of a boost, matching this project's
+    established "unknown/absent never counts against" posture throughout.
+    """
+    if not candidate.topdown_signals:
+        return 0
+    return sum(1 for signal in candidate.topdown_signals if _signal_matches(signal, signature))
 
 
 def benchmark_languages(spec_dir, bench: str) -> list[str]:
@@ -98,10 +170,6 @@ class GccCompiler(CompilerBackend):
     def candidate_flags_for_signature(
         self, signature: Optional[object], languages: list[str],
     ) -> list[FlagCandidate]:
-        # M1 ignores `signature` entirely -- see this module's docstring and
-        # compilers/base.py's interface docstring for why that's a deliberate
-        # M1-scope choice, not an oversight.
-        del signature
         wanted = set(languages)
         candidates = []
         for entry in self._flags():
@@ -131,6 +199,11 @@ class GccCompiler(CompilerBackend):
                 notes=entry.get("notes", ""),
                 topdown_signals=entry.get("topdown_signals", []),
             ))
+        # M2: highest-priority-first, not raw catalog order -- stable sort, so
+        # candidates that tie (including every candidate when signature is None,
+        # or when nothing about it matches anything) keep the catalog's own
+        # relative order rather than being shuffled for no reason.
+        candidates.sort(key=lambda c: _candidate_rank(c, signature), reverse=True)
         return candidates
 
     def validate_flagset(
