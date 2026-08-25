@@ -3,7 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working in this repository.
 
 **Status: M0/M1's pipeline mechanics are real and working, M4's cross-benchmark knowledge transfer is
-real-verified, and four real benchmarks have now been mined across three of the four `resource_dominance`
+real-verified, and six real benchmarks have now been mined across three of the four `resource_dominance`
 clusters.** `doc/mining_results.782.lbm_r.2026-08-22.md` was the first genuinely trustworthy `cfm mine`
 result (a focused, budget-capped run, zero acceptances — a correct reject, not a bug).
 `doc/mining_results.714.cpython_r.2026-08-23.md` was the first *uncapped* corrected run and the first
@@ -27,7 +27,13 @@ and especially a near-zero-variance PGO measurement). `doc/mining_results.727.cp
 confirms the fix (`BASELINE_WARMUP_REPETITIONS`, PR #41) for real: a re-mine of the same benchmark
 landed exactly the predicted flip — PGO now correctly **accepted, +10.79%**, this benchmark's first
 genuine win, while `-flto` still rejects but now honestly (a real, narrow CI overlap against a
-properly-calibrated baseline, not an artifact). All seven runs happened after both real bugs below (the
+properly-calibrated baseline, not an artifact). `doc/mining_results.777.zstd_r.2026-08-25.md` mined a
+sixth benchmark (first-ever real run of it) specifically to stress-test that same fix on a second,
+independent `memory-bound` benchmark — no verdict flipped this time, but a counterfactual replay against
+the old, unfixed baseline math showed every single candidate's *reported sign* would have come out
+backwards (every flag reading as a regression instead of the true mostly-flat/slightly-positive picture)
+— the same underlying bug's other failure mode, now confirmed on a second benchmark rather than just the
+one that originally exposed it. All eight runs happened after both real bugs below (the
 basepeak config-scoping bug and the isolated-candidate-flags bug) were fixed. Every prior "verified"/
 "real run" result before 2026-08-21 is still retracted (see both entries in the Non-obvious traps log
 below for the full stories) — these are the fresh corrected
@@ -893,6 +899,24 @@ Full branch/PR discipline, same shape as wspy's:
   noise against the higher PGO baseline) — the first real confirmation Phase 6's multiplier-chaining
   works when PGO actually wins, not just when it's skipped or rejected. See
   `doc/mining_results.727.cppcheck_r.2026-08-25.md` for the full write-up.
+  **Stress-tested on a second, independent benchmark the same day: `777.zstd_r` (first-ever real mining
+  run of this benchmark, `memory-bound` cluster — deliberately different from `727.cppcheck_r`'s own
+  `frontend-bound` cluster on every axis).** No verdict flipped here (everything correctly rejects under
+  both old and new baseline math), but the fix still mattered, in a different way: recomputing every
+  candidate's delta against the **counterfactual old-style baseline** (all 5 reps including the two
+  now-excluded warm-up reps, mean 37.820) vs. the real fixed baseline (3 calibration reps only, mean
+  37.405) shows every single candidate's *reported sign* would have come out backwards under the old
+  code — every flag would have read as a net regression (−0.31% to −1.27%), when the true, properly-
+  baselined picture is four genuinely flat flags and two (`-march=native`, `-march=znver5`) with a real,
+  statistically-distinguishable (CI non-overlapping) but practically-insignificant +0.7-0.8% edge,
+  correctly rejected for falling short of `MIN_PRACTICAL_SIGNIFICANCE_PCT` rather than for being
+  (falsely) harmful. Where `727.cppcheck_r`'s own re-mine showed the fix rescuing a swallowed *large*
+  win (a too-wide CI), this run shows the same underlying bug's other failure mode: a still-settling
+  baseline's inflated *center* systematically biasing every delta's sign, not just its width. M4 also
+  confirmed working correctly a second time in this cluster: `-march=native` fast-tracked on its own
+  real prior (`706.stockfish_r`'s accept, `782.lbm_r`'s reject), then honestly re-evaluated and correctly
+  rejected here too (a real but too-small effect, not a rubber-stamped accept). See
+  `doc/mining_results.777.zstd_r.2026-08-25.md` for the full write-up.
 
 ## Build & test
 
