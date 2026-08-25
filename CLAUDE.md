@@ -23,10 +23,14 @@ clean, real reject. `doc/mining_results.727.cppcheck_r.2026-08-24.md` is the fir
 M4 confirmation** (`-flto` fast-tracked from `714.cpython_r`'s own prior) but, more importantly, real
 evidence that **Phase 4/5/6's own CI-overlap test has the same baseline-instability vulnerability Phase
 3 already had** — a wide, settling-driven baseline CI plausibly swallowed two genuine wins (`-flto`,
-and especially a near-zero-variance PGO measurement) — the natural next real fix, not yet done. All six
-runs happened after both real bugs below (the basepeak config-scoping bug and the isolated-candidate-
-flags bug) were fixed. Every prior "verified"/"real run" result before 2026-08-21 is still retracted (see
-both entries in the Non-obvious traps log below for the full stories) — these are the fresh corrected
+and especially a near-zero-variance PGO measurement). `doc/mining_results.727.cppcheck_r.2026-08-25.md`
+confirms the fix (`BASELINE_WARMUP_REPETITIONS`, PR #41) for real: a re-mine of the same benchmark
+landed exactly the predicted flip — PGO now correctly **accepted, +10.79%**, this benchmark's first
+genuine win, while `-flto` still rejects but now honestly (a real, narrow CI overlap against a
+properly-calibrated baseline, not an artifact). All seven runs happened after both real bugs below (the
+basepeak config-scoping bug and the isolated-candidate-flags bug) were fixed. Every prior "verified"/
+"real run" result before 2026-08-21 is still retracted (see both entries in the Non-obvious traps log
+below for the full stories) — these are the fresh corrected
 re-runs that retraction was pending on, verified end-to-end via real `cfm mine` invocations, not isolated
 ad hoc builds. Checked the *entire* real SPEC CPU2026 suite (49 benchmarks) against the reference-matrix
 corpus for a genuinely **backend-bound** benchmark — none exists anywhere in it; memory-bound,
@@ -877,8 +881,18 @@ Full branch/PR discipline, same shape as wspy's:
   duration; that stays a real, open, bigger design question. Verified at the mocked-backend tier
   (`tests/test_orchestrator.py`'s updated `run_baseline()` fixtures, now requiring 2 extra sentinel
   values to prove warm-up reps are genuinely excluded from the CI, plus a dedicated test for the
-  warm-up hypothesis row) — real end-to-end confirmation is a re-mined `727.cppcheck_r`, to see whether
-  this actually flips its own PGO/`-flto` verdict the way this run's own numbers predict.
+  warm-up hypothesis row).
+  **Confirmed for real the same day**: a fresh, uncapped re-mine of `727.cppcheck_r` itself (the exact
+  benchmark that motivated the fix) landed exactly the predicted flip. Baseline's own CI tightened from
+  `[39.94, 46.76]` to `[41.04, 43.72]`; PGO's own near-zero-variance confirm CI (`[46.09, 47.81]`) now
+  sits cleanly, unambiguously above it — **accept, +10.79%**, this benchmark's first genuine win.
+  `-flto` (+4.20% this time, up from +1.19%) still rejects — but now honestly, its own CI (`[43.51,
+  44.81]`) overlapping baseline's new, properly-calibrated upper bound by a narrow real margin, not an
+  artifact of measuring baseline too early. The microarch multiplier then correctly chained on top of
+  the PGO win (`["-O3", "-fprofile-use", "-march=znver5"]`/`"-mtune=znver5"`, both correctly rejected as
+  noise against the higher PGO baseline) — the first real confirmation Phase 6's multiplier-chaining
+  works when PGO actually wins, not just when it's skipped or rejected. See
+  `doc/mining_results.727.cppcheck_r.2026-08-25.md` for the full write-up.
 
 ## Build & test
 
