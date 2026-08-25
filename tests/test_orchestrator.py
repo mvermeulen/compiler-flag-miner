@@ -21,6 +21,7 @@ from cfm.compilers.gcc import GccCompiler
 from cfm.config import CfmConfig
 from cfm.instrumentation.base import InstrumentationBackend, RunSignature
 from cfm.orchestrator import (
+    BASELINE_WARMUP_REPETITIONS,
     MAX_PAIR_TOURNAMENT_TRIALS,
     MIN_PRACTICAL_SIGNIFICANCE_PCT,
     PGO_FLAG,
@@ -136,11 +137,14 @@ def _no_reference_matrix(cfg, benchmark):
 
 def test_run_baseline_computes_ci_over_repeated_trials(tmp_path):
     cfg = _cfg(tmp_path)
-    # First pop is the one characterization-grade (deep-cpu) trial -- a deliberately
-    # off-value (999.0) to prove it's excluded from the CI sample; the remaining
-    # three are the calibration-grade (quick) trials that actually feed the CI.
+    # First pop is the one characterization-grade (deep-cpu) trial -- a
+    # deliberately off-value (999.0) to prove it's excluded from the CI
+    # sample. Next BASELINE_WARMUP_REPETITIONS (2) pops are warm-up reps --
+    # also deliberately off-value (777.0 each) to prove they're excluded too
+    # (2026-08-24/25 finding, CLAUDE.md's traps entry). The remaining three
+    # are the real calibration-grade (quick) trials that actually feed the CI.
     backends = ScriptedBackends(
-        ratio_sequences={("-O3",): [999.0, 100.0, 102.0, 98.0]},
+        ratio_sequences={("-O3",): [999.0, 777.0, 777.0, 100.0, 102.0, 98.0]},
         vectorization_density="low", allocation_pressure="moderate",
     )
 
@@ -158,7 +162,7 @@ def test_run_baseline_computes_ci_over_repeated_trials(tmp_path):
     assert result.resource_dominance == "memory-bound"
     assert result.vectorization_density == "low"
     assert result.allocation_pressure == "moderate"
-    assert len(result.trial_ids) == 4  # 1 characterization + 3 calibration
+    assert len(result.trial_ids) == 6  # 1 characterization + 2 warm-up + 3 calibration
 
     conn = db.connect(cfg.db_path)
     try:
@@ -167,7 +171,41 @@ def test_run_baseline_computes_ci_over_repeated_trials(tmp_path):
         assert exp["baseline_run_ref"].startswith("fakehost:")
         assert exp["status"] == "running"  # set_baseline_run_ref must not finish it
         trials = db.list_trials_by_phase(conn, result.experiment_id, "confirmation")
-        assert len(trials) == 4
+        assert len(trials) == 6  # 1 characterization + 2 warm-up + 3 calibration
+    finally:
+        conn.close()
+
+
+def test_run_baseline_records_a_warmup_hypothesis_per_warmup_rep(tmp_path):
+    # Real 2026-08-24/25 finding (727.cppcheck_r, CLAUDE.md's traps entry):
+    # baseline's own reps can still be visibly settling by the time they're
+    # measured, and a still-settling CI has been shown to swallow real Phase
+    # 4+ wins. BASELINE_WARMUP_REPETITIONS real, persisted-but-excluded warm-up
+    # reps address this -- each one gets its own explanatory hypothesis row so
+    # a future reader of cfm.db (or scripts/analyze_trial_drift.py) can tell
+    # them apart from the real calibration reps that feed the CI.
+    cfg = _cfg(tmp_path)
+    backends = ScriptedBackends(
+        ratio_sequences={("-O3",): [999.0, 777.0, 777.0, 100.0, 102.0, 98.0]},
+    )
+
+    result = run_baseline(
+        cfg, benchmark="fake_r", base_flags=["-O3"],
+        workload=backends, instrumentation=backends,
+        reference_matrix_fetch=_no_reference_matrix,
+    )
+
+    conn = db.connect(cfg.db_path)
+    try:
+        rows = conn.execute(
+            "SELECT trial_id, rationale FROM hypotheses WHERE rationale LIKE 'baseline warm-up rep%'",
+        ).fetchall()
+        assert len(rows) == BASELINE_WARMUP_REPETITIONS
+        # The two warm-up trial_ids should be exactly the 2nd and 3rd trials
+        # recorded for this experiment (after the 1st, the characterization
+        # trial, and before the 3 real calibration ones).
+        warmup_trial_ids = {row["trial_id"] for row in rows}
+        assert warmup_trial_ids == {result.trial_ids[1], result.trial_ids[2]}
     finally:
         conn.close()
 

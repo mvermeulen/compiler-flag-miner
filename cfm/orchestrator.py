@@ -47,6 +47,29 @@ from .workloads.base import WorkloadBackend
 # alike -- cheap enough that repeating it CONFIRMATION_REPETITIONS times for a CI
 # is affordable where deep-cpu wasn't.
 CONFIRMATION_REPETITIONS = 3
+# Real, twice-independently-confirmed finding, not a hypothetical (CLAUDE.md's
+# 2026-08-24/25 traps entries): baseline's own CONFIRMATION_REPETITIONS reps
+# can still be visibly settling downward (e.g. 44.68 -> 43.44 -> 41.93,
+# 727.cppcheck_r's own real run) by the time they're measured, immediately
+# after Phase 1 starts with no warm-up at all -- unlike every later Phase
+# 4/5/6 confirmation trial, which naturally benefits from whatever settling
+# time has already elapsed earlier in the run. The 2026-08-24 fix
+# (BaselineResult.most_recent_ratio) addressed Phase 3 screening's own point
+# comparison; this addresses the deeper problem that a still-settling 3-rep
+# sample also produces a too-wide baseline.ci -- confirmed live on
+# 727.cppcheck_r to plausibly swallow a near-zero-variance, genuinely large
+# PGO win (+11.05% against the settled reference, officially rejected against
+# the unsettled one). These reps are real trials (real sustained load is what
+# actually lets the system settle, not merely waiting), persisted to cfm.db
+# like any other, just deliberately excluded from the ratios/CI that becomes
+# `baseline.ci` -- cheap, bounded, one-time cost (BASELINE_WARMUP_REPETITIONS
+# extra quick-profile trials per mining run, not per candidate).
+# Deliberately does NOT address the separate, larger multi-hour *continuing*
+# drift case (`782.lbm_r`'s own 2026-08-21 run, which never fully leveled off
+# even after hours) -- a short, fixed warm-up can't fix a drift that keeps
+# moving throughout the whole run's own duration; that's still a real, open,
+# bigger design question.
+BASELINE_WARMUP_REPETITIONS = 2
 SCREENING_ITERATIONS = 1
 CHARACTERIZATION_PROFILE = "deep-cpu"  # needs PR 1's multi-pass identity fix
 CHARACTERIZATION_ITERATIONS = 1  # shape needs one measurement, not a 3-rep CI --
@@ -233,11 +256,13 @@ def run_baseline(
     """doc/DESIGN.md sec. 6 Phase 1, sec. 14 M2.5 item 2: one characterization-grade
     trial (``_characterize_baseline()``, shape only -- its ratio is *not* part of
     the CI sample, so a deep-cpu-profile measurement never mixes with quick-profile
-    ones in the same statistic) followed by ``CONFIRMATION_REPETITIONS``
-    calibration-grade trials (``quick`` profile, cheap enough to repeat for a real
-    CI where ``deep-cpu`` wasn't) establishing the running baseline every
-    subsequent trial compares against. ``reference_matrix_fetch`` passes straight
-    through to ``_characterize_baseline()`` -- see its own docstring.
+    ones in the same statistic), ``BASELINE_WARMUP_REPETITIONS`` real warm-up reps
+    (real trials, deliberately excluded from the CI below -- see that constant's
+    own docstring for the real 2026-08-24/25 finding that motivated this), then
+    ``CONFIRMATION_REPETITIONS`` calibration-grade trials (``quick`` profile, cheap
+    enough to repeat for a real CI where ``deep-cpu`` wasn't) establishing the
+    running baseline every subsequent trial compares against. ``reference_matrix_fetch``
+    passes straight through to ``_characterize_baseline()`` -- see its own docstring.
     """
     char_result = _characterize_baseline(
         cfg, benchmark=benchmark, base_flags=base_flags,
@@ -254,6 +279,33 @@ def run_baseline(
     # item 2: this is a strict improvement on top of the local-trial path's own
     # budget cost, not just a time saving).
     trial_ids: list[int] = [char_result["trial_id"]] if char_result["trial_id"] is not None else []
+
+    # Warm-up reps: real trials under real sustained load (that's what actually
+    # lets the system settle, not merely waiting) -- persisted to cfm.db like any
+    # other trial (counted in trial_ids, so --max-trials budgeting stays
+    # accurate), but their ratios are deliberately never fed into the
+    # ratios/CI below. See BASELINE_WARMUP_REPETITIONS's own comment.
+    conn = db.connect(cfg.db_path)
+    try:
+        for _ in range(BASELINE_WARMUP_REPETITIONS):
+            warmup_result = run_one_trial(
+                cfg, benchmark=benchmark, flags=base_flags, phase="confirmation",
+                profile=CALIBRATION_PROFILE, iterations=CALIBRATION_ITERATIONS,
+                experiment_id=experiment_id, workload=workload, instrumentation=instrumentation,
+            )
+            trial_ids.append(warmup_result["trial_id"])
+            db.record_hypothesis(
+                conn, trial_id=warmup_result["trial_id"], proposed_by="rule",
+                rationale=(
+                    "baseline warm-up rep -- deliberately excluded from the calibration "
+                    "ratios/CI below (CLAUDE.md's 2026-08-24/25 traps entry: baseline's "
+                    "own early reps can still be visibly settling, and a still-settling "
+                    "CI has been shown to swallow real Phase 4+ wins, not just Phase 3 "
+                    "screening noise)"
+                ),
+            )
+    finally:
+        conn.close()
 
     ratios: list[float] = []
     wspy_run_refs: list[str] = []
