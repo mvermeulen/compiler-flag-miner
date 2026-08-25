@@ -325,6 +325,20 @@ the Instrumentation agent with the `deep-cpu` profile, 3 repetitions minimum (ws
 `thin` threshold). This becomes the running baseline every subsequent trial is compared against, and
 its `resource_dominance` signature drives Phase 2.
 
+**`BASELINE_WARMUP_REPETITIONS` real warm-up reps precede the calibration reps that actually feed the
+CI** (added 2026-08-25, real finding not a hypothetical: see CLAUDE.md's 2026-08-24/25 traps entries).
+Baseline's own calibration reps are measured immediately after Phase 1 starts, with no warm-up at
+all — unlike every later Phase 4/5/6 confirmation trial, which naturally benefits from whatever
+settling time has already elapsed earlier in the run. Confirmed live on `727.cppcheck_r`: this
+asymmetry produced a too-wide `baseline.ci` that plausibly swallowed a near-zero-variance, genuinely
+large PGO win (+11.05% against a settled reference, officially rejected against the unsettled one).
+The warm-up reps are real trials under real sustained load (persisted to `cfm.db` like any other, a
+distinct `hypotheses` row marks each one), just excluded from the ratios/CI that becomes
+`baseline.ci` — cheap, bounded, one-time cost per mining run. Deliberately does **not** address the
+separate, larger multi-hour *continuing* drift case (`782.lbm_r`'s own 2026-08-21 run, which never
+fully leveled off even after hours) — a short, fixed warm-up can't fix a drift that keeps moving
+throughout the whole run's own duration; that's still a real, open, bigger design question.
+
 ### Phase 2 — Hypothesis generation
 Compiler Knowledge agent produces rule-based candidates from the baseline's signature; Hypothesis
 Designer merges in cross-benchmark knowledge-base priors (§8) and the one bounded LLM re-rank/augment
