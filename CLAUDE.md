@@ -917,6 +917,33 @@ Full branch/PR discipline, same shape as wspy's:
   real prior (`706.stockfish_r`'s accept, `782.lbm_r`'s reject), then honestly re-evaluated and correctly
   rejected here too (a real but too-small effect, not a rubber-stamped accept). See
   `doc/mining_results.777.zstd_r.2026-08-25.md` for the full write-up.
+- **Resolved 2026-08-25: `cfm measure` never closed out its own experiment — every successful standalone
+  call left a `status='running'` row in `cfm.db` forever, with nothing ever finishing it.**
+  `run_one_trial()` only calls `db.finish_experiment()` itself on an unhandled exception (the 2026-08-20
+  OOM-incident fix's own try/except) — a normal return, even a `build-failed`/`validate-failed` one,
+  never reached `finish_experiment()` at all. `cfm mine`'s own handler (`cli.py`) already closes its
+  experiment out at the very end (`status="converged"`/`"budget-exhausted"`), but `cfm measure`'s handler
+  never did the equivalent for its own one-off experiment, since it calls `run_one_trial()` directly with
+  no `experiment_id` passed in — a fresh experiment gets created on every call, and nothing downstream
+  ever finishes it. Found via a real stale row (experiment 18), a legitimate ad hoc
+  `cfm measure 750.sealcrypto_r --flags -O3 --iterations 1` call from the 2026-08-24 package-power
+  verification work (CLAUDE.md's own package-power traps entry above), still showing `status='running'`
+  with no `finished_at` a full day later — while checking on an unrelated mining run turned up this as a
+  leftover, not something actively broken at the time. Fixed: `cfm measure`'s handler now calls
+  `db.finish_experiment(status="converged")` after any normal return, regardless of `build_status` — same
+  "converged means the run reached completion, not that everything succeeded" meaning `cfm mine` already
+  uses for a real, informative reject. The stale row itself was fixed up by hand
+  (`status='converged'`) as a one-time cleanup; this fix prevents recurrence. Covered by
+  `tests/test_cli.py`'s `test_measure_calls_finish_experiment_as_converged_on_a_successful_build`/
+  `test_measure_still_calls_finish_experiment_as_converged_on_a_build_failure` — no prior test coverage
+  existed for `cfm measure`'s CLI wiring at all before this fix, only `cfm mine`'s.
+  **Aside, not fixed here (a separate, unrelated, pre-existing quirk noticed while writing that test)**:
+  `cfm measure --flags` rejects a single bare flag with no space (e.g. `--flags -O3` alone) as an
+  unrecognized option — argparse's own heuristic for "does this look like an option" trips on a
+  single-token value starting with `-`; a multi-flag string with a space (e.g. `"-O3 -flto"`, matching
+  every real invocation this project has ever actually used, including every `CLAUDE.md` example) parses
+  fine. Left as-is since it's never actually blocked a real call, but worth knowing if a future one-flag
+  `cfm measure` invocation mysteriously fails to parse.
 
 ## Build & test
 

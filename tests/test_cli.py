@@ -174,6 +174,53 @@ def test_mine_calls_finish_experiment_with_the_right_experiment_id_and_status(tm
     assert calls == [(42, "converged")]
 
 
+# -- measure command wiring -----------------------------------------------------
+#
+# Added 2026-08-25 after a real stale experiment row was found stuck at
+# status='running' forever from an earlier ad hoc `cfm measure` verification
+# call -- run_one_trial() only calls finish_experiment() itself on an
+# unhandled exception (spec_agent.py's own try/except), never on a normal
+# return, so `cfm measure` (unlike `cfm mine`) never closed its own one-off
+# experiment out. See CLAUDE.md's Non-obvious traps log.
+
+def test_measure_calls_finish_experiment_as_converged_on_a_successful_build(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(cli.db, "connect", lambda path: _FakeConn())
+    monkeypatch.setattr(cli.db, "finish_experiment", lambda conn, exp_id, status: calls.append((exp_id, status)))
+    monkeypatch.setattr(
+        cli, "run_one_trial",
+        lambda *a, **k: {"experiment_id": 7, "trial_id": 1, "build_status": "ok", "ratio": 100.0},
+    )
+
+    exit_code = cli.main([
+        "measure", "fake_r", "--flags", "-O3 -flto",
+        "--db", str(tmp_path / "cfm.db"), "--lock-file", str(tmp_path / "test.lock"),
+    ])
+    assert exit_code == 0
+    assert calls == [(7, "converged")]
+
+
+def test_measure_still_calls_finish_experiment_as_converged_on_a_build_failure(tmp_path, monkeypatch):
+    # A build/validate failure is itself a normal, recorded trial outcome (not
+    # an orchestration crash) -- the experiment still "converged" (ran to
+    # completion), same "converged doesn't mean everything succeeded" meaning
+    # `cfm mine` already gives the same status on a real, informative reject.
+    calls = []
+    monkeypatch.setattr(cli.db, "connect", lambda path: _FakeConn())
+    monkeypatch.setattr(cli.db, "finish_experiment", lambda conn, exp_id, status: calls.append((exp_id, status)))
+    monkeypatch.setattr(
+        cli, "run_one_trial",
+        lambda *a, **k: {"experiment_id": 8, "trial_id": 2, "build_status": "build-failed"},
+    )
+
+    exit_code = cli.main([
+        "measure", "fake_r", "--flags", "-O3 -bogus-flag",
+        "--db", str(tmp_path / "cfm.db"), "--lock-file", str(tmp_path / "test.lock"),
+    ])
+    assert exit_code == 1  # still a nonzero exit -- the caller needs to see the build failed
+    assert calls == [(8, "converged")]
+
+
 # -- Phase 6 (PGO multiplier) wiring -------------------------------------------
 
 def _mine_common_mocks(monkeypatch, baseline, combination):
