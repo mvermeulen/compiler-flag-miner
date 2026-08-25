@@ -16,13 +16,22 @@ prior correctly fast-tracked `-march=native` past screening, then correctly reje
 merits, a genuinely informative negative result. `doc/mining_results.750.sealcrypto_r.2026-08-24.md` is
 the first real **compute-bound** benchmark mined — a third real `-march=native` win (+14.17%), plus an
 honestly-documented screening-vs-settling-baseline ambiguity (thermal throttling directly ruled out as
-the cause with real data). All five runs happened after both real bugs below (the basepeak
-config-scoping bug and the isolated-candidate-flags bug) were fixed. Every prior "verified"/"real run"
-result before 2026-08-21 is still retracted (see both entries in the Non-obvious traps log below for the
-full stories) — these are the fresh corrected re-runs that retraction was pending on, verified
-end-to-end via real `cfm mine` invocations, not isolated ad hoc builds. Still open: a genuinely
-**backend-bound** benchmark — memory-bound, frontend-bound, and compute-bound are all covered by at
-least one real run now, backend-bound never has been. See `CLAUDE.md`'s Non-obvious traps log
+the cause with real data). `doc/mining_results.750.sealcrypto_r.2026-08-24b.md` re-mined it again the
+same day to verify the Phase 3 screening fix (PR #38) for real — the same benchmark, the same real
+settling pattern, and this time all 5 previously-pruned flags correctly survived screening and reached a
+clean, real reject. `doc/mining_results.727.cppcheck_r.2026-08-24.md` is the first real **frontend-bound
+M4 confirmation** (`-flto` fast-tracked from `714.cpython_r`'s own prior) but, more importantly, real
+evidence that **Phase 4/5/6's own CI-overlap test has the same baseline-instability vulnerability Phase
+3 already had** — a wide, settling-driven baseline CI plausibly swallowed two genuine wins (`-flto`,
+and especially a near-zero-variance PGO measurement) — the natural next real fix, not yet done. All six
+runs happened after both real bugs below (the basepeak config-scoping bug and the isolated-candidate-
+flags bug) were fixed. Every prior "verified"/"real run" result before 2026-08-21 is still retracted (see
+both entries in the Non-obvious traps log below for the full stories) — these are the fresh corrected
+re-runs that retraction was pending on, verified end-to-end via real `cfm mine` invocations, not isolated
+ad hoc builds. Checked the *entire* real SPEC CPU2026 suite (49 benchmarks) against the reference-matrix
+corpus for a genuinely **backend-bound** benchmark — none exists anywhere in it; memory-bound,
+frontend-bound, and compute-bound are all covered by at least one real run now, backend-bound appears
+not to occur as a dominant shape for this suite at all. See `CLAUDE.md`'s Non-obvious traps log
 ("Resolved 2026-08-21: `generate_config()`'s per-trial `basepeak = no` override was silently ignored
 by SPEC since this project's very first commit") for the full basepeak story: every real trial run
 before that fix — M0's own original verification, and all four `doc/mining_results.*.md` write-ups
@@ -823,6 +832,33 @@ Full branch/PR discipline, same shape as wspy's:
   too (`Pearson r(package_power_w, elapsed_min)`) — not yet run against a multi-trial real sequence long
   enough to show a power ramp, since collection only started with this change; that's the natural next
   real-world verification once a fresh mining run accumulates enough same-session trials.
+- **2026-08-24/25: a real mining run (`727.cppcheck_r`) surfaced that Phase 4/5/6's own CI-overlap test
+  is vulnerable to an unstable baseline too, not just Phase 3's screening comparison PR #38 already
+  fixed — real evidence, not the hypothetical "separate, larger design question" that fix's own write-up
+  flagged.** Picked deliberately after checking the *entire* real SPEC CPU2026 suite (49 benchmarks)
+  against the reference-matrix corpus specifically for a backend-bound candidate — **none exists
+  anywhere in the corpus**, a real, now-confirmed finding in its own right (every benchmark checked
+  characterizes as memory-bound, frontend-bound, or compute-bound, never backend-bound as primary or
+  even alternative); `727.cppcheck_r` was instead the cleanest, highest-confidence `frontend-bound`
+  signal found (71.0%, high confidence). Baseline settled the same way every prior run's own has
+  (`44.68 → 43.44 → 41.93`), but this time the resulting confirmation-stage CI (`[39.94, 46.76]`, wide
+  because of the one elevated first rep plus only 3 reps) was wide enough to plausibly swallow two real
+  wins: `-flto` (confirm mean 43.86, tight own CI `[43.36, 44.36]`, entirely inside baseline's) and, more
+  strikingly, real two-pass PGO (`-fprofile-use`, confirm mean 46.57, an almost-zero-variance own CI
+  `[46.55, 46.59]` — about as precise a measurement as this pipeline produces — landing *just barely*
+  inside baseline's own upper bound). Both trials' compiled-flags audits confirm genuine builds, not an
+  artifact. Against `most_recent_ratio` (41.93, the same reference Phase 3 already uses) instead of the
+  full-run mean, `-flto` reads +4.60% and PGO reads +11.05% — a materially different picture than the
+  officially-reported +1.19%/+7.42% rejects. M4 continued to work correctly on this new benchmark/cluster
+  (`-flto`'s own accepted prior from `714.cpython_r` was fast-tracked correctly; `-fprofile-use`'s
+  stronger prior correctly never enters that mechanism at all, always routing through the dedicated
+  Phase 6 PGO path instead). Package-power sampling (PR #40) produced its first real multi-hour data:
+  a real early ramp (~29W → ~31W in the first ~11 minutes) then a stable plateau for the remaining ~3
+  hours — a real but weaker signal than hoped, not yet a clean confirmation of the STAPM hypothesis.
+  **Not yet fixed**: extending the Phase 3 `most_recent_ratio` fix's own reasoning to Phase 4/5/6's
+  baseline CI itself is the natural next real fix, not just a documented curiosity — this run's own
+  numbers make a concrete case it would flip `727.cppcheck_r`'s own verdict. See
+  `doc/mining_results.727.cppcheck_r.2026-08-24.md` for the full write-up.
 
 ## Build & test
 
