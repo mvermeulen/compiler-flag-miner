@@ -118,6 +118,20 @@ def main(argv=None) -> int:
         except RuntimeError as exc:
             print(f"cfm measure: {exc}", file=sys.stderr)
             return 1
+        # run_one_trial() only calls finish_experiment() itself on an unhandled
+        # exception (spec_agent.py's own try/except) -- a normal return here,
+        # even a build-failed/validate-failed one, means the single trial ran
+        # to completion without crashing, same "converged" meaning `cfm mine`
+        # already uses for a run that found nothing to accept. Without this,
+        # every standalone `cfm measure` call leaves its own one-off experiment
+        # stuck at status='running' forever, since nothing else ever closes it
+        # out (caught 2026-08-25 via a real stale row from an earlier ad hoc
+        # verification call -- CLAUDE.md's Non-obvious traps log).
+        conn = db.connect(cfg.db_path)
+        try:
+            db.finish_experiment(conn, result["experiment_id"], status="converged")
+        finally:
+            conn.close()
         print(json.dumps(result, indent=2, default=str))
         return 0 if result.get("build_status") == "ok" else 1
 
