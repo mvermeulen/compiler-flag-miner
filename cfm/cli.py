@@ -260,6 +260,11 @@ def main(argv=None) -> int:
             # Non-obvious traps log, 2026-08-24 sealcrypto entry).
             "baseline_most_recent_calibration_ratio": baseline.most_recent_ratio,
             "baseline_resource_dominance": baseline.resource_dominance,
+            # M2's own "margin" signal (cfm/compilers/gcc.py's ranking pass) --
+            # surfaced here for the same reason as every other baseline shape
+            # field: a run's own summary JSON should show what its candidate
+            # ordering was actually based on, not just the values downstream of it.
+            "baseline_resource_dominance_pct": baseline.resource_dominance_pct,
             "baseline_vectorization_density": baseline.vectorization_density,
             "baseline_allocation_pressure": baseline.allocation_pressure,
             "baseline_characterization_source": baseline.characterization_source,

@@ -3,17 +3,36 @@
 ``gcc.py`` is the only implementation today; ``llvm.py``/``aocc.py`` are the future
 modularity seam this interface defines, not yet implemented.
 
-M1 scope note (doc/DESIGN.md sec. 14): ``candidate_flags_for_signature`` exists with
-its full signature (``signature`` included) so M2 can wire real resource_dominance-
-based filtering into ``gcc.py`` without changing this interface -- but M1's own
-implementation ignores ``signature`` entirely and returns the whole
-applicable-language catalog uniformly ("static catalog priors only").
+M1 scope note (doc/DESIGN.md sec. 14, superseded by M2, 2026-08-26):
+``candidate_flags_for_signature`` was given its full signature (``signature``
+included) from the start so M2 could later wire in real resource_dominance-based
+ranking without changing this interface -- M1's own implementation ignored
+``signature`` entirely and returned the whole applicable-language catalog
+uniformly ("static catalog priors only"). M2 fills that in: ``gcc.py`` now scores
+and reorders the catalog by how well each candidate's ``topdown_signals`` match
+``signature``'s characterized shape, highest-priority first -- still every
+applicable-language entry (M2 ranks, it doesn't drop anything; that's still
+``cfm/orchestrator.py``'s separate ``_filter_implausible_candidates()`` job).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Optional
+
+# resource_dominance-named topdown_signals -- config/gcc_flag_catalog.seed.json's
+# real vocabulary (see its own top-level "note" field), checked directly against a
+# baseline's characterized resource_dominance. Shared between orchestrator.py's
+# Phase 2 filtering (_signal_is_implausible()) and gcc.py's M2 ranking
+# (_signal_matches()) -- one source of truth for the vocabulary rather than two
+# modules each keeping their own copy in sync by hand. "memory-bound-corroborated"
+# and "vectorization-density-high" are handled as their own special cases in both
+# (they key off memory_attribution/vectorization_density, not resource_dominance
+# alone); "retiring-high-narrow-margin" is also its own special case (keys off
+# resource_dominance_pct too, not just resource_dominance).
+RESOURCE_DOMINANCE_SIGNALS = frozenset({
+    "frontend-bound", "speculation-bound", "compute-bound", "backend-bound",
+})
 
 
 @dataclass
@@ -53,11 +72,16 @@ class CompilerBackend:
         self, signature: Optional[object], languages: list[str],
     ) -> list[FlagCandidate]:
         """Candidate flags for a benchmark whose applicable languages are
-        ``languages`` (e.g. ``["cxx"]``), given the baseline's
-        ``instrumentation.base.RunSignature`` (or ``None`` before a baseline
-        exists). M1's ``gcc.py`` implementation ignores ``signature``; M2 wires in
-        real resource_dominance-based filtering/ranking (doc/DESIGN.md sec. 4.3's
-        signature-to-candidate table) without changing this method's shape.
+        ``languages`` (e.g. ``["cxx"]``), ranked highest-priority-first against
+        ``signature``'s characterized shape (doc/DESIGN.md sec. 4.3's signature-to-
+        candidate table) -- ``None`` before a baseline exists, in which case every
+        candidate ranks equally (catalog order preserved). ``signature`` is duck-
+        typed, not a fixed type: anything exposing ``.resource_dominance``/
+        ``.resource_dominance_pct``/``.vectorization_density`` works (both
+        ``instrumentation.base.RunSignature`` and ``orchestrator.BaselineResult``
+        do) -- the same duck-typing precedent as Phase 6's ``CombinationResult``/
+        ``MultiplierResult`` chaining, since this method only ever reads those
+        three attributes, never anything type-specific.
         """
         raise NotImplementedError
 

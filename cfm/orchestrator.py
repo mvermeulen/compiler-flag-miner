@@ -19,7 +19,7 @@ from . import db
 from . import reference_matrix
 from .agents.knowledge_agent import KnownFlag
 from .agents.spec_agent import run_one_trial
-from .compilers.base import FlagCandidate
+from .compilers.base import FlagCandidate, RESOURCE_DOMINANCE_SIGNALS
 from .compilers.gcc import GccCompiler, benchmark_languages
 from .config import CfmConfig
 from .hostinfo import detect_microarch_flags
@@ -126,8 +126,8 @@ MIN_PRACTICAL_SIGNIFICANCE_PCT = 1.0
 @dataclass
 class BaselineResult:
     """Phase 1's output: the running baseline every subsequent trial is compared
-    against, plus the characterized shape (resource_dominance/vectorization_density/
-    allocation_pressure) Phase 2 filters on (doc/DESIGN.md sec. 14 M2.5 item 3) and
+    against, plus the characterized shape (resource_dominance/resource_dominance_pct/
+    vectorization_density/allocation_pressure) Phase 2 filters *and* (M2) ranks on, and
     knowledge-transfer upserts key off. ``ci`` is computed only over calibration-
     grade (quick-profile) ratios -- doc/DESIGN.md sec. 14 M2.5 item 2's
     characterization/calibration split, see ``_characterize_baseline()``.
@@ -138,6 +138,11 @@ class BaselineResult:
     ratios: list[float]
     ci: ConfidenceInterval
     resource_dominance: Optional[str]
+    # How dominant that shape actually is (0-100, e.g. 71.0 for a 71%-frontend-bound
+    # read) -- wspy-archetype's own scorecard field, threaded through since M2 (doc/
+    # DESIGN.md sec. 4.3's "retiring-high-narrow-margin" row needs a real "margin"
+    # signal to judge by, not a guess; see cfm/compilers/gcc.py's ranking code).
+    resource_dominance_pct: Optional[float] = None
     vectorization_density: Optional[str] = None
     allocation_pressure: Optional[str] = None
     trial_ids: list[int] = field(default_factory=list)
@@ -230,6 +235,7 @@ def _characterize_baseline(
             "experiment_id": experiment_id,
             "trial_id": None,
             "resource_dominance": shape.get("resource_dominance"),
+            "resource_dominance_pct": shape.get("resource_dominance_pct"),
             "vectorization_density": shape.get("vectorization_density"),
             "allocation_pressure": shape.get("allocation_pressure"),
             "characterization_source": "reference-matrix:%s" % shape.get("source_machine", "?"),
@@ -271,6 +277,7 @@ def run_baseline(
     )
     experiment_id = char_result["experiment_id"]
     resource_dominance = char_result.get("resource_dominance")
+    resource_dominance_pct = char_result.get("resource_dominance_pct")
     vectorization_density = char_result.get("vectorization_density")
     allocation_pressure = char_result.get("allocation_pressure")
     characterization_source = char_result.get("characterization_source")
@@ -353,6 +360,7 @@ def run_baseline(
     return BaselineResult(
         experiment_id=experiment_id, flags=base_flags, ratios=ratios, ci=ci,
         resource_dominance=resource_dominance,
+        resource_dominance_pct=resource_dominance_pct,
         vectorization_density=vectorization_density,
         allocation_pressure=allocation_pressure,
         trial_ids=trial_ids,
@@ -360,16 +368,10 @@ def run_baseline(
     )
 
 
-# resource_dominance-named topdown_signals -- config/gcc_flag_catalog.seed.json's
-# real vocabulary, confirmed against the seed catalog -- checked directly against
-# baseline.resource_dominance below. "memory-bound-corroborated" and
-# "vectorization-density-high" are handled as their own special cases (they key
-# off memory_attribution/vectorization_density, not resource_dominance alone);
-# "retiring-high-narrow-margin" is deliberately never excluded (see
-# _signal_is_implausible()'s docstring).
-_RESOURCE_DOMINANCE_SIGNALS = frozenset({
-    "frontend-bound", "speculation-bound", "compute-bound", "backend-bound",
-})
+# RESOURCE_DOMINANCE_SIGNALS moved to compilers/base.py (2026-08-26, M2) -- shared
+# with gcc.py's own ranking pass, one source of truth for the vocabulary instead
+# of two modules each keeping a copy in sync by hand. "retiring-high-narrow-margin"
+# is deliberately never excluded here (see _signal_is_implausible()'s docstring).
 
 
 def _signal_is_implausible(signal: str, baseline: BaselineResult) -> bool:
@@ -381,9 +383,11 @@ def _signal_is_implausible(signal: str, baseline: BaselineResult) -> bool:
     is essentially *absent*," not "exclude whenever unsure." ``"retiring-high-
     narrow-margin"`` is never flagged here -- doc/DESIGN.md sec. 4.3's own table
     calls it a "low priority, not exclude" signal (diminishing returns, not
-    implausibility), and there's no "margin" field to judge it by; a real
-    verdict on it belongs to M2's own resource_dominance-based ranking, not a
-    guess here.
+    implausibility), never an *exclude* one -- M2 (``cfm/compilers/gcc.py``'s
+    ranking pass, using ``baseline.resource_dominance_pct`` as the real "margin"
+    field this function still doesn't have/use) is where it actually affects
+    anything, by de-prioritizing the *other* compute-bound-tagged candidates
+    relative to ``-march=<uarch>``, not by excluding here.
     """
     if signal == "vectorization-density-high":
         return baseline.vectorization_density == "low"
@@ -391,7 +395,7 @@ def _signal_is_implausible(signal: str, baseline: BaselineResult) -> bool:
         if baseline.resource_dominance is not None and baseline.resource_dominance != "memory-bound":
             return True
         return False  # memory_attribution isn't tracked on BaselineResult (M1 scope)
-    if signal in _RESOURCE_DOMINANCE_SIGNALS:
+    if signal in RESOURCE_DOMINANCE_SIGNALS:
         return baseline.resource_dominance is not None and baseline.resource_dominance != signal
     return False
 
@@ -427,22 +431,25 @@ def generate_candidates(
     cfg: CfmConfig, *, benchmark: str, baseline: BaselineResult,
     compiler: Optional[GccCompiler] = None,
 ) -> list[FlagCandidate]:
-    """doc/DESIGN.md sec. 6 Phase 2. M1 scope: every catalog entry applicable to
-    this benchmark's language(s), unranked by signature -- "static catalog
-    priors only" (doc/DESIGN.md sec. 14); ``compilers/gcc.py``'s own
-    ``candidate_flags_for_signature()`` still ignores ``signature`` entirely,
-    per that method's own M1-vs-M2 doc boundary. M2.5 item 3 adds one cheap
-    filtering pass on top of that M1 catalog read, though:
-    ``_filter_implausible_candidates()`` drops only a candidate whose every
+    """doc/DESIGN.md sec. 6 Phase 2: every catalog entry applicable to this
+    benchmark's language(s), signature-*ranked* then filtered. ``baseline`` itself
+    (not just ``baseline.resource_dominance``) is passed through as
+    ``candidate_flags_for_signature()``'s ``signature`` argument -- duck-typed the
+    same way Phase 6's multiplier-chaining already accepts either
+    ``CombinationResult`` or ``MultiplierResult`` (both exposing ``.winning_flags``/
+    ``.winning_ci`` under the same names): ``compilers/gcc.py``'s M2 ranking reads
+    ``.resource_dominance``/``.resource_dominance_pct``/``.vectorization_density``
+    off whatever's passed, and ``BaselineResult`` already exposes all three, so no
+    new type is needed just to carry them across this module boundary.
+    ``_filter_implausible_candidates()`` then drops only a candidate whose every
     ``topdown_signals`` entry is confidently contradicted by the baseline's
     already-characterized shape -- "never spend a trial on a mechanically-
-    implausible flag" -- distinct from M2's still-pending real
-    resource_dominance-based *ranking* (compilers/base.py's docstring), which
-    this doesn't attempt.
+    implausible flag" -- a distinct, still-real *exclude* pass on top of ranking,
+    not replaced by it: ranking only reorders what filtering leaves standing.
     """
     compiler = compiler or GccCompiler()
     languages = benchmark_languages(cfg.spec_dir, benchmark)
-    candidates = compiler.candidate_flags_for_signature(baseline.resource_dominance, languages)
+    candidates = compiler.candidate_flags_for_signature(baseline, languages)
     return _filter_implausible_candidates(candidates, baseline)
 
 
