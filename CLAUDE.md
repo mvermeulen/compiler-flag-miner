@@ -3,9 +3,10 @@
 This file provides guidance to Claude Code (claude.ai/code) when working in this repository.
 
 **Status: M0/M1's pipeline mechanics are real and working, M4's cross-benchmark knowledge transfer is
-real-verified, M2's signature-aware candidate *ranking* is implemented (2026-08-26, mocked-tier verified,
-real-verification pending — see the Non-obvious traps log), and six real benchmarks have now been mined
-across three of the four `resource_dominance` clusters.** `doc/mining_results.782.lbm_r.2026-08-22.md` was the first genuinely trustworthy `cfm mine`
+real-verified, M2's signature-aware candidate *ranking* is implemented and real-verified (2026-08-26 —
+see the Non-obvious traps log for the two real bugs the first real-verification attempt caught and
+fixed, and `doc/mining_results.707.ntest_r.2026-08-26.md` for the confirming run), and seven real
+benchmarks have now been mined across three of the four `resource_dominance` clusters.** `doc/mining_results.782.lbm_r.2026-08-22.md` was the first genuinely trustworthy `cfm mine`
 result (a focused, budget-capped run, zero acceptances — a correct reject, not a bug).
 `doc/mining_results.714.cpython_r.2026-08-23.md` was the first *uncapped* corrected run and the first
 real accept: `-flto` then real two-pass PGO for **+41.65% overall vs. plain `-O3`**, Phase 6's
@@ -1030,11 +1031,19 @@ Full branch/PR discipline, same shape as wspy's:
      bookkeeping first. Covered by
      `tests/test_cli.py::test_mine_marks_experiment_failed_on_an_unexpected_non_runtime_error`.
   Both fixes landed together (same PR) since the same real run exposed both, but they're independent —
-  fixing either alone would have left the other gap fully live for the next unrelated bug to hit. A
-  second, clean `cfm mine 707.ntest_r` run (after both fixes) is the natural next step to confirm the
-  actual ranking payoff this milestone was implemented for: does `-march=native` really print ahead of
-  `-Ofast`/`-ffast-math`/`-funroll-loops` in Phase 2's candidate order now, on this benchmark's own real,
-  narrow-margin compute-bound shape.
+  fixing either alone would have left the other gap fully live for the next unrelated bug to hit.
+  **Confirmed for real the same day**: a clean re-mine of `707.ntest_r` (experiment 23, after both fixes)
+  converged cleanly — `-march=native` accepted at **+14.83%**, remarkably close to its own real prior
+  (+14.79% from `750.sealcrypto_r`), the compute-bound cluster's second real accept for this flag (now
+  3/3 real trials accepted). The ranking payoff itself was confirmed a different way than originally
+  planned: M4's own fast-track pulled `-march=native` out of the ordinary screened-candidate list before
+  Phase 2's ranking order would ever show up in a live screening trial sequence — so a direct, read-only
+  `candidate_flags_for_signature()` call against this benchmark's exact real characterized shape
+  (`resource_dominance="compute-bound"`, `resource_dominance_pct=40.60`, `vectorization_density="low"`)
+  is what actually demonstrated it: `-march=native` (2 matching signals: `compute-bound` +
+  `retiring-high-narrow-margin`) genuinely outranks `-funroll-loops`/`-Ofast`/`-ffast-math` (1 matching
+  signal each), confirmed against real corpus data, not a synthetic fixture. See
+  `doc/mining_results.707.ntest_r.2026-08-26.md` for the full write-up.
 
 ## Build & test
 
