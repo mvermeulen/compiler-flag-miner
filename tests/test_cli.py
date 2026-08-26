@@ -139,6 +139,43 @@ def test_mine_propagates_a_runtime_error_cleanly(tmp_path, monkeypatch, capsys):
     assert "no valid ratio" in capsys.readouterr().err
 
 
+def test_mine_marks_experiment_failed_on_an_unexpected_non_runtime_error(tmp_path, monkeypatch):
+    # Real 2026-08-26 gap (a genuine cfm mine 707.ntest_r crash, CLAUDE.md's
+    # traps log): only RuntimeError was ever caught here -- any other unhandled
+    # exception from a phase function running after run_baseline() (e.g. a real
+    # TypeError bug in generate_candidates()) propagated straight through,
+    # leaving the experiment stuck at status='running' forever. This confirms
+    # the fix: baseline.experiment_id gets marked 'failed' before the exception
+    # is allowed to keep propagating (not swallowed into a clean exit -- a real
+    # bug should still surface loudly, just with correct bookkeeping first).
+    baseline = _fake_baseline(exp_id=99)
+    monkeypatch.setattr(cli.orchestrator, "run_baseline", lambda *a, **k: baseline)
+
+    def raise_type_error(*a, **k):
+        raise TypeError("'<=' not supported between instances of 'str' and 'float'")
+
+    monkeypatch.setattr(cli.orchestrator, "generate_candidates", raise_type_error)
+
+    db_path = tmp_path / "cfm.db"
+    conn = cli.db.connect(str(db_path))
+    conn.execute(
+        "INSERT INTO experiments (id, benchmark, hostname, compiler, started_at, status) "
+        "VALUES (99, 'fake_r', 'fakehost', 'gcc', '2026-08-26T00:00:00Z', 'running')",
+    )
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(TypeError, match="not supported between instances"):
+        cli.main(["mine", "fake_r", "--db", str(db_path), "--lock-file", str(tmp_path / "test.lock")])
+
+    conn = cli.db.connect(str(db_path))
+    try:
+        exp = cli.db.get_experiment(conn, 99)
+        assert exp["status"] == "failed"
+    finally:
+        conn.close()
+
+
 class _FakeConn:
     """Stands in for db.connect()'s return value when db.finish_experiment() is
     *also* mocked (the test below) -- safe to pass around as an opaque object

@@ -2,6 +2,29 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
+
+def to_float(value) -> Optional[float]:
+    """Best-effort numeric coercion, never raising -- ``None`` in, ``None`` out;
+    anything that doesn't parse as a float (including an already-``None`` value)
+    also becomes ``None`` rather than propagating a ``ValueError``/``TypeError``.
+    Moved here (2026-08-26, M2 real-verification, a genuine `cfm mine` crash
+    caught by a real 707.ntest_r run -- CLAUDE.md's traps log) from
+    ``instrumentation/wspy.py``'s own private copy, since ``reference_matrix.py``
+    needed the exact same coercion and duplicating it silently (rather than
+    sharing) is exactly how this bug happened in the first place:
+    ``_score_guest_vector()`` returned ``parse_kv_lines()``'s raw
+    ``dict[str, str]`` straight through with no coercion at all, so
+    ``resource_dominance_pct`` came back as a string from the reference-matrix
+    path specifically -- invisible until M2's ranking code did the first real
+    numeric comparison (``<=``) on it.
+    """
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
 
 def normalize_flag_base(token: str) -> str:
     """Collapse a compiler flag token to the base name a

@@ -142,6 +142,7 @@ def main(argv=None) -> int:
         )
         compiler = GccCompiler(catalog_path=args.catalog) if args.catalog else GccCompiler()
         base_flags = args.base_flags.split()
+        baseline = None  # bound inside the try below; checked in the broad except handler
 
         try:
             with host_lock(cfg, command=f"cfm mine {args.benchmark}"):
@@ -222,6 +223,30 @@ def main(argv=None) -> int:
         except RuntimeError as exc:
             print(f"cfm mine: {exc}", file=sys.stderr)
             return 1
+        except Exception:
+            # Any *other* unhandled exception -- a real bug in a phase function,
+            # not an expected "no valid ratio"-style RuntimeError -- still needs
+            # to mark the experiment failed, not leave it stuck at
+            # status='running' forever. run_one_trial()'s own internal exceptions
+            # (and run_baseline()'s "no valid ratio" case) already handle this
+            # themselves (CLAUDE.md's 2026-08-20 traps entry) -- this covers the
+            # phase-composition code that runs directly in this function body
+            # instead (generate_candidates()/screen_candidates()/confirm_
+            # candidates()/etc., each with no try/except of its own), caught for
+            # real 2026-08-26 by a genuine crash mid-generate_candidates() during
+            # a real 707.ntest_r mining run (a type bug in M2's ranking code,
+            # fixed separately -- but this gap in cli.py's own bookkeeping was a
+            # second, independent problem the same incident exposed). Re-raises
+            # after marking failed, matching run_one_trial()'s own "record it,
+            # then still let the real traceback surface" posture -- this is a
+            # genuine bug, not something to silently convert into a clean exit.
+            if baseline is not None:
+                conn = db.connect(cfg.db_path)
+                try:
+                    db.finish_experiment(conn, baseline.experiment_id, status="failed")
+                finally:
+                    conn.close()
+            raise
 
         conn = db.connect(cfg.db_path)
         try:

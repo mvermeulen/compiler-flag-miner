@@ -161,6 +161,35 @@ def test_get_json_returns_none_on_network_error(monkeypatch):
     assert reference_matrix._get_json("https://example.invalid/wp-json/wp/v2/pages") is None
 
 
+def test_score_guest_vector_coerces_numeric_percentage_fields(tmp_path, monkeypatch):
+    # Fast, always-run (no real vendor/wspy binary needed) regression test for the
+    # real 2026-08-26 bug: parse_kv_lines()'s own dict[str, str] return type means
+    # every field wspy-archetype --run-guest prints comes back as a string unless
+    # something explicitly coerces it -- resource_dominance_pct/alternative_pct are
+    # the two numeric ones, invisible until a real cfm mine 707.ntest_r run did the
+    # first-ever numeric comparison on resource_dominance_pct (M2's ranking code)
+    # and crashed comparing a str to a float. See CLAUDE.md's traps log.
+    class _FakeCompletedProcess:
+        returncode = 0
+        stdout = (
+            "resource_dominance=compute-bound\n"
+            "resource_dominance_pct=40.60\n"
+            "alternative=frontend-bound\n"
+            "alternative_pct=28.10\n"
+            "confidence=medium\n"
+        )
+
+    monkeypatch.setattr(reference_matrix.subprocess, "run", lambda *a, **k: _FakeCompletedProcess())
+
+    scorecard = reference_matrix._score_guest_vector(Path("unused"), {"retire_pct": 40.0})
+
+    assert scorecard["resource_dominance"] == "compute-bound"  # untouched, still a string
+    assert isinstance(scorecard["resource_dominance_pct"], float)
+    assert scorecard["resource_dominance_pct"] == pytest.approx(40.60)
+    assert isinstance(scorecard["alternative_pct"], float)
+    assert scorecard["alternative_pct"] == pytest.approx(28.10)
+
+
 # -- needs the built vendor/wspy submodule ------------------------------------
 
 def _wspy_built() -> bool:
@@ -195,6 +224,17 @@ class TestAgainstBuiltWspy:
         scorecard = reference_matrix._score_guest_vector(wspy_dir, guest)
         assert scorecard is not None
         assert "resource_dominance" in scorecard
+        # Real regression check for a real caught bug (2026-08-26, CLAUDE.md's traps
+        # log): parse_kv_lines()'s own return type is dict[str, str] -- everything
+        # wspy-archetype --run-guest prints comes back as a string unless something
+        # explicitly coerces it. This exact test previously only checked
+        # "resource_dominance" in scorecard and missed that resource_dominance_pct
+        # was silently a str, not a float -- invisible until a real cfm mine
+        # 707.ntest_r run crashed doing a numeric comparison on it for the first
+        # time (M2's ranking code). Assert the type explicitly now, against the
+        # real binary, not a mock -- a mock could trivially "pass" this check
+        # without proving the real subprocess output is actually coerced.
+        assert isinstance(scorecard["resource_dominance_pct"], float)
 
 
 # -- real, live contract test against the actual site -------------------------

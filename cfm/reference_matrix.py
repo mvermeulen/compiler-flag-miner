@@ -55,7 +55,18 @@ from pathlib import Path
 from typing import Optional
 
 from .config import CfmConfig
-from .util import parse_kv_lines
+from .util import parse_kv_lines, to_float
+
+# wspy-archetype --run-guest's own key=value output is all strings (parse_kv_lines()'s
+# return type) -- these two keys are numeric percentages, coerced before the scorecard
+# dict is handed to any caller (2026-08-26, M2 real-verification: a real cfm mine
+# 707.ntest_r crash caught this -- resource_dominance_pct reached a real numeric
+# comparison in cfm/compilers/gcc.py's ranking code for the first time and blew up
+# comparing a str to a float, since this function had never coerced it. CLAUDE.md's
+# traps log has the full story). instrumentation/wspy.py's own characterize() already
+# coerced resource_dominance_pct correctly for the *local* characterization path --
+# this was purely a reference-matrix-path gap.
+_NUMERIC_SCORECARD_KEYS = ("resource_dominance_pct", "alternative_pct")
 
 _REQUEST_TIMEOUT_S = 20
 # Matches wspy's own MAX_WORDPRESS_RECOVERED_RUNS (wspy-testpoint) -- most-recent-first, capped so a
@@ -214,7 +225,11 @@ def _score_guest_vector(wspy_dir: Path, guest: dict[str, float]) -> Optional[dic
             return None
         if proc.returncode != 0:
             return None
-        return parse_kv_lines(proc.stdout)
+        scorecard = parse_kv_lines(proc.stdout)
+        for key in _NUMERIC_SCORECARD_KEYS:
+            if key in scorecard:
+                scorecard[key] = to_float(scorecard[key])
+        return scorecard
     finally:
         tmp_path.unlink(missing_ok=True)
 
