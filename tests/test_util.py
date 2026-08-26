@@ -1,4 +1,4 @@
-from cfm.util import catalog_flag_base, normalize_flag_base, parse_kv_lines
+from cfm.util import catalog_flag_base, normalize_flag_base, parse_kv_lines, to_float
 
 
 def test_parse_kv_lines_basic():
@@ -43,3 +43,13 @@ def test_catalog_flag_base_param_form_matches_normalize_flag_base():
         == normalize_flag_base("--param=prefetch-latency=300")
         == "--param:prefetch-latency"
     )
+
+
+def test_to_float_handles_none_and_bad_values():
+    # Moved here from tests/test_instrumentation_wspy.py (2026-08-26, M2
+    # real-verification) when to_float() itself moved from instrumentation/wspy.py
+    # to util.py to share it with reference_matrix.py -- see cfm/util.py's own
+    # docstring for the real bug that motivated sharing it instead of duplicating.
+    assert to_float(None) is None
+    assert to_float("not-a-number") is None
+    assert to_float("12.5") == 12.5

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from cfm.instrumentation.wspy import WspyInstrumentation, _count_lines, _to_float
+from cfm.instrumentation.wspy import WspyInstrumentation, _count_lines
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -33,12 +33,6 @@ def test_preflight_reports_only_missing_binaries(tmp_path):
     problems = _make(tmp_path).preflight()
     assert len(problems) == 4
     assert not any("wspy-run not found" in p or p.startswith("wspy not found") for p in problems)
-
-
-def test_to_float_handles_none_and_bad_values():
-    assert _to_float(None) is None
-    assert _to_float("not-a-number") is None
-    assert _to_float("12.5") == 12.5
 
 
 def test_count_lines_missing_file_is_zero(tmp_path):

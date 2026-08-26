@@ -12,9 +12,8 @@ import io
 import json
 import subprocess
 from pathlib import Path
-from typing import Optional
 
-from ..util import parse_kv_lines
+from ..util import parse_kv_lines, to_float
 from .base import InstrumentationBackend, RunSignature
 
 # Which named pass (from the run-level manifest.json's own passes[] list) carries the
@@ -131,7 +130,7 @@ class WspyInstrumentation(InstrumentationBackend):
             wspy_run_ref=f"{real_hostname}:{real_run_id}",
             validated=validated,
             resource_dominance=scorecard.get("resource_dominance"),
-            resource_dominance_pct=_to_float(scorecard.get("resource_dominance_pct")),
+            resource_dominance_pct=to_float(scorecard.get("resource_dominance_pct")),
             memory_attribution=scorecard.get("memory_attribution"),
             vectorization_density=scorecard.get("vectorization_density"),
             allocation_pressure=scorecard.get("allocation_pressure"),
@@ -289,10 +288,3 @@ def _count_lines(path: Path) -> int:
         return 0
     with path.open() as f:
         return sum(1 for _ in f)
-
-
-def _to_float(value) -> Optional[float]:
-    try:
-        return float(value) if value is not None else None
-    except (TypeError, ValueError):
-        return None

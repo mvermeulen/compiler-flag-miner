@@ -985,11 +985,56 @@ Full branch/PR discipline, same shape as wspy's:
   `resource_dominance` string, plus a new test for `_characterize_baseline()`'s reference-matrix-found
   path, which had zero orchestrator-level coverage before this change) — matching this project's own
   established two-step discipline (M2.5's own items, M4) of landing at the mocked tier first, then
-  real-verifying with an actual mining run once merged. **Not yet real-verified**: the natural next step
-  is re-mining `750.sealcrypto_r` (the one real compute-bound benchmark on record, with a real
-  `-march=native` accept already alongside real `-Ofast`/`-ffast-math`/`-funroll-loops` rejects) to
-  confirm the ranked Phase 2 candidate order actually shows `-march=native` ahead of those three in a
-  real run's own printed candidate list, not just in a unit-test fixture.
+  real-verifying with an actual mining run once merged.
+  **Resolved 2026-08-26: real verification against `707.ntest_r` (a new, never-before-mined `intrate`
+  benchmark, deliberately picked over re-mining `750.sealcrypto_r` for broader suite coverage — real
+  compute-bound with a narrow margin, 40.6%, medium confidence) immediately caught two real bugs, exactly
+  the value real verification exists for.**
+  1. **`resource_dominance_pct` came back as a `str`, not a `float`, from the reference-matrix
+     characterization path specifically** — `cfm/reference_matrix.py`'s `_score_guest_vector()` returned
+     `parse_kv_lines()`'s raw `dict[str, str]` straight through with no numeric coercion at all (unlike
+     `instrumentation/wspy.py`'s own `characterize()`, which already coerced this same field correctly
+     for the *local* `deep-cpu` characterization path via a private `_to_float()` helper). Invisible until
+     this moment because nothing had ever done a *numeric* comparison on `resource_dominance_pct` before —
+     M2's own `_signal_matches()` (`pct <= _NARROW_MARGIN_MAX_PCT`) is the first. Crashed the whole
+     `cfm mine` run instantly (`TypeError: '<=' not supported between instances of 'str' and 'float'`) the
+     moment Phase 2 tried to rank candidates against a baseline whose shape came from the reference-matrix
+     path (as `707.ntest_r`'s did) rather than a local trial. **Fixed**: moved `_to_float()` out of
+     `instrumentation/wspy.py` into `cfm/util.py` as a shared `to_float()` (the duplication itself — one
+     module coercing correctly, the other never coercing at all — is exactly how this class of bug
+     happens; sharing one helper closes that gap for any future numeric scorecard field too, not just
+     this one), and `_score_guest_vector()` now coerces both known numeric scorecard keys
+     (`resource_dominance_pct`, `alternative_pct`) before returning. **Caught by a real test that existed
+     but had too shallow an assertion, not a missing test**: `test_score_guest_vector_scores_a_real_wspy_
+     archetype_run` already ran the real `wspy-archetype --run-guest` binary (skipped cleanly when
+     `vendor/wspy` isn't built) but only asserted `"resource_dominance" in scorecard`, never checking
+     `resource_dominance_pct`'s actual type — strengthened to assert `isinstance(..., float)` against the
+     real binary's real output, plus a new fast always-run mocked-subprocess test
+     (`test_score_guest_vector_coerces_numeric_percentage_fields`) for quick regression coverage without
+     needing `vendor/wspy` built. The `_to_float`/`to_float` rename also moved its own unit test from
+     `tests/test_instrumentation_wspy.py` to `tests/test_util.py`, matching its new home.
+  2. **`cli.py`'s `mine` handler only ever caught `RuntimeError` — any other unhandled exception (like the
+     `TypeError` above) crashed straight through, leaving the experiment stuck at `status='running'`
+     forever**, the same class of gap the 2026-08-20 traps entry fixed for `run_one_trial()`'s own
+     internal exceptions and `run_baseline()`'s "no valid ratio" case — but that fix never covered the
+     phase-composition code running directly in `cli.py`'s own function body
+     (`generate_candidates()`/`screen_candidates()`/`confirm_candidates()`/etc., each with no try/except
+     of its own). A real, independent bug this same incident exposed, not a consequence of bug 1 above —
+     confirmed live: experiment 22 sat at `status='running'` with no `finished_at` after the crash, fixed
+     up by hand (`status='failed'`) the same way past incidents were. **Fixed**: a new
+     `except Exception` clause (after the existing `except RuntimeError`) marks `baseline.experiment_id`
+     failed — only if `baseline` is already bound, since a failure inside `run_baseline()` itself has no
+     experiment to mark yet beyond what that function's own error path already handles — then **re-raises**
+     rather than swallowing into a clean exit code, matching `run_one_trial()`'s own "record it, then
+     still let the real traceback surface" posture; a genuine bug should stay loud, just with correct
+     bookkeeping first. Covered by
+     `tests/test_cli.py::test_mine_marks_experiment_failed_on_an_unexpected_non_runtime_error`.
+  Both fixes landed together (same PR) since the same real run exposed both, but they're independent —
+  fixing either alone would have left the other gap fully live for the next unrelated bug to hit. A
+  second, clean `cfm mine 707.ntest_r` run (after both fixes) is the natural next step to confirm the
+  actual ranking payoff this milestone was implemented for: does `-march=native` really print ahead of
+  `-Ofast`/`-ffast-math`/`-funroll-loops` in Phase 2's candidate order now, on this benchmark's own real,
+  narrow-margin compute-bound shape.
 
 ## Build & test
 
