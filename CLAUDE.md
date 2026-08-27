@@ -5,8 +5,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working in this
 **Status: M0/M1's pipeline mechanics are real and working, M4's cross-benchmark knowledge transfer is
 real-verified, M2's signature-aware candidate *ranking* is implemented and real-verified (2026-08-26 —
 see the Non-obvious traps log for the two real bugs the first real-verification attempt caught and
-fixed, and `doc/mining_results.707.ntest_r.2026-08-26.md` for the confirming run), and nine real
+fixed, and `doc/mining_results.707.ntest_r.2026-08-26.md` for the confirming run), and ten real
 benchmarks have now been mined across three of the four `resource_dominance` clusters.**
+`doc/mining_results.735.gem5_r.2026-08-27.md` landed this project's **first real PGO reject** (every
+prior PGO trial — `714.cpython_r`, `727.cppcheck_r`, `723.llvm_r` — was a real accept; `-flto` still
+accepted here, +13.62% overall) and, along the way, found and fixed a real bug in the compiled-flags
+audit tool itself — `audit_compiled_flags()` only ever inspected the first ELF binary a directory listing
+happened to yield, silently wrong for `735.gem5_r`'s own two-executable (`gem5sim`/`gem5stats`) build
+shape (PR #45, merged) — investigated live rather than assumed, confirming the real measured ratios
+themselves were very likely unaffected (only `gem5sim` is ever timed) before fixing the audit tool
+properly.
 `doc/mining_results.723.llvm_r.2026-08-26.md` mined LLVM itself, the frontend-bound cluster's third real
 benchmark — `-flto` then PGO both accepted (+32.23% overall), confirming the cluster's real PGO/LTO
 priors (from `714.cpython_r`/`727.cppcheck_r`) generalize to a third, very different real-world codebase,
@@ -1057,6 +1065,39 @@ Full branch/PR discipline, same shape as wspy's:
   `retiring-high-narrow-margin`) genuinely outranks `-funroll-loops`/`-Ofast`/`-ffast-math` (1 matching
   signal each), confirmed against real corpus data, not a synthetic fixture. See
   `doc/mining_results.707.ntest_r.2026-08-26.md` for the full write-up.
+- **Resolved 2026-08-27: `audit_compiled_flags()` only ever inspected the first ELF binary a directory
+  listing happened to yield — silently wrong for any benchmark that legitimately builds more than one
+  executable, found live via a real `735.gem5_r` mining run.** `735.gem5_r`'s own build directory
+  contains two real ELF binaries, `gem5sim` (the actual simulator) and `gem5stats` (a companion tool) —
+  the method's original implementation looped `for entry in candidates[0].iterdir(): ... break` at the
+  first ELF found, and `Path.iterdir()`'s own order is filesystem-dependent, not alphabetical or
+  otherwise meaningful. All 3 of that run's PGO confirmation trials got a false `⚠ WARNING: no -O
+  optimization level found in the compiled binary at all` audit result — directly contradicting a clean
+  `runcpu --action=validate` pass on the exact same trials, and every sibling trial in the same
+  experiment (the plain `-flto` trials measured immediately before) showing a correct audit.
+  **Investigated live before assuming anything, including before assuming the real measured data was
+  compromised**: read `run_peak_refrate_gcc_O3.0000/speccmds.cmd` directly and confirmed `gem5stats` is
+  never invoked in *any* timed workload command for this benchmark — only `gem5sim` is ever measured —
+  so whichever binary the audit's own directory-iteration happened to pick, the real ratios themselves
+  (SPEC's own `--action=validate` action already guarantees correctness of whatever binary actually ran)
+  were very likely unaffected regardless. This mattered for how to interpret that run's own real PGO
+  reject honestly: a real, trustworthy negative result on the merits, not an artifact of a broken build
+  — but the audit tool's own secondary-verification signal was still genuinely wrong for those 3 trials,
+  a real gap in the tooling worth fixing properly, not dismissing just because the primary correctness
+  gate (SPEC's own validate) was unaffected. **Fixed**: `audit_compiled_flags()`
+  (`cfm/workloads/spec_cpu2026.py`) now collects *every* ELF binary found in the build directory (not
+  just the first), runs `readelf -p .GCC.command.line` on each, and concatenates their dumps together
+  (each prefixed with its own filename) — a flag or `-O` level found in *any* component binary now
+  counts, matching this method's own "best-effort sanity signal, avoid false negatives" posture rather
+  than depending on directory-iteration-order luck. No change to existing single-binary behavior
+  (verified: every pre-existing test passed unchanged). New regression test
+  (`test_audit_compiled_flags_reads_every_elf_binary_not_just_the_first`) builds two real ELF binaries
+  with genuinely different flags and confirms both surface in the combined dump — a mock wouldn't have
+  caught the original bug (a fake single-file build dir was exactly what the original tests already
+  used), so this one, like the `.rsf`/basepeak-era lessons before it, is built from a shape that actually
+  matches the real thing that broke. See `doc/mining_results.735.gem5_r.2026-08-27.md` for the full
+  mining-run write-up this was found inside of, including this project's first real PGO reject
+  (`-flto` still accepted, +13.62% overall).
 
 ## Build & test
 
