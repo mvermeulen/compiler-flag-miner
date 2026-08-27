@@ -179,7 +179,7 @@ class SpecCpu2026Workload(WorkloadBackend):
 
     def audit_compiled_flags(self, bench: str, tune: str) -> Optional[str]:
         """Independent, best-effort audit of what SPEC *actually* compiled --
-        reads the just-built binary's own `.GCC.command.line` section
+        reads every just-built ELF binary's own `.GCC.command.line` section
         (`-frecord-gcc-switches`, always appended in `generate_config()` above)
         via `readelf`, rather than trusting `runcpu`'s own "Build successes"
         report. Exists specifically because that report alone was not enough
@@ -191,14 +191,28 @@ class SpecCpu2026Workload(WorkloadBackend):
         benchmark (SPEC's own build-dir naming; the tag component, e.g.
         `gcc_O3`, comes from the base config's own compiler identification, not
         this trial's own config filename, so it can't be predicted from
-        `config_path` alone) and the one ELF file inside it (as opposed to the
-        accompanying `simple-build-*.sh` build script, identified by the ELF
+        `config_path` alone) and reads *every* ELF file inside it (as opposed to
+        the accompanying `simple-build-*.sh` build script, identified by the ELF
         magic number rather than a benchmark-specific name convention, which
-        differs per benchmark). Returns the raw `readelf -p .GCC.command.line`
-        output, or `None` if the build directory, binary, or `readelf` itself
-        can't be found/read -- degrades gracefully, same posture as
-        `instrumentation/wspy.py`'s `check_regression()` (a sanity signal,
-        never a build/trial correctness verdict itself).
+        differs per benchmark) -- not just the first one found. A single
+        benchmark can legitimately build more than one executable (e.g.
+        `735.gem5_r`'s own `gem5sim`/`gem5stats` pair); checking only the first
+        ELF `Path.iterdir()` happens to yield (filesystem order, not a
+        meaningful one) risked auditing an irrelevant companion binary while
+        missing the one SPEC actually times -- caught live via a real
+        `735.gem5_r` mining run whose PGO trial's audit falsely reported
+        `-O3` (and every requested flag) missing entirely, contradicting a
+        clean `runcpu --action=validate` pass and every sibling trial's own
+        correct audit (CLAUDE.md's Non-obvious traps log has the full story).
+        Concatenates every binary's own `readelf -p .GCC.command.line` output
+        together, each preceded by its own filename -- a flag or `-O` level
+        found in *any* component binary now counts, matching this method's own
+        "best-effort sanity signal, never a build/trial correctness verdict"
+        posture: a false negative (missing a real flag) is the failure mode
+        worth avoiding here, not a false positive. Returns `None` only if the
+        build directory, no ELF binaries, or `readelf` itself can't be
+        found/read at all -- degrades gracefully, same posture as
+        `instrumentation/wspy.py`'s `check_regression()`.
         """
         build_root = self.spec_dir / "benchspec" / "CPU" / bench / "build"
         candidates = sorted(
@@ -207,26 +221,29 @@ class SpecCpu2026Workload(WorkloadBackend):
         )
         if not candidates:
             return None
-        exe_path = None
-        for entry in candidates[0].iterdir():
+        exe_paths = []
+        for entry in sorted(candidates[0].iterdir()):
             if not entry.is_file():
                 continue
             try:
                 if entry.read_bytes()[:4] == b"\x7fELF":
-                    exe_path = entry
-                    break
+                    exe_paths.append(entry)
             except OSError:
                 continue
-        if exe_path is None:
+        if not exe_paths:
             return None
-        try:
-            proc = subprocess.run(
-                ["readelf", "-p", ".GCC.command.line", str(exe_path)],
-                capture_output=True, text=True,
-            )
-        except OSError:
-            return None
-        return proc.stdout if proc.returncode == 0 else None
+        dumps = []
+        for exe_path in exe_paths:
+            try:
+                proc = subprocess.run(
+                    ["readelf", "-p", ".GCC.command.line", str(exe_path)],
+                    capture_output=True, text=True,
+                )
+            except OSError:
+                continue
+            if proc.returncode == 0:
+                dumps.append(f"# {exe_path.name}\n{proc.stdout}")
+        return "\n".join(dumps) if dumps else None
 
     def build(self, bench: str, tune: str, config_path: Path) -> BuildResult:
         cmd = self._shrc_command(

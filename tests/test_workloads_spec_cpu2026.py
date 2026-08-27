@@ -152,6 +152,37 @@ def test_audit_compiled_flags_finds_the_most_recent_build_dir_and_reads_it(tmp_p
     assert "-funroll-loops" in dump
 
 
+def test_audit_compiled_flags_reads_every_elf_binary_not_just_the_first(tmp_path):
+    # Real 2026-08-27 bug (735.gem5_r's own gem5sim/gem5stats pair -- CLAUDE.md's
+    # traps log): a benchmark that legitimately builds more than one executable
+    # could have its audit silently inspect the wrong one, since
+    # Path.iterdir()'s order is filesystem-dependent, not meaningful. Two real
+    # ELF binaries here (built with genuinely different flags) confirm both get
+    # read -- a flag present in only the *second* one found must still surface.
+    if shutil.which("gcc") is None or shutil.which("readelf") is None:
+        pytest.skip("gcc/readelf not available")
+    workload = _make_workload(tmp_path)
+    build_dir = workload.spec_dir / "benchspec" / "CPU" / "735.gem5_r" / "build" / "build_peak_gcc_O3.0000"
+    build_dir.mkdir(parents=True)
+    src = build_dir / "toy.c"
+    src.write_text("int main(void) { return 0; }\n")
+    subprocess.run(
+        ["gcc", "-frecord-gcc-switches", "-funroll-loops",
+         "-o", str(build_dir / "gem5stats"), str(src)],
+        check=True,
+    )
+    subprocess.run(
+        ["gcc", "-frecord-gcc-switches", "-fno-semantic-interposition",
+         "-o", str(build_dir / "gem5sim"), str(src)],
+        check=True,
+    )
+
+    dump = workload.audit_compiled_flags("735.gem5_r", "peak")
+    assert dump is not None
+    assert "-funroll-loops" in dump  # gem5stats's own flag
+    assert "-fno-semantic-interposition" in dump  # gem5sim's own flag -- the one that matters for timing
+
+
 def test_generate_config_rejects_base_tune(tmp_path):
     workload = _make_workload(tmp_path)
     with pytest.raises(ValueError):
