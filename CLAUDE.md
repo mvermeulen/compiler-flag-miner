@@ -5,8 +5,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working in this
 **Status: M0/M1's pipeline mechanics are real and working, M4's cross-benchmark knowledge transfer is
 real-verified, M2's signature-aware candidate *ranking* is implemented and real-verified (2026-08-26 —
 see the Non-obvious traps log for the two real bugs the first real-verification attempt caught and
-fixed, and `doc/mining_results.707.ntest_r.2026-08-26.md` for the confirming run), and ten real
+fixed, and `doc/mining_results.707.ntest_r.2026-08-26.md` for the confirming run), and eleven real
 benchmarks have now been mined across three of the four `resource_dominance` clusters.**
+`doc/mining_results.753.ns3_r.2026-08-27.md` landed a real PGO *accept* (+37.99% overall, `-flto` +23.07%
+then PGO +11.94% on top — the cluster's largest combined win yet), a welcome real contrast to
+`735.gem5_r`'s own PGO reject the run immediately before it — together a clean demonstration that PGO's
+real effect genuinely varies by benchmark within one cluster, not a fixed per-cluster property. Also
+confirmed the multi-binary audit fix (PR #45) generalizes cleanly to a second, differently-shaped
+multi-ELF-file benchmark.
 `doc/mining_results.735.gem5_r.2026-08-27.md` landed this project's **first real PGO reject** (every
 prior PGO trial — `714.cpython_r`, `727.cppcheck_r`, `723.llvm_r` — was a real accept; `-flto` still
 accepted here, +13.62% overall) and, along the way, found and fixed a real bug in the compiled-flags
