@@ -5,14 +5,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working in this
 **Status: M0/M1's pipeline mechanics are real and working, M4's cross-benchmark knowledge transfer is
 real-verified, M2's signature-aware candidate *ranking* is implemented and real-verified (2026-08-26 —
 see the Non-obvious traps log for the two real bugs the first real-verification attempt caught and
-fixed, and `doc/mining_results.707.ntest_r.2026-08-26.md` for the confirming run), and eight real
+fixed, and `doc/mining_results.707.ntest_r.2026-08-26.md` for the confirming run), and nine real
 benchmarks have now been mined across three of the four `resource_dominance` clusters.**
 `doc/mining_results.723.llvm_r.2026-08-26.md` mined LLVM itself, the frontend-bound cluster's third real
 benchmark — `-flto` then PGO both accepted (+32.23% overall), confirming the cluster's real PGO/LTO
 priors (from `714.cpython_r`/`727.cppcheck_r`) generalize to a third, very different real-world codebase,
 and that `-march=native`'s own real rejected prior in this cluster stays correctly separate from its real
 accepted priors in `memory-bound`/`compute-bound` (cross-cluster prior separation, not one blended global
-average). `doc/mining_results.782.lbm_r.2026-08-22.md` was the first genuinely trustworthy `cfm mine`
+average). `doc/mining_results.734.vpr_r.2026-08-27.md` mined the first benchmark with
+`allocation_pressure=high` (FPGA place-and-route, a graph/heap-driven memory access pattern genuinely
+different from `lbm_r`/`zstd_r`) — `-march=native` accepted again, but by far the smallest real win on
+record for that flag (+1.04%, vs. +48.75% on `706.stockfish_r`), a genuinely informative illustration of
+why the knowledge table tracks a running mean rather than a single fixed "known-good" verdict: the same
+flag's real effect size varies by more than 40x across benchmarks in the same cluster, and the prior mean
+dropped from +17.14% to +13.14% accordingly, honestly reflecting the new data rather than staying
+anchored to one outsized earlier win. `doc/mining_results.782.lbm_r.2026-08-22.md` was the first genuinely trustworthy `cfm mine`
 result (a focused, budget-capped run, zero acceptances — a correct reject, not a bug).
 `doc/mining_results.714.cpython_r.2026-08-23.md` was the first *uncapped* corrected run and the first
 real accept: `-flto` then real two-pass PGO for **+41.65% overall vs. plain `-O3`**, Phase 6's
