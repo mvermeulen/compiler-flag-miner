@@ -5,8 +5,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working in this
 **Status: M0/M1's pipeline mechanics are real and working, M4's cross-benchmark knowledge transfer is
 real-verified, M2's signature-aware candidate *ranking* is implemented and real-verified (2026-08-26 —
 see the Non-obvious traps log for the two real bugs the first real-verification attempt caught and
-fixed, and `doc/mining_results.707.ntest_r.2026-08-26.md` for the confirming run), and twelve real
+fixed, and `doc/mining_results.707.ntest_r.2026-08-26.md` for the confirming run), and thirteen real
 benchmarks have now been mined across three of the four `resource_dominance` clusters.**
+`doc/mining_results.721.gcc_r.2026-08-28.md` mined GCC itself — a clean, genuine reject (0.0% gain,
+matching `782.lbm_r`'s own original correct reject), including `-march=native`'s own real fast-tracked
+prior (mean +13.14% before this run) landing essentially flat here (-0.15%), the fourth distinct real
+effect size that flag has now shown in the memory-bound cluster alone (+48.75% → +1.79% reject → +1.04%
+accept → -0.15% reject) — the knowledge table's own running mean continues moderating honestly
+(+13.14% → +10.48%) as more real, varied data accumulates. Also a real finding in its own right: GCC
+(memory-bound) and LLVM (frontend-bound) land in different `resource_dominance` clusters despite both
+being real-world compilers.
 `doc/mining_results.710.omnetpp_r.2026-08-28.md` mined the sixth and (for now) final real frontend-bound
 benchmark — `-flto` then PGO both accepted again (+39.90% overall), and the microarch multiplier's own
 `-march=znver5` candidate gave a real, directly-verified illustration of why CI overlap (not raw delta)
