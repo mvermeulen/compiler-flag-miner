@@ -5,8 +5,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working in this
 **Status: M0/M1's pipeline mechanics are real and working, M4's cross-benchmark knowledge transfer is
 real-verified, M2's signature-aware candidate *ranking* is implemented and real-verified (2026-08-26 —
 see the Non-obvious traps log for the two real bugs the first real-verification attempt caught and
-fixed, and `doc/mining_results.707.ntest_r.2026-08-26.md` for the confirming run), and eleven real
+fixed, and `doc/mining_results.707.ntest_r.2026-08-26.md` for the confirming run), and twelve real
 benchmarks have now been mined across three of the four `resource_dominance` clusters.**
+`doc/mining_results.710.omnetpp_r.2026-08-28.md` mined the sixth and (for now) final real frontend-bound
+benchmark — `-flto` then PGO both accepted again (+39.90% overall), and the microarch multiplier's own
+`-march=znver5` candidate gave a real, directly-verified illustration of why CI overlap (not raw delta)
+is the accept criterion: a nominal +2.68% positive delta, still correctly rejected because the two
+confidence intervals genuinely overlapped. With this run, frontend-bound `intrate` coverage is
+essentially complete (6 benchmarks, PGO/LTO each 5/6 real accepts); only three low-confidence
+memory-bound benchmarks (`708.sqlite_r`/`721.gcc_r`/`729.abc_r`) remain to finish the whole `intrate`
+suite.
 `doc/mining_results.753.ns3_r.2026-08-27.md` landed a real PGO *accept* (+37.99% overall, `-flto` +23.07%
 then PGO +11.94% on top — the cluster's largest combined win yet), a welcome real contrast to
 `735.gem5_r`'s own PGO reject the run immediately before it — together a clean demonstration that PGO's
