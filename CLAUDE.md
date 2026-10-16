@@ -1120,6 +1120,15 @@ Full branch/PR discipline, same shape as wspy's:
   matches the real thing that broke. See `doc/mining_results.735.gem5_r.2026-08-27.md` for the full
   mining-run write-up this was found inside of, including this project's first real PGO reject
   (`-flto` still accepted, +13.62% overall).
+- **Resolved 2026-10-16: `detect_microarch_flags()` skipped a hybrid Zen5 + Zen5c host even though both
+  labels mean `znver5`.** On the new mining host (`niwot`, Ryzen AI 7 350, 4 Zen5 + 4 Zen5c cores), `cpu_info`
+  reports both labels, and the original "available core labels must all agree" rule returned `[]`, so
+  Phase 6's microarch multiplier would silently skip every run here. The "don't guess" rule was meant to cover
+  cores that need *different* `-march=` targets, and two labels mapping to the same one isn't that. Fixed by
+  comparing mapped targets instead of raw labels: any unmapped available-core label still returns `[]`, and so
+  do mapped targets that disagree. Confirmed live on this host (`['-march=znver5', '-mtune=znver5']`). Also, a
+  host note: this SPEC install has no `gcc_O3.cfg`, so runs here need
+  `CFM_SPEC_CONFIG=ryzen350_64gb.gcc_O3.cfg` (label `gcc_O3`, 16 copies).
 
 ## Build & test
 

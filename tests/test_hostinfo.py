@@ -45,11 +45,31 @@ def test_detect_microarch_flags_skips_unmapped_vendor(tmp_path):
     assert detect_microarch_flags(wspy_dir) == []
 
 
-def test_detect_microarch_flags_skips_mixed_labels(tmp_path):
-    # A genuinely hybrid host -- available cores disagree, so nothing is
-    # confidently detectable without guessing which label should win.
+def test_detect_microarch_flags_maps_hybrid_zen5_zen5c(tmp_path):
+    # A real hybrid part (Ryzen AI 7 350) -- different labels, but both map to
+    # the same -march target, so there's nothing to guess between.
     wspy_dir = _fake_cpu_info(
-        tmp_path, "CPU information:\n\tAMD family 1a model 70\n\t   * 0 Zen5\n\t   * 1 Zen5c\n",
+        tmp_path, "CPU information:\n\tAMD family 1a model 60\n\t   * 0 Zen5\n\t   * 1 Zen5c\n",
+    )
+    assert detect_microarch_flags(wspy_dir) == ["-march=znver5", "-mtune=znver5"]
+
+
+def test_detect_microarch_flags_skips_mixed_mapped_and_unmapped_labels(tmp_path):
+    # One available core has no confident mapping -- still never guessed at,
+    # even though the other core's label is mapped.
+    wspy_dir = _fake_cpu_info(
+        tmp_path, "CPU information:\n\tAMD family 1a model 70\n\t   * 0 Zen5\n\t   * 1 Zen\n",
+    )
+    assert detect_microarch_flags(wspy_dir) == []
+
+
+def test_detect_microarch_flags_skips_labels_mapping_to_different_targets(tmp_path, monkeypatch):
+    # Hypothetical future mapping where available cores need different -march
+    # values -- a genuine disagreement, so nothing is detected.
+    import cfm.hostinfo as hostinfo
+    monkeypatch.setitem(hostinfo._LABEL_TO_MARCH, "Zen6", "znver6")
+    wspy_dir = _fake_cpu_info(
+        tmp_path, "CPU information:\n\tAMD family 1a model 70\n\t   * 0 Zen5\n\t   * 1 Zen6\n",
     )
     assert detect_microarch_flags(wspy_dir) == []
 
