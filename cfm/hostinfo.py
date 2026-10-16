@@ -64,10 +64,11 @@ def detect_microarch_flags(wspy_dir) -> list[str]:
     project's own posture on an optional wspy binary -- degrade gracefully,
     same as `check_regression()`/`audit_compiled_flags()` elsewhere, never a
     hard failure for what's genuinely a bonus multiplier), a non-zero exit, no
-    available cores parsed, the available cores disagreeing with each other
-    (a genuinely mixed/hybrid host -- picking either label over the other
-    would be a guess), or an available-core label with no entry in
-    `_LABEL_TO_MARCH`.
+    available cores parsed, any available-core label with no entry in
+    `_LABEL_TO_MARCH`, or the available cores' mapped `-march=` targets
+    disagreeing with each other (a genuinely mixed host -- picking either
+    target would be a guess). Labels that differ but map to the same target
+    (Zen5 + Zen5c) are not a disagreement.
     """
     cpu_info_bin = Path(wspy_dir) / "cpu_info"
     if not cpu_info_bin.exists():
@@ -87,12 +88,16 @@ def detect_microarch_flags(wspy_dir) -> list[str]:
         if match and match.group(1) == "*":
             labels.add(match.group(3))
 
-    if len(labels) != 1:
-        return []  # no cores parsed, or a genuinely mixed/ambiguous host
+    if not labels or not labels <= _LABEL_TO_MARCH.keys():
+        return []  # no cores parsed, or some available core has no mapping
 
-    uarch = _LABEL_TO_MARCH.get(next(iter(labels)))
-    if uarch is None:
-        return []
+    # Compare mapped -march targets, not raw labels: a hybrid Zen5 + Zen5c
+    # part (e.g. Ryzen AI 7 350, confirmed live 2026-10-16) reports two labels
+    # that share one ISA generation, so there's nothing to guess between.
+    uarchs = {_LABEL_TO_MARCH[label] for label in labels}
+    if len(uarchs) != 1:
+        return []  # available cores genuinely disagree on the right target
+    uarch = next(iter(uarchs))
     return [f"-march={uarch}", f"-mtune={uarch}"]
 
 
