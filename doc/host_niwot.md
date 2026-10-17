@@ -35,6 +35,96 @@ CFM_SPEC_CONFIG=ryzen350_64gb.gcc_O3.cfg .venv/bin/cfm mine <benchmark>
 | 2026-10-17 | `706.stockfish_r` | frontend-bound 40.6% (local) | `-O3 -march=native` | **+48.42%** | [link](mining_results.706.stockfish_r.2026-10-17.md) |
 | 2026-10-17 | `714.cpython_r` | frontend-bound 63.9% (local) | `-O3 -flto -fprofile-use` | **+36.49%** | [link](mining_results.714.cpython_r.2026-10-17.md) |
 
+## Summary by suite
+
+Per benchmark: the latest converged `cfm mine` experiment on this host. *Base* is the plain `-O3` calibration
+mean, *best* is the winning flag set's confirmed mean, and *gain* is best / base. Ratios are SPECrate ratios
+from single-iteration `--action=validate` runs (16 copies), not reportable SPEC scores.
+
+Geomean rows cover **only the benchmarks mined so far**, so they aren't a suite score until every row is
+filled in. The geomean gain is the geomean of the per-benchmark gain factors (equal to geomean(best) /
+geomean(base) over the same rows).
+
+### intrate (2 of 14 mined)
+
+| Benchmark | Base (`-O3`) | Best | Winning flags | Gain | Write-up |
+|---|---|---|---|---|---|
+| `706.stockfish_r` | 50.69 | 75.23 | `-O3 -march=native` | **+48.42%** | [2026-10-17](mining_results.706.stockfish_r.2026-10-17.md) |
+| `707.ntest_r` | — | — | not mined yet | — | |
+| `708.sqlite_r` | — | — | not mined yet | — | |
+| `710.omnetpp_r` | — | — | not mined yet | — | |
+| `714.cpython_r` | 37.53 | 51.23 | `-O3 -flto -fprofile-use` | **+36.49%** | [2026-10-17](mining_results.714.cpython_r.2026-10-17.md) |
+| `721.gcc_r` | — | — | not mined yet | — | |
+| `723.llvm_r` | — | — | not mined yet | — | |
+| `727.cppcheck_r` | — | — | not mined yet | — | |
+| `729.abc_r` | — | — | not mined yet | — | |
+| `734.vpr_r` | — | — | not mined yet | — | |
+| `735.gem5_r` | — | — | not mined yet | — | |
+| `750.sealcrypto_r` | — | — | not mined yet | — | |
+| `753.ns3_r` | — | — | not mined yet | — | |
+| `777.zstd_r` | — | — | not mined yet | — | |
+| **Geomean (2 of 14 mined)** | **43.62** | **62.08** | | **+42.33%** | |
+
+### fprate (0 of 12 mined)
+
+| Benchmark | Base (`-O3`) | Best | Winning flags | Gain | Write-up |
+|---|---|---|---|---|---|
+| `709.cactus_r` | — | — | not mined yet | — | |
+| `722.palm_r` | — | — | not mined yet | — | |
+| `731.astcenc_r` | — | — | not mined yet | — | |
+| `736.ocio_r` | — | — | not mined yet | — | |
+| `737.gmsh_r` | — | — | not mined yet | — | |
+| `748.flightdm_r` | — | — | not mined yet | — | |
+| `749.fotonik3d_r` | — | — | not mined yet | — | |
+| `765.roms_r` | — | — | not mined yet | — | |
+| `766.femflow_r` | — | — | not mined yet | — | |
+| `767.nest_r` | — | — | not mined yet | — | |
+| `772.marian_r` | — | — | not mined yet | — | |
+| `782.lbm_r` | — | — | not mined yet | — | |
+| **Geomean** | — | — | | — (nothing mined yet) | |
+
+### intspeed (0 of 13 mined)
+
+| Benchmark | Base (`-O3`) | Best | Winning flags | Gain | Write-up |
+|---|---|---|---|---|---|
+| `801.xz_s` | — | — | not mined yet | — | |
+| `807.ntest_s` | — | — | not mined yet | — | |
+| `817.flac_s` | — | — | not mined yet | — | |
+| `821.gcc_s` | — | — | not mined yet | — | |
+| `823.llvm_s` | — | — | not mined yet | — | |
+| `827.cppcheck_s` | — | — | not mined yet | — | |
+| `829.abc_s` | — | — | not mined yet | — | |
+| `834.vpr_s` | — | — | not mined yet | — | |
+| `835.gem5_s` | — | — | not mined yet | — | |
+| `838.diamond_s` | — | — | not mined yet | — | |
+| `846.minizinc_s` | — | — | not mined yet | — | |
+| `853.ns3_s` | — | — | not mined yet | — | |
+| `854.graph500_s` | — | — | not mined yet | — | |
+| **Geomean** | — | — | | — (nothing mined yet) | |
+
+### fpspeed (0 of 13 mined)
+
+| Benchmark | Base (`-O3`) | Best | Winning flags | Gain | Write-up |
+|---|---|---|---|---|---|
+| `800.pot3d_s` | — | — | not mined yet | — | |
+| `803.sph_exa_s` | — | — | not mined yet | — | |
+| `809.cactus_s` | — | — | not mined yet | — | |
+| `811.tealeaf_s` | — | — | not mined yet | — | |
+| `816.nab_s` | — | — | not mined yet | — | |
+| `820.cloverleaf_s` | — | — | not mined yet | — | |
+| `822.palm_s` | — | — | not mined yet | — | |
+| `849.fotonik3d_s` | — | — | not mined yet | — | |
+| `857.namd_s` | — | — | not mined yet | — | |
+| `865.roms_s` | — | — | not mined yet | — | |
+| `867.nest_s` | — | — | not mined yet | — | |
+| `872.marian_s` | — | — | not mined yet | — | |
+| `881.neutron_s` | — | — | not mined yet | — | |
+| **Geomean** | — | — | | — (nothing mined yet) | |
+
+cfm has only mined `_r` (SPECrate) benchmarks so far, on either host. The `_s` speed suites are listed
+for completeness. Whether `cfm mine` handles a speed benchmark correctly (threads rather than copies) hasn't
+been checked.
+
 ## Cross-host comparison
 
 | Benchmark | Old host | `niwot` |
