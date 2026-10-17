@@ -48,8 +48,10 @@ Measured CPU temperature stayed at 89.1-95.0°C and package power at 19.1-22.0 W
 
 **Shape: `frontend-bound`, 40.6%** (narrow margin), `vectorization_density=high`,
 `allocation_pressure=moderate`. It came from a local `deep-cpu` trial, not the reference-matrix corpus. The
-corpus lookup returned nothing during this run but worked both before and after it. `fetch_shape()` doesn't
-raise, so the cause isn't recorded; a temporary network or site problem is the likely explanation. The
+corpus lookup returned nothing during this run. *Correction:* I first put this down to a temporary network
+problem. The real cause is a slug bug, found during the `714.cpython_r` write-up: a host-prefixed
+`CFM_SPEC_CONFIG` never matches a published corpus page (see
+[`mining_results.714.cpython_r.2026-10-17.md`](mining_results.714.cpython_r.2026-10-17.md)). The
 corpus's entry for this benchmark (`amd-370-64gb`) reads `memory-bound` at 45.3%, with `frontend-bound` as
 the 35.3% alternative. Both machines put stockfish near the boundary between those two classes. Because this
 run used its own host's shape, its Phase 2 filtering differs from the old host's (next section).
