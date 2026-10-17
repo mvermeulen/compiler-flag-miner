@@ -1,0 +1,138 @@
+# `cfm mine` results: 729.abc_r on `niwot`, 2026-10-17
+
+The fourth mining run on `niwot` (see [`host_niwot.md`](host_niwot.md)), and the first mine of `729.abc_r`
+(ABC, logic synthesis and verification) on either host. It's also the first `memory-bound` run on this host
+to use cross-benchmark priors: `-fprefetch-loop-arrays` was fast-tracked on `708.sqlite_r`'s accept from
+earlier the same day.
+
+## Headline result
+
+**Nothing accepted. `-O3` alone stays the best setting (0.0% gain).** Every candidate was rejected,
+including the fast-tracked `-fprefetch-loop-arrays` (+0.87%), so sqlite's small win didn't carry over. All
+five candidates measured nominally positive (+0.87% to +1.57%), but none had a CI clear of the baseline's.
+The evidence below points to the baseline sampling slightly low rather than five flags each gaining about 1%.
+Either way, nothing here is a resolvable win.
+
+## Run metadata
+
+| | |
+|---|---|
+| Host | `niwot`: AMD Ryzen AI 7 350 (4 Zen5 + 4 Zen5c, 16 threads), 60 GB RAM |
+| Command | `CFM_SPEC_CONFIG=ryzen350_64gb.gcc_O3.cfg cfm mine 729.abc_r` (uncapped, queued to start when `708.sqlite_r` exited) |
+| Code | `main` at `ee80a98` (PR #47 merged) |
+| Experiment id | 13 |
+| Started / finished | 2026-10-17T14:36:46Z / 2026-10-17T16:36:26Z (2h00m) |
+| Final status | `converged` |
+| Trials | 22 (126-147) |
+| Candidates screened / confirmed | 2 / 0 |
+| Fast-tracked (M4) | `-fprefetch-loop-arrays` (rejected) |
+| Winning flags | `["-O3"]`, 0.0% |
+| Power profile | `balanced`, unchanged; CPU temp 85.4-91.9°C, package power 21.0-28.0 W |
+
+## Baseline
+
+| Trial | Role | Ratio |
+|---|---|---|
+| 126 | warm-up (excluded from CI) | 27.46 |
+| 127 | warm-up (excluded from CI) | 27.73 |
+| 128 | calibration | 27.62 |
+| 129 | calibration | 27.31 |
+| 130 | calibration | 27.36 |
+
+Calibration mean **27.427**, 95% CI **[27.01, 27.84]**, a ±1.5% band. That's much wider than
+`708.sqlite_r`'s (±0.4%), and it sets the bar every candidate here had to clear.
+
+**Shape: `memory-bound`, 38.2%** (low confidence; `frontend-bound` is a close alternative at 34.1%),
+`vectorization_density=low`, `allocation_pressure=moderate`, from the corpus
+(`reference-matrix:amd-370-64gb`). No local characterization trial was run.
+
+### Was the baseline low?
+
+| | Ratio |
+|---|---|
+| Calibration mean (the bar used) | 27.43 |
+| All five baseline reps including warm-ups | 27.50 |
+| Mean of all 15 candidate trials (five different flag sets) | 27.76 |
+| Lowest single candidate trial | 27.56 |
+
+Two of the three calibration reps (27.31, 27.36) are below **every** one of the 15 candidate trials, across
+five unrelated flag changes. It's much more likely that `-O3`'s true level here is around 27.6, and that
+calibration happened to catch two low runs, than that five unrelated flags all gain 0.9-1.6%. Neither the
+per-trial CPU temperature nor the package-power sample tracks the ratio (for example, trial 129 at 27.31 sits
+at 87.4°C and 25.0 W, the same range as the candidates), so there's no environmental explanation in the data.
+
+The effect is the same "baseline center biases every delta's sign" failure mode `777.zstd_r` showed on the old
+host (CLAUDE.md, 2026-08-25 traps entry), this time in the positive direction. It didn't change any verdict:
+with a true baseline near 27.6, every candidate reads about +0.5% or less, still a reject. But it inflates the
+reported deltas, and it fed those inflated deltas into the knowledge table's running means (below).
+
+## Phase 2 filtering
+
+Ten candidates were excluded by the memory-bound, low-vectorization shape: `-flto`,
+`-freorder-blocks-and-partition`, `-freorder-functions`, `-fno-semantic-interposition`, `-funroll-loops`,
+both `-mprefer-vector-width` settings (excluded because `vectorization_density=low`), `-Ofast`,
+`-ffast-math`, and `-fipa-pta`. `-fprefetch-loop-arrays` went to the M4 fast track, and two candidates went to
+screening.
+
+## Phase 3 screening (vs. most recent calibration rep, 27.36)
+
+| Trial | Flags | Ratio | Delta | Result |
+|---|---|---|---|---|
+| 131 | `-O3 -fgraphite-identity` | 27.84 | +1.76% | survived |
+| 132 | `-O3 -march=native` | 27.69 | +1.22% | survived |
+
+## Phase 4 confirmation (3 reps each, vs. baseline CI [27.01, 27.84])
+
+| Flags | Mean | 95% CI | Delta | Verdict |
+|---|---|---|---|---|
+| `-fgraphite-identity` | 27.83 | [27.40, 28.25] | +1.45% | reject (CIs overlap) |
+| `-march=native` | 27.68 | [27.30, 28.05] | +0.91% | reject |
+| `-fprefetch-loop-arrays` (fast-tracked) | 27.67 | [27.50, 27.83] | +0.87% | reject |
+
+M4 worked as designed: `-fprefetch-loop-arrays` skipped screening on sqlite's +2.08% prior, then was rejected
+on abc's own data.
+
+## Phase 5 combination
+
+Nothing was accepted, so there was nothing to combine.
+
+## Phase 6 multipliers
+
+- **PGO: skipped** (memory-bound shape).
+- **Microarch: attempted on plain `-O3`, both rejected.**
+
+  | Flags | Mean | 95% CI | Delta | Verdict |
+  |---|---|---|---|---|
+  | `-O3 -march=znver5` | 27.75 | [27.65, 27.85] | +1.19% | reject |
+  | `-O3 -mtune=znver5` | 27.86 | [27.33, 28.38] | +1.57% | reject |
+
+  `-march=znver5` comes closest to an accept here. Its tight CI overlaps the baseline's upper bound by only
+  about 0.01 (27.65 against 27.84). Against a re-measured baseline near 27.6 it would read about +0.5%,
+  under the 1.0% bar either way.
+
+All five audits confirm the flags under test were compiled in.
+
+## Knowledge table after this run (`memory-bound`, `niwot`)
+
+| Flag | n | Accepted | Mean delta |
+|---|---|---|---|
+| `-fprefetch-loop-arrays` | 2 | 1 | +1.48% |
+| `-fgraphite-identity` | 2 | 0 | +1.06% |
+| `-mprefer-vector-width=256` | 1 | 0 | +0.48% |
+| `-mtune=znver5` | 2 | 0 | +0.33% |
+| `-march=native` | 2 | 0 | +0.19% |
+| `-mprefer-vector-width=512` | 1 | 0 | -0.30% |
+| `-march=znver5` | 2 | 0 | -0.33% |
+
+Because of the low-baseline effect, this run's contributions are probably about 1 point optimistic per flag.
+
+## Follow-ups
+
+1. If an abc number needs to be firm: a few interleaved `cfm measure` reps of `-O3` and `-O3 -march=znver5`
+   (the same pattern as the stockfish `-flto` re-measure) would settle whether anything here is above +1%.
+2. Same low-confidence-corpus caveat as `708.sqlite_r`: the corpus put abc at memory-bound 38.2%, with
+   frontend-bound close behind at 34.1%, and LTO and PGO were excluded on that basis. A local `deep-cpu`
+   characterization would show whether this host agrees.
+3. A design question raised by this run, not specific to abc: a 3-rep calibration CI can land low or high by
+   about 1% on a benchmark this noisy. Re-running one or two `-O3` reps at the end of Phase 4 would detect
+   that kind of baseline offset cheaply.

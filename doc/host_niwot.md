@@ -35,7 +35,7 @@ CFM_SPEC_CONFIG=ryzen350_64gb.gcc_O3.cfg .venv/bin/cfm mine <benchmark>
 | 2026-10-17 | `706.stockfish_r` | frontend-bound 40.6% (local) | `-O3 -march=native` | **+48.42%** | [link](mining_results.706.stockfish_r.2026-10-17.md) |
 | 2026-10-17 | `714.cpython_r` | frontend-bound 63.9% (local) | `-O3 -flto -fprofile-use` | **+36.49%** | [link](mining_results.714.cpython_r.2026-10-17.md) |
 | 2026-10-17 | `708.sqlite_r` | memory-bound 39.7% (corpus, low conf.) | `-O3 -fprefetch-loop-arrays` | **+1.76%** | [link](mining_results.708.sqlite_r.2026-10-17.md) |
-| in progress | `729.abc_r` | memory-bound 38.2% (corpus, low conf.) | | | |
+| 2026-10-17 | `729.abc_r` | memory-bound 38.2% (corpus, low conf.) | `-O3` (nothing accepted) | 0.00% | [link](mining_results.729.abc_r.2026-10-17.md) |
 
 ## Summary by suite
 
@@ -47,7 +47,7 @@ Geomean rows cover **only the benchmarks mined so far**, so they aren't a suite 
 filled in. The geomean gain is the geomean of the per-benchmark gain factors (equal to geomean(best) /
 geomean(base) over the same rows).
 
-### intrate (3 of 14 mined)
+### intrate (4 of 14 mined)
 
 | Benchmark | Base (`-O3`) | Best | Winning flags | Gain | Write-up |
 |---|---|---|---|---|---|
@@ -59,13 +59,13 @@ geomean(base) over the same rows).
 | `721.gcc_r` | — | — | not mined yet | — | |
 | `723.llvm_r` | — | — | not mined yet | — | |
 | `727.cppcheck_r` | — | — | not mined yet | — | |
-| `729.abc_r` | — | — | not mined yet | — | |
+| `729.abc_r` | 27.43 | 27.43 | `-O3` (nothing accepted) | 0.00% | [2026-10-17](mining_results.729.abc_r.2026-10-17.md) |
 | `734.vpr_r` | — | — | not mined yet | — | |
 | `735.gem5_r` | — | — | not mined yet | — | |
 | `750.sealcrypto_r` | — | — | not mined yet | — | |
 | `753.ns3_r` | — | — | not mined yet | — | |
 | `777.zstd_r` | — | — | not mined yet | — | |
-| **Geomean (3 of 14 mined)** | **35.88** | **45.66** | | **+27.27%** | |
+| **Geomean (4 of 14 mined)** | **33.55** | **40.20** | | **+19.82%** | |
 
 ### fprate (0 of 12 mined)
 
@@ -135,6 +135,7 @@ been checked.
 | `714.cpython_r` | `-flto` + PGO +41.65% | `-flto` + PGO +36.49% |
 | `714.cpython_r`, `-march=native` | -5.32% (screening only) | -4.77% (confirmed) |
 | `708.sqlite_r` | not mined | `-fprefetch-loop-arrays` +1.76% |
+| `729.abc_r` | not mined | nothing accepted (0.0%) |
 
 ## Open items
 
@@ -144,6 +145,9 @@ been checked.
   `-march=native`. It's stockfish-specific: `714.cpython_r` gained +7.94% from `-flto` here.
 - `708.sqlite_r`: try `--param prefetch-latency=N` (200/300/400) on top of the accepted
   `-fprefetch-loop-arrays`. The catalog entry is a placeholder that every run skips.
+- `729.abc_r`: every candidate read +0.9% to +1.6% against a calibration baseline that appears to have sampled
+  about 1% low. No verdict changes, but the knowledge-table deltas are inflated. A short interleaved re-measure
+  would settle it.
 - Corpus shapes for `708.sqlite_r`/`729.abc_r` are low-confidence memory-bound, which excludes LTO and PGO
   untried. A local cross-check (a `deep-cpu` trial or a direct `-flto` measure) would show whether that's
   right.
