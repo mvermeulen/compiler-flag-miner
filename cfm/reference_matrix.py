@@ -167,8 +167,14 @@ def _slugify_test_point(spec_config: str) -> str:
     points represent; SPEC's peak/base *tune* is about which --config section gets a flag override,
     a mechanism cfm uses even for its "base_flags"-only baseline trial. Confirmed live, 2026-08-20:
     every cpu2026 entry published in this corpus so far is "-base" -- there is no "-peak" entry to
-    match against yet regardless, so this is also just the only slug that could ever hit."""
+    match against yet regardless, so this is also just the only slug that could ever hit.
+
+    A host-prefixed config name (`ryzen350_64gb.gcc_O3.cfg`, the convention on the `niwot` host,
+    found 2026-10-17) keeps only its last `.`-separated part. Published test points are named after the
+    SPEC label (`gcc_O3`), which is that last part, not the whole filename; keeping the host prefix
+    produced a slug that never matched, so every run there silently fell back to a local trial."""
     tag = spec_config[:-len(".cfg")] if spec_config.endswith(".cfg") else spec_config
+    tag = tag.rsplit(".", 1)[-1]
     return f"{tag.lower()}-base"
 
 

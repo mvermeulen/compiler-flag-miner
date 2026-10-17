@@ -49,6 +49,13 @@ def test_slugify_test_point_handles_no_cfg_suffix():
     assert reference_matrix._slugify_test_point("llvm_O3") == "llvm_o3-base"
 
 
+def test_slugify_test_point_drops_a_host_prefix():
+    # niwot's SPEC install names its config "<host>.<label>.cfg"; the published
+    # test point is keyed on the label alone.
+    assert reference_matrix._slugify_test_point("ryzen350_64gb.gcc_O3.cfg") == "gcc_o3-base"
+    assert reference_matrix._slugify_test_point("ryzen350_64gb.gcc_O3") == "gcc_o3-base"
+
+
 # -- pure-logic: HTML block extraction, against a real captured page ----------
 
 def test_extract_preformatted_blocks_finds_every_block_in_real_page():

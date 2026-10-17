@@ -1129,6 +1129,14 @@ Full branch/PR discipline, same shape as wspy's:
   do mapped targets that disagree. Confirmed live on this host (`['-march=znver5', '-mtune=znver5']`). Also, a
   host note: this SPEC install has no `gcc_O3.cfg`, so runs here need
   `CFM_SPEC_CONFIG=ryzen350_64gb.gcc_O3.cfg` (label `gcc_O3`, 16 copies).
+- **Resolved 2026-10-17: a host-prefixed `CFM_SPEC_CONFIG` silently disabled the reference-matrix lookup.**
+  `reference_matrix._slugify_test_point()` turned `ryzen350_64gb.gcc_O3.cfg` into `ryzen350_64gb.gcc_o3-base`.
+  Published test points are keyed on the SPEC label (`gcc_o3-base`), so on `niwot` every run's
+  `fetch_shape()` returned `None` and fell back to a local `deep-cpu` trial. Nothing was logged, because
+  `fetch_shape()` degrades silently by design. That made the first miss (706.stockfish_r) look like a network
+  problem until a second run missed the same way. Direct checks without `CFM_SPEC_CONFIG` set had "worked",
+  which hid it. Fixed by keeping only the config name's last `.`-separated part. **Lesson:** reproduce a
+  "works when I try it" discrepancy with the exact environment the real run used before calling it transient.
 
 ## Build & test
 
