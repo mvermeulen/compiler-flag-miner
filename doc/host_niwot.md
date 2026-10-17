@@ -34,6 +34,8 @@ CFM_SPEC_CONFIG=ryzen350_64gb.gcc_O3.cfg .venv/bin/cfm mine <benchmark>
 |---|---|---|---|---|---|
 | 2026-10-17 | `706.stockfish_r` | frontend-bound 40.6% (local) | `-O3 -march=native` | **+48.42%** | [link](mining_results.706.stockfish_r.2026-10-17.md) |
 | 2026-10-17 | `714.cpython_r` | frontend-bound 63.9% (local) | `-O3 -flto -fprofile-use` | **+36.49%** | [link](mining_results.714.cpython_r.2026-10-17.md) |
+| 2026-10-17 | `708.sqlite_r` | memory-bound 39.7% (corpus, low conf.) | `-O3 -fprefetch-loop-arrays` | **+1.76%** | [link](mining_results.708.sqlite_r.2026-10-17.md) |
+| in progress | `729.abc_r` | memory-bound 38.2% (corpus, low conf.) | | | |
 
 ## Summary by suite
 
@@ -45,13 +47,13 @@ Geomean rows cover **only the benchmarks mined so far**, so they aren't a suite 
 filled in. The geomean gain is the geomean of the per-benchmark gain factors (equal to geomean(best) /
 geomean(base) over the same rows).
 
-### intrate (2 of 14 mined)
+### intrate (3 of 14 mined)
 
 | Benchmark | Base (`-O3`) | Best | Winning flags | Gain | Write-up |
 |---|---|---|---|---|---|
 | `706.stockfish_r` | 50.69 | 75.23 | `-O3 -march=native` | **+48.42%** | [2026-10-17](mining_results.706.stockfish_r.2026-10-17.md) |
 | `707.ntest_r` | — | — | not mined yet | — | |
-| `708.sqlite_r` | — | — | not mined yet | — | |
+| `708.sqlite_r` | 24.27 | 24.70 | `-O3 -fprefetch-loop-arrays` | **+1.76%** | [2026-10-17](mining_results.708.sqlite_r.2026-10-17.md) |
 | `710.omnetpp_r` | — | — | not mined yet | — | |
 | `714.cpython_r` | 37.53 | 51.23 | `-O3 -flto -fprofile-use` | **+36.49%** | [2026-10-17](mining_results.714.cpython_r.2026-10-17.md) |
 | `721.gcc_r` | — | — | not mined yet | — | |
@@ -63,7 +65,7 @@ geomean(base) over the same rows).
 | `750.sealcrypto_r` | — | — | not mined yet | — | |
 | `753.ns3_r` | — | — | not mined yet | — | |
 | `777.zstd_r` | — | — | not mined yet | — | |
-| **Geomean (2 of 14 mined)** | **43.62** | **62.08** | | **+42.33%** | |
+| **Geomean (3 of 14 mined)** | **35.88** | **45.66** | | **+27.27%** | |
 
 ### fprate (0 of 12 mined)
 
@@ -132,15 +134,19 @@ been checked.
 | `706.stockfish_r` | `-march=native` +48.75% | `-march=native` +48.42% |
 | `714.cpython_r` | `-flto` + PGO +41.65% | `-flto` + PGO +36.49% |
 | `714.cpython_r`, `-march=native` | -5.32% (screening only) | -4.77% (confirmed) |
+| `708.sqlite_r` | not mined | `-fprefetch-loop-arrays` +1.76% |
 
 ## Open items
 
-- **Reference-matrix lookup never matches on this host.** `_slugify_test_point()` turns
-  `ryzen350_64gb.gcc_O3.cfg` into `ryzen350_64gb.gcc_o3-base`, not the published `gcc_o3-base`, so every run
-  falls back to a local `deep-cpu` characterization trial. Harmless (this host's own shape), but not the
-  designed first choice. Not fixed yet.
-- `706.stockfish_r`: `-O3 -flto` screened at **-16.9%** (single trial, never confirmed). `714.cpython_r`'s
-  `-flto` was +7.94% on the same host, so this is stockfish-specific. Worth re-measuring.
+- ~~Reference-matrix lookup never matches on this host~~: fixed in PR #47 (merged 2026-10-17). It first
+  matched for real on `708.sqlite_r`. Runs before that (`706.stockfish_r`, `714.cpython_r`) used local shapes.
+- `706.stockfish_r`: `-flto` is a confirmed **-16.6%** regression (3 reps), and about -24% on top of
+  `-march=native`. It's stockfish-specific: `714.cpython_r` gained +7.94% from `-flto` here.
+- `708.sqlite_r`: try `--param prefetch-latency=N` (200/300/400) on top of the accepted
+  `-fprefetch-loop-arrays`. The catalog entry is a placeholder that every run skips.
+- Corpus shapes for `708.sqlite_r`/`729.abc_r` are low-confidence memory-bound, which excludes LTO and PGO
+  untried. A local cross-check (a `deep-cpu` trial or a direct `-flto` measure) would show whether that's
+  right.
 - `714.cpython_r`: `-march=native` regresses -4.77% at plain `-O3` on both hosts. The cause is still open.
-- The microarch multiplier has run for real here (cpython, both candidates rejected), so PR #46's detection
-  fix is verified end to end.
+- The microarch multiplier has run for real here (cpython, sqlite; all four candidates rejected), so PR #46's
+  detection fix is verified end to end.

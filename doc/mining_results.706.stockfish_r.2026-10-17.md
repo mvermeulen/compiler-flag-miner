@@ -130,10 +130,32 @@ All entries are under `cluster_key = frontend-bound`, with `n_trials = 1` each. 
 
 `-flto` has no entry. Screening-phase prunes don't write to the knowledge table.
 
+## Follow-up re-measure: `-flto` (2026-10-17)
+
+Three interleaved rounds of standalone `cfm measure` trials (experiments 3-11, 07:56-11:04Z). Each round ran
+`-O3`, then `-O3 -flto`, then `-O3 -march=native -flto`, so slow drift would hit all three sets equally.
+All 9 built and validated.
+
+| Flags | Ratios | Mean | vs `-O3` |
+|---|---|---|---|
+| `-O3` | 50.89, 50.70, 50.71 | 50.77 | — |
+| `-O3 -flto` | 42.17, 42.38, 42.40 | 42.32 | **-16.6%** |
+| `-O3 -march=native -flto` | 56.88, 57.09, 56.99 | 56.99 | +12.3% |
+
+**Confirmed: LTO is a large, stable regression for stockfish on this host.** The `-O3` control matches the
+mining run's baseline (50.69), and `-O3 -flto` matches its single screening trial (-16.9%). The ratios within
+each set span at most 0.5%. LTO also hurts on top of `-march=native`: 56.99 against 75.23 without it, about
+-24%. That means the mine's winning set `-O3 -march=native` would have stood even if `-flto` had reached
+Phase 5. Why is open. The likely suspect is LTO's cross-unit inlining or code layout changing stockfish's hot
+evaluation and search code. `714.cpython_r`'s +7.94% from `-flto` on the same host rules out a general LTO
+problem on `niwot`.
+
+(These standalone `cfm measure` trials go into `cfm.db` as their own experiments, but they don't update the
+knowledge table. Only `cfm mine`'s Phase 4+ trials do.)
+
 ## Follow-ups
 
-1. Re-measure `-O3 -flto` (and `-O3 -march=native -flto`) on this host to confirm or rule out the -16.9%
-   regression.
-2. Exercise the microarch multiplier on a benchmark where `-march=native` doesn't win.
-3. The `-march=native` prior in this host's `frontend-bound` cluster will fast-track that flag on
-   `714.cpython_r`, the next run.
+1. ~~Re-measure `-O3 -flto`~~: done, see above. Confirmed -16.6%.
+2. ~~Exercise the microarch multiplier~~: done on `714.cpython_r` and `708.sqlite_r` (both rejected).
+3. The `-march=native` prior in this host's `frontend-bound` cluster fast-tracked that flag on
+   `714.cpython_r`, where it was rejected at -4.77%.
