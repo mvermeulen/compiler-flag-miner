@@ -1,0 +1,48 @@
+# Mining host: `niwot`
+
+Index of `cfm mine` results for this host. Every `doc/mining_results.*.md` dated before 2026-10 came from a
+different machine (a Strix Halo host, 91 GB RAM, 32 copies). Those results, and that host's `cfm.db`
+knowledge priors, don't carry over here.
+
+## Host
+
+| | |
+|---|---|
+| CPU | AMD Ryzen AI 7 350 w/ Radeon 860M (family 1a model 60): 4 Zen5 + 4 Zen5c cores, 16 threads |
+| Memory | 60 GB |
+| Chassis | mini PC (DMI chassis type 35) |
+| OS / compiler | Linux 7.0.0-38-generic, GCC 15.2.0 (Ubuntu 15.2.0-16ubuntu1) |
+| SPEC | CPU2026 1.0.1 at `/home/mev/cpu2026` |
+| SPEC config | `ryzen350_64gb.gcc_O3.cfg` (label `gcc_O3`, `copies = 16`) |
+| Power | amd-pstate `active`, governor `powersave`, EPP `balance_performance`, profile `balanced` |
+| Microarch detection | `-march=znver5` / `-mtune=znver5` (needs PR #46, the hybrid Zen5/Zen5c fix) |
+| Sensors | `k10temp` (CPU temp), `amdgpu` `power1_average` (package power, ~5 W idle, ~20 W under SPECrate load) |
+
+## Running here
+
+This SPEC install has no `gcc_O3.cfg` (cfm's default), so every invocation needs:
+
+```
+CFM_SPEC_CONFIG=ryzen350_64gb.gcc_O3.cfg .venv/bin/cfm mine <benchmark>
+```
+
+`cfm.db` on this host started empty on 2026-10-16.
+
+## Results
+
+| Date | Benchmark | Shape (source) | Winning flags | Gain vs `-O3` | Write-up |
+|---|---|---|---|---|---|
+| 2026-10-17 | `706.stockfish_r` | frontend-bound 40.6% (local) | `-O3 -march=native` | **+48.42%** | [link](mining_results.706.stockfish_r.2026-10-17.md) |
+| in progress | `714.cpython_r` | | | | |
+
+## Cross-host comparison
+
+| Benchmark | Old host | `niwot` |
+|---|---|---|
+| `706.stockfish_r` | `-march=native` +48.75% | `-march=native` +48.42% |
+
+## Open items
+
+- `706.stockfish_r`: `-O3 -flto` screened at **-16.9%** (single trial, never confirmed). Worth re-measuring.
+- The microarch multiplier hasn't run for real on this host yet. It skips whenever `-march=native` is
+  already in the winning set.
