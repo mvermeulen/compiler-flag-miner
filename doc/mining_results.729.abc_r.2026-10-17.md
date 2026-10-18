@@ -126,10 +126,29 @@ All five audits confirm the flags under test were compiled in.
 
 Because of the low-baseline effect, this run's contributions are probably about 1 point optimistic per flag.
 
+## Follow-up re-measure: `-O3` vs `-O3 -march=znver5` (2026-10-18)
+
+Three interleaved rounds of standalone `cfm measure` trials (experiments 14-19, 18:39-20:05Z), alternating
+`-O3` and `-O3 -march=znver5`. All 6 built and passed `--action=validate`.
+
+| Flags | Ratios | Mean | 95% CI | vs `-O3` |
+|---|---|---|---|---|
+| `-O3` | 27.66, 27.46, 27.56 | 27.56 | [27.31, 27.81] | — |
+| `-O3 -march=znver5` | 27.62, 27.73, 27.79 | 27.71 | [27.50, 27.92] | **+0.55%** |
+
+**The mine's verdict stands: nothing here clears +1%.**
+
+- `-march=znver5` reads +0.55%. Its CI overlaps `-O3`'s, and it's below the 1.0% practical-significance bar,
+  so it's still a reject.
+- `-O3`'s true level is about 27.56. The mine's calibration mean (27.43) was about 0.5% low, not the ~1%
+  estimated above. The mine's deltas were inflated by about half a point, and so were its knowledge-table
+  means.
+- `-march=znver5` here (27.71) matches the mine's own measurement (27.75), so the candidate trials were
+  fine. Only the baseline was off.
+
 ## Follow-ups
 
-1. If an abc number needs to be firm: a few interleaved `cfm measure` reps of `-O3` and `-O3 -march=znver5`
-   (the same pattern as the stockfish `-flto` re-measure) would settle whether anything here is above +1%.
+1. ~~Interleaved re-measure of `-O3` and `-O3 -march=znver5`~~: done, see above. +0.55%, reject stands.
 2. Same low-confidence-corpus caveat as `708.sqlite_r`: the corpus put abc at memory-bound 38.2%, with
    frontend-bound close behind at 34.1%, and LTO and PGO were excluded on that basis. A local `deep-cpu`
    characterization would show whether this host agrees.
