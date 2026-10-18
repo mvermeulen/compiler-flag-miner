@@ -22,7 +22,7 @@ slightly improve an existing result, **L** is a curiosity or diagnostic.
 
 | # | Pri | Opportunity | Motivation |
 |---|---|---|---|
-| 7 | H | **End-of-Phase-4 baseline re-check:** one or two extra `-O3` reps after confirmation, flagging a baseline offset beyond some threshold. | `729.abc_r`'s calibration appears to have sampled about 1% low, inflating every delta and the knowledge-table means. Cheap (one or two trials per mine). |
+| 7 | H | **End-of-Phase-4 baseline re-check:** one or two extra `-O3` reps after confirmation, flagging a baseline offset beyond some threshold. | `729.abc_r`'s calibration sampled about 0.5% low (confirmed by re-measure), inflating every delta and the knowledge-table means. Cheap (one or two trials per mine). |
 | 8 | H | **Don't let a low-confidence corpus shape exclude whole flag families.** When the corpus margin between primary and alternative shape is narrow, union the two shapes' plausible candidates, or fall back to local `deep-cpu`. | sqlite and abc both excluded LTO and PGO on a ~4-5 point corpus margin from another machine. |
 | 9 | M | **Re-try screening prunes in combination.** A flag pruned at Phase 3 is never tried again with the eventual winner. | Interactions such as `-march=native` with `-fprefetch-loop-arrays` (sqlite: -1.84% for `-march=znver5`) go unexplored in both directions. |
 | 10 | M | **Resolve catalog template placeholders** (`--param prefetch-latency=N` and others) into a small, fixed sweep instead of skipping them. | Item 1 is the hand-run version of this. |
