@@ -43,9 +43,15 @@ Per benchmark: the latest converged `cfm mine` experiment on this host. *Base* i
 mean, *best* is the winning flag set's confirmed mean, and *gain* is best / base. Ratios are SPECrate ratios
 from single-iteration `--action=validate` runs (16 copies), not reportable SPEC scores.
 
-Geomean rows cover **only the benchmarks mined so far**, so they aren't a suite score until every row is
-filled in. The geomean gain is the geomean of the per-benchmark gain factors (equal to geomean(best) /
-geomean(base) over the same rows).
+Each suite has two geomean rows:
+
+- **Suite geomean gain (progression)** is the geomean of the per-benchmark gain factors over **every**
+  benchmark in the suite, counting each unmined benchmark as 1.00× (no gain yet). It only rises as
+  mining finds wins, so it tracks overall progress, and it becomes the real suite-level gain once every
+  row is mined. Base and best ratios don't exist for unmined rows, so this row shows the gain only.
+- **Mined-only geomean** covers just the benchmarks mined so far: base and best ratio geomeans, plus their
+  gain (geomean(best) / geomean(base) over the same rows). It shows the typical win per mined benchmark,
+  not a suite score.
 
 ### intrate (4 of 14 mined)
 
@@ -65,7 +71,8 @@ geomean(base) over the same rows).
 | `750.sealcrypto_r` | — | — | not mined yet | — | |
 | `753.ns3_r` | — | — | not mined yet | — | |
 | `777.zstd_r` | — | — | not mined yet | — | |
-| **Geomean (4 of 14 mined)** | **33.55** | **40.20** | | **+19.82%** | |
+| **Suite geomean gain (14, unmined = 1.00×)** | | | | **+5.30%** | |
+| Mined-only geomean (4 of 14) | 33.55 | 40.20 | | +19.82% | |
 
 ### fprate (0 of 12 mined)
 
@@ -83,7 +90,8 @@ geomean(base) over the same rows).
 | `767.nest_r` | — | — | not mined yet | — | |
 | `772.marian_r` | — | — | not mined yet | — | |
 | `782.lbm_r` | — | — | not mined yet | — | |
-| **Geomean** | — | — | | — (nothing mined yet) | |
+| **Suite geomean gain (12, unmined = 1.00×)** | | | | +0.00% | |
+| Mined-only geomean (0 of 12) | — | — | | — | |
 
 ### intspeed (0 of 13 mined)
 
@@ -102,7 +110,8 @@ geomean(base) over the same rows).
 | `846.minizinc_s` | — | — | not mined yet | — | |
 | `853.ns3_s` | — | — | not mined yet | — | |
 | `854.graph500_s` | — | — | not mined yet | — | |
-| **Geomean** | — | — | | — (nothing mined yet) | |
+| **Suite geomean gain (13, unmined = 1.00×)** | | | | +0.00% | |
+| Mined-only geomean (0 of 13) | — | — | | — | |
 
 ### fpspeed (0 of 13 mined)
 
@@ -121,7 +130,19 @@ geomean(base) over the same rows).
 | `867.nest_s` | — | — | not mined yet | — | |
 | `872.marian_s` | — | — | not mined yet | — | |
 | `881.neutron_s` | — | — | not mined yet | — | |
-| **Geomean** | — | — | | — (nothing mined yet) | |
+| **Suite geomean gain (13, unmined = 1.00×)** | | | | +0.00% | |
+| Mined-only geomean (0 of 13) | — | — | | — | |
+
+### Suite geomean progression
+
+Suite geomean gain over every benchmark in the suite, unmined = 1.00×, recorded after each mine.
+
+| After | intrate (14) | fprate (12) | intspeed (13) | fpspeed (13) |
+|---|---|---|---|---|
+| `706.stockfish_r` | +2.86% | +0.00% | +0.00% | +0.00% |
+| `714.cpython_r` | +5.17% | +0.00% | +0.00% | +0.00% |
+| `708.sqlite_r` | +5.30% | +0.00% | +0.00% | +0.00% |
+| `729.abc_r` | +5.30% | +0.00% | +0.00% | +0.00% |
 
 cfm has only mined `_r` (SPECrate) benchmarks so far, on either host. The `_s` speed suites are listed
 for completeness. Whether `cfm mine` handles a speed benchmark correctly (threads rather than copies) hasn't
@@ -139,18 +160,13 @@ been checked.
 
 ## Open items
 
+Follow-up experiments and pipeline ideas are tracked in
+[`opportunities_niwot.md`](opportunities_niwot.md) (prefetch-distance sweep for sqlite, abc re-measure,
+local-shape cross-checks, the stockfish LTO regression, and others). Standing facts about this host:
+
 - ~~Reference-matrix lookup never matches on this host~~: fixed in PR #47 (merged 2026-10-17). It first
   matched for real on `708.sqlite_r`. Runs before that (`706.stockfish_r`, `714.cpython_r`) used local shapes.
 - `706.stockfish_r`: `-flto` is a confirmed **-16.6%** regression (3 reps), and about -24% on top of
   `-march=native`. It's stockfish-specific: `714.cpython_r` gained +7.94% from `-flto` here.
-- `708.sqlite_r`: try `--param prefetch-latency=N` (200/300/400) on top of the accepted
-  `-fprefetch-loop-arrays`. The catalog entry is a placeholder that every run skips.
-- `729.abc_r`: every candidate read +0.9% to +1.6% against a calibration baseline that appears to have sampled
-  about 1% low. No verdict changes, but the knowledge-table deltas are inflated. A short interleaved re-measure
-  would settle it.
-- Corpus shapes for `708.sqlite_r`/`729.abc_r` are low-confidence memory-bound, which excludes LTO and PGO
-  untried. A local cross-check (a `deep-cpu` trial or a direct `-flto` measure) would show whether that's
-  right.
-- `714.cpython_r`: `-march=native` regresses -4.77% at plain `-O3` on both hosts. The cause is still open.
-- The microarch multiplier has run for real here (cpython, sqlite; all four candidates rejected), so PR #46's
+- The microarch multiplier has run for real here (cpython, sqlite, abc; every candidate rejected), so PR #46's
   detection fix is verified end to end.
