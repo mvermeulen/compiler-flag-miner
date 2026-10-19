@@ -110,9 +110,40 @@ These are the first `memory-bound` rows on `niwot`: `-fprefetch-loop-arrays` (ac
 `-mtune=znver5` (all rejected). `729.abc_r`, mined next and also corpus-characterized as memory-bound, will be
 the first to use them: `-fprefetch-loop-arrays` should be fast-tracked.
 
+## Follow-up sweep: `--param prefetch-latency` (2026-10-18)
+
+Three interleaved rounds of standalone `cfm measure` trials (experiments 21-32, 2026-10-18T23:31Z to
+2026-10-19T03:05Z). Each round ran the winner `-O3 -fprefetch-loop-arrays` as the control, then the same flags
+with `--param=prefetch-latency=` 100, 300 and 400. All 12 built and passed `--action=validate`, and the
+rendered `OPTIMIZE` line confirms the parameter reached the compiler. GCC 15's default for this target is
+already **200** (`gcc -Q --help=params`), so the control *is* the 200 point.
+
+| `prefetch-latency` | Ratios (round 1, 2, 3) | Mean | 95% CI | vs control |
+|---|---|---|---|---|
+| 200 (default, control) | 24.02, 24.61, 24.50 | 24.37 | [23.60, 25.15] | — |
+| 100 | 24.41, 24.37, 24.42 | 24.40 | [24.33, 24.46] | +0.10% |
+| 300 | 24.39, 24.47, 24.35 | 24.40 | [24.25, 24.55] | +0.11% |
+| 400 | 24.48, 24.64, 24.58 | 24.57 | [24.36, 24.77] | +0.79% |
+
+**No setting beats the default. `-O3 -fprefetch-loop-arrays` stays as is.**
+
+- 400's +0.79% depends entirely on the control's first-round reading (24.02), which was the low outlier of the
+  whole sweep. Against the control's rounds 2 and 3 (mean 24.55), 400 reads +0.07%, and 100 and 300 read about
+  -0.6%. Paired round by round, 400 leads by +1.92%, +0.16%, +0.33%.
+- Even taken at face value, +0.79% is below the 1.0% practical-significance bar, and the CIs overlap.
+
+**A new question this sweep raises:** the control's level (24.37 overall, 24.55 without round 1) is below the
+mine's own confirmed winner (24.70) and close to the mine's plain `-O3` baseline (24.27). Against that
+baseline, the control reads only +0.4% to +1.2%, not the +1.76% the mine reported. `cfm measure` takes a
+3-iteration median and the mine's trials are single-iteration, but on stockfish and abc that difference didn't
+move the level. This sweep had no `-O3` control, so it can't settle the question itself. An interleaved
+`-O3` vs `-O3 -fprefetch-loop-arrays` re-measure would. Added to the
+[opportunity list](opportunities_niwot.md).
+
 ## Follow-ups
 
-1. **`--param prefetch-latency=N`** is the catalog's natural companion to `-fprefetch-loop-arrays`, but every
+1. ~~**`--param prefetch-latency=N`**~~ (done 2026-10-18, see above: no setting beats the default 200).
+   **`--param prefetch-latency=N`** is the catalog's natural companion to `-fprefetch-loop-arrays`, but every
    run skips it as an "unresolved template placeholder". Its catalog notes suggest sweeping 200/300/400. Now
    that `-fprefetch-loop-arrays` has a real accept, sqlite is the obvious place to try that sweep, for example
    with `cfm measure 708.sqlite_r --flags="-O3 -fprefetch-loop-arrays --param prefetch-latency=300"`.
