@@ -159,7 +159,7 @@ been checked.
 | `706.stockfish_r` | `-march=native` +48.75% | `-march=native` +48.42% |
 | `714.cpython_r` | `-flto` + PGO +41.65% | `-flto` + PGO +36.49% |
 | `714.cpython_r`, `-march=native` | -5.32% (screening only) | -4.77% (confirmed) |
-| `708.sqlite_r` | not mined | `-fprefetch-loop-arrays` +1.76% (prefetch-latency sweep: no better setting) |
+| `708.sqlite_r` | not mined | `-fprefetch-loop-arrays` +1.76% (re-check: +1.68%; prefetch-latency sweep: no better setting) |
 | `729.abc_r` | not mined | nothing accepted (0.0%; re-measure: `-march=znver5` +0.55%) |
 | `707.ntest_r` | `-march=native` +14.83% | `-march=native` +14.27% |
 | `750.sealcrypto_r` | `-march=native` +14.17% / +15.63% | `-march=native` +20.49% |

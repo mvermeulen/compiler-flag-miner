@@ -140,6 +140,25 @@ move the level. This sweep had no `-O3` control, so it can't settle the question
 `-O3` vs `-O3 -fprefetch-loop-arrays` re-measure would. Added to the
 [opportunity list](opportunities_niwot.md).
 
+## Follow-up re-check: `-O3` vs `-O3 -fprefetch-loop-arrays` (2026-10-19)
+
+Three interleaved rounds of standalone `cfm measure` trials (experiments 34-39, 08:10-09:57Z), alternating the
+two flag sets. All 6 built and passed `--action=validate`.
+
+| Flags | Ratios (round 1, 2, 3) | Mean | 95% CI | vs `-O3` |
+|---|---|---|---|---|
+| `-O3` | 24.15, 24.18, 24.18 | 24.17 | [24.12, 24.22] | — |
+| `-O3 -fprefetch-loop-arrays` | 24.62, 24.57, 24.54 | 24.58 | [24.47, 24.68] | **+1.68%** |
+
+**Confirmed: `-fprefetch-loop-arrays` is a real +1.7% for sqlite.**
+
+- The CIs don't overlap, and the gain is consistent round by round (+1.95%, +1.62%, +1.46%). It also clears
+  the 1.0% bar, matching the mine's +1.76%.
+- Both flag sets measured about 0.4-0.5% below their mine values (24.17 vs 24.27, 24.58 vs 24.70). It was a
+  level shift that affected both equally, not a smaller gain.
+- That level shift also answers the sweep's question. The sweep's rounds 2-3 control (24.55) matches this
+  re-check's 24.58. Only its round-1 control (24.02) was an outlier.
+
 ## Follow-ups
 
 1. ~~**`--param prefetch-latency=N`**~~ (done 2026-10-18, see above: no setting beats the default 200).
