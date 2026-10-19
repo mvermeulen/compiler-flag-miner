@@ -29,6 +29,8 @@ slightly improve an existing result, **L** is a curiosity or diagnostic.
 | 8 | H | **Don't let a low-confidence corpus shape exclude whole flag families.** When the corpus margin between primary and alternative shape is narrow, union the two shapes' plausible candidates, or fall back to local `deep-cpu`. | sqlite and abc both excluded LTO and PGO on a ~4-5 point corpus margin from another machine. |
 | 9 | M | **Re-try screening prunes in combination.** A flag pruned at Phase 3 is never tried again with the eventual winner. | Interactions such as `-march=native` with `-fprefetch-loop-arrays` (sqlite: -1.84% for `-march=znver5`) go unexplored in both directions. |
 | 10 | M | **Resolve catalog template placeholders** (`--param prefetch-latency=N` and others) into a small, fixed sweep instead of skipping them. | Item 1 is the hand-run version of this. |
+| 15 | M | **M4 fast-track needs a stronger prior.** Today any single past accept qualifies, and the mean can be one outlier. Require a majority-accepted record, or rank by median. | `710.omnetpp_r` fast-tracked `-march=native` on a 1-of-2 record (mean +21.8%, really +48% and -4.8%) and rejected it at +0.35%, spending 3 confirmation trials instead of 1 screening trial. |
+| 16 | L | **Why is PGO's gain on top of LTO smaller here than on the old host?** omnetpp +14.9% vs +23.5%, cpython +24.8% vs +31.2%. | Possibly the cache-size difference (64 MB L3 vs 16 + 8 MB) or the hybrid Zen5c cores. A diagnostic, unlikely to add gain directly. |
 | 11 | L | **Speed-suite (`_s`) support check.** cfm has never mined a speed benchmark (threads, not copies). | Half of the four suites on the host page are speed suites. |
 
 ## Done
