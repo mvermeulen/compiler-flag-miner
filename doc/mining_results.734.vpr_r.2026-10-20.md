@@ -125,3 +125,29 @@ the old host after its stockfish outlier is set aside (stockfish profiles fronte
    show whether that cost anything. Added to the [opportunity list](opportunities_niwot.md) as #20.
 2. Opportunity #15 now has a memory-bound case too: `-fprefetch-loop-arrays` fast-tracked on a 1-of-2 record
    and rejected.
+
+## Follow-up: LTO and PGO on top of the winner (2026-10-20)
+
+Opportunity #20. The mine never tried `-flto` or PGO, because the memory-bound shape excluded both. This
+follow-up measured them directly: three interleaved rounds of four flag sets, each a `cfm measure` run at
+its default 3 iterations (median), experiments 44-55, 11:09Z-15:04Z.
+
+| Flags | Round 1 | Round 2 | Round 3 | Mean | 95% CI | vs control | vs mine's `-O3` (21.20) |
+|---|---|---|---|---|---|---|---|
+| `-O3 -march=native` (control) | 21.40 | 21.43 | 21.41 | 21.41 | [21.38, 21.44] | — | +0.98% |
+| `-O3 -march=native -flto` | 23.82 | 23.89 | 23.83 | 23.84 | [23.75, 23.94] | **+11.35%** | +12.44% |
+| `-O3 -march=native -fprofile-use` | 22.26 | 22.34 | 22.25 | 22.28 | [22.16, 22.40] | **+4.05%** | +5.07% |
+| `-O3 -march=native -flto -fprofile-use` | 24.53 | 24.54 | 24.58 | 24.55 | [24.49, 24.61] | **+14.65%** | **+15.77%** |
+
+- **Both help, and they stack.** Every CI is far clear of every other, and each flag set's three rounds agree
+  within 0.3%. `-flto` alone is worth +11.4%, PGO alone +4.1%, and together +14.7%.
+- **vpr's winner is now `-O3 -march=native -flto -fprofile-use`, +15.77% over plain `-O3`**, against the
+  mine's +1.31%. The control here (21.41) sits within 0.3% of the mine's own `-O3 -march=native` result
+  (21.48), so the two runs are comparable.
+- Every build passed validate. Every audit confirmed `-O3` (and `-fprofile-use` where present) compiled in,
+  with `-march=native`/`-flto` reported as "not independently checkable", as expected.
+
+**This is the pipeline's biggest miss so far.** The shape filter treated a 45.4% memory-bound margin as
+enough to rule out the whole frontend-bound family (`-flto`, PGO), and that cost vpr about 14 points. On the
+old host the same filter made the same call. Opportunities #8 (don't let a moderate-margin shape exclude
+whole families) and #2 (the same LTO/PGO check for `708.sqlite_r` and `729.abc_r`) are now high priority.
