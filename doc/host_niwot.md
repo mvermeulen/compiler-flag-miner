@@ -41,6 +41,7 @@ CFM_SPEC_CONFIG=ryzen350_64gb.gcc_O3.cfg .venv/bin/cfm mine <benchmark>
 | 2026-10-19 | `710.omnetpp_r` | frontend-bound 45.9% (corpus) | `-O3 -flto -fprofile-use` | **+29.94%** | [link](mining_results.710.omnetpp_r.2026-10-19.md) |
 | 2026-10-19 | `723.llvm_r` | frontend-bound 61.6% (corpus) | `-O3 -flto -fprofile-use` | **+24.83%** | [link](mining_results.723.llvm_r.2026-10-19.md) |
 | 2026-10-20 | `727.cppcheck_r` | frontend-bound 71.0% (corpus) | `-O3 -fprofile-use` | **+7.78%** | [link](mining_results.727.cppcheck_r.2026-10-19.md) |
+| 2026-10-20 | `734.vpr_r` | memory-bound 45.4% (corpus) | `-O3 -march=native` | **+1.31%** | [link](mining_results.734.vpr_r.2026-10-20.md) |
 
 ## Summary by suite
 
@@ -58,7 +59,7 @@ Each suite has two geomean rows:
   gain (geomean(best) / geomean(base) over the same rows). It shows the typical win per mined benchmark,
   not a suite score.
 
-### intrate (9 of 14 mined)
+### intrate (10 of 14 mined)
 
 | Benchmark | Base (`-O3`) | Best | Winning flags | Gain | Write-up |
 |---|---|---|---|---|---|
@@ -71,13 +72,13 @@ Each suite has two geomean rows:
 | `723.llvm_r` | 25.83 | 32.24 | `-O3 -flto -fprofile-use` | **+24.83%** | [2026-10-19](mining_results.723.llvm_r.2026-10-19.md) |
 | `727.cppcheck_r` | 24.85 | 26.79 | `-O3 -fprofile-use` | **+7.78%** | [2026-10-19](mining_results.727.cppcheck_r.2026-10-19.md) |
 | `729.abc_r` | 27.43 | 27.43 | `-O3` (nothing accepted) | 0.00% | [2026-10-17](mining_results.729.abc_r.2026-10-17.md) |
-| `734.vpr_r` | — | — | not mined yet | — | |
+| `734.vpr_r` | 21.20 | 21.48 | `-O3 -march=native` | **+1.31%** | [2026-10-20](mining_results.734.vpr_r.2026-10-20.md) |
 | `735.gem5_r` | — | — | not mined yet | — | |
 | `750.sealcrypto_r` | 27.91 | 33.63 | `-O3 -march=native` | **+20.49%** | [2026-10-18](mining_results.750.sealcrypto_r.2026-10-18.md) |
 | `753.ns3_r` | — | — | not mined yet | — | |
 | `777.zstd_r` | — | — | not mined yet | — | |
-| **Suite geomean gain (14, unmined = 1.00×)** | | | | **+12.12%** | |
-| Mined-only geomean (9 of 14) | 29.24 | 34.93 | | +19.48% | |
+| **Suite geomean gain (14, unmined = 1.00×)** | | | | **+12.23%** | |
+| Mined-only geomean (10 of 14) | 28.31 | 33.28 | | +17.53% | |
 
 ### fprate (0 of 12 mined)
 
@@ -153,6 +154,7 @@ Suite geomean gain over every benchmark in the suite, unmined = 1.00×, recorded
 | `710.omnetpp_r` | +9.77% | +0.00% | +0.00% | +0.00% |
 | `723.llvm_r` | +11.52% | +0.00% | +0.00% | +0.00% |
 | `727.cppcheck_r` | +12.12% | +0.00% | +0.00% | +0.00% |
+| `734.vpr_r` | +12.23% | +0.00% | +0.00% | +0.00% |
 
 cfm has only mined `_r` (SPECrate) benchmarks so far, on either host. The `_s` speed suites are listed
 for completeness. Whether `cfm mine` handles a speed benchmark correctly (threads rather than copies) hasn't
@@ -172,6 +174,7 @@ been checked.
 | `710.omnetpp_r` | `-flto` + PGO +39.90% (LTO +13.3%, PGO +23.5%) | `-flto` + PGO +29.94% (LTO +13.1%, PGO +14.9%) |
 | `723.llvm_r` | `-flto` + PGO +32.23% (LTO +5.9%, PGO +24.9%) | `-flto` + PGO +24.83% (LTO +1.4%, PGO +23.1%) |
 | `727.cppcheck_r` | PGO +10.79% (`-flto` +4.20% rejected) | PGO +7.78% (`-flto` +0.96% rejected) |
+| `734.vpr_r` | `-march=native` +1.04% (fast-tracked) | `-march=native` +1.31% (screened; `-fprefetch-loop-arrays` fast-tracked, +0.42% rejected) |
 
 ## Open items
 
