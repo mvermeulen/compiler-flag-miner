@@ -155,3 +155,27 @@ Three interleaved rounds of standalone `cfm measure` trials (experiments 14-19, 
 3. A design question raised by this run, not specific to abc: a 3-rep calibration CI can land low or high by
    about 1% on a benchmark this noisy. Re-running one or two `-O3` reps at the end of Phase 4 would detect
    that kind of baseline offset cheaply.
+
+## Follow-up: LTO and PGO (2026-10-21)
+
+Opportunity #2. The mine never tried `-flto` or PGO, because the low-confidence memory-bound shape (38.2%)
+excluded both. This check measured them directly: three interleaved rounds of four flag sets, each a
+`cfm measure` run at its default 3 iterations (median), experiments 70-81, 05:12Z-08:37Z.
+
+| Flags | Round 1 | Round 2 | Round 3 | Mean | 95% CI | vs control | vs mine's `-O3` (27.43) |
+|---|---|---|---|---|---|---|---|
+| `-O3` (control) | 27.28 | 27.25 | 27.26 | 27.27 | [27.22, 27.31] | — | -0.60% |
+| `-O3 -flto` | 28.12 | 28.17 | 28.05 | 28.11 | [27.96, 28.26] | **+3.10%** | **+2.49%** |
+| `-O3 -fprofile-use` | 26.10 | 26.12 | 26.46 | 26.22 | [25.73, 26.72] | -3.82% | -4.40% |
+| `-O3 -flto -fprofile-use` | 25.53 | 25.87 | 26.00 | 25.80 | [25.20, 26.40] | -5.38% | -5.94% |
+
+- **LTO is a real win, +3.1%,** CI clear of the control's and of the 1% bar. abc is spread across many
+  translation units (it's a full logic-synthesis system), so cross-module inlining has something to work on.
+- **PGO is a real loss, about -4%, with or without LTO.** It's the second benchmark on this host where PGO
+  regresses, after `735.gem5_r`. abc is like gem5 in one relevant way: a large system whose hot code depends
+  on which commands the script runs, so SPEC's training run may exercise different paths from the reference
+  run. An interleaved `-fprofile-partial-training` check is queued for both (#21).
+- **abc's winner is now `-O3 -flto`, +2.49% over the mine's `-O3`** (the mine accepted nothing). The control
+  here measured 0.6% below the mine's baseline, so against this run's own control the gain is +3.10%; the host
+  page uses the more conservative figure.
+- Every build passed validate, and no audit logged a warning.
