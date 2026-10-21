@@ -107,3 +107,27 @@ None of the trials logged an audit warning.
 1. **The LTO/PGO check (queued).** Interleaved `cfm measure` of `-O3` against `-O3 -flto`,
    `-O3 -fprofile-use` and `-O3 -flto -fprofile-use`, 3 rounds. GCC is a large C codebase with a big
    instruction footprint, the kind of program LTO and PGO usually help, so a real gain is likely.
+
+## Follow-up: LTO and PGO (2026-10-21)
+
+The check the follow-up above called for. Three interleaved rounds of four flag sets, each a `cfm measure`
+run at its default 3 iterations (median), experiments 82-93, 08:37Z-14:33Z. Each round took about 2 hours:
+a two-pass PGO build of GCC takes about half an hour.
+
+| Flags | Round 1 | Round 2 | Round 3 | Mean | 95% CI | vs control | vs mine's `-O3` (22.99) |
+|---|---|---|---|---|---|---|---|
+| `-O3` (control) | 22.93 | 22.98 | 22.96 | 22.96 | [22.89, 23.02] | — | -0.15% |
+| `-O3 -flto` | 23.41 | 23.31 | 23.39 | 23.37 | [23.24, 23.51] | +1.81% | +1.66% |
+| `-O3 -fprofile-use` | 24.46 | 24.43 | 24.36 | 24.42 | [24.30, 24.54] | +6.37% | +6.21% |
+| `-O3 -flto -fprofile-use` | 25.43 | 25.46 | 25.46 | 25.45 | [25.41, 25.49] | **+10.87%** | **+10.71%** |
+
+- **LTO and PGO both help, and they stack**, as on vpr. Every CI is clear of every other. Together they're
+  worth more than the sum of their separate gains (+10.9% vs +1.8% + 6.4%): with whole-program visibility,
+  the profile guides inlining across modules, not just within each file.
+- **gcc's winner is now `-O3 -flto -fprofile-use`, +10.71% over the mine's `-O3`**, against the mine's 0.00%.
+  The control matched the mine's baseline within 0.15%, so the two runs agree.
+- Every build passed validate, and no audit logged a warning.
+
+This is the fourth memory-bound benchmark on this host (after vpr, sqlite and abc) where the shape filter
+excluded LTO and PGO and a direct check found a real gain. Every memory-bound benchmark here has now gained
+from at least one of them.
