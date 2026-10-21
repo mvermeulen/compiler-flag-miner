@@ -34,7 +34,7 @@ CFM_SPEC_CONFIG=ryzen350_64gb.gcc_O3.cfg .venv/bin/cfm mine <benchmark>
 |---|---|---|---|---|---|
 | 2026-10-17 | `706.stockfish_r` | frontend-bound 40.6% (local) | `-O3 -march=native` | **+48.42%** | [link](mining_results.706.stockfish_r.2026-10-17.md) |
 | 2026-10-17 | `714.cpython_r` | frontend-bound 63.9% (local) | `-O3 -flto -fprofile-use` | **+36.49%** | [link](mining_results.714.cpython_r.2026-10-17.md) |
-| 2026-10-17 | `708.sqlite_r` | memory-bound 39.7% (corpus, low conf.) | `-O3 -fprefetch-loop-arrays` | **+1.76%** | [link](mining_results.708.sqlite_r.2026-10-17.md) |
+| 2026-10-17 | `708.sqlite_r` | memory-bound 39.7% (corpus, low conf.) | `-O3 -fprefetch-loop-arrays -fprofile-use` (follow-up; the mine found `-O3 -fprefetch-loop-arrays`, +1.76%) | **+10.48%** | [link](mining_results.708.sqlite_r.2026-10-17.md) |
 | 2026-10-17 | `729.abc_r` | memory-bound 38.2% (corpus, low conf.) | `-O3` (nothing accepted) | 0.00% | [link](mining_results.729.abc_r.2026-10-17.md) |
 | 2026-10-18 | `707.ntest_r` | compute-bound 40.6% (corpus) | `-O3 -march=native` | **+14.27%** | [link](mining_results.707.ntest_r.2026-10-18.md) |
 | 2026-10-19 | `750.sealcrypto_r` | compute-bound 55.1% (corpus) | `-O3 -march=native` | **+20.49%** | [link](mining_results.750.sealcrypto_r.2026-10-18.md) |
@@ -67,7 +67,7 @@ Each suite has two geomean rows:
 |---|---|---|---|---|---|
 | `706.stockfish_r` | 50.69 | 75.23 | `-O3 -march=native` | **+48.42%** | [2026-10-17](mining_results.706.stockfish_r.2026-10-17.md) |
 | `707.ntest_r` | 28.61 | 32.69 | `-O3 -march=native` | **+14.27%** | [2026-10-18](mining_results.707.ntest_r.2026-10-18.md) |
-| `708.sqlite_r` | 24.27 | 24.70 | `-O3 -fprefetch-loop-arrays` | **+1.76%** | [2026-10-17](mining_results.708.sqlite_r.2026-10-17.md) |
+| `708.sqlite_r` | 24.27 | 26.81 | `-O3 -fprefetch-loop-arrays -fprofile-use` ¹ | **+10.48%** | [2026-10-17](mining_results.708.sqlite_r.2026-10-17.md#follow-up-lto-and-pgo-on-top-of-the-winner-2026-10-21) |
 | `710.omnetpp_r` | 24.06 | 31.27 | `-O3 -flto -fprofile-use` | **+29.94%** | [2026-10-19](mining_results.710.omnetpp_r.2026-10-19.md) |
 | `714.cpython_r` | 37.53 | 51.23 | `-O3 -flto -fprofile-use` | **+36.49%** | [2026-10-17](mining_results.714.cpython_r.2026-10-17.md) |
 | `721.gcc_r` | 22.99 | 22.99 | `-O3` (nothing accepted) | 0.00% | [2026-10-20](mining_results.721.gcc_r.2026-10-20.md) |
@@ -79,11 +79,12 @@ Each suite has two geomean rows:
 | `750.sealcrypto_r` | 27.91 | 33.63 | `-O3 -march=native` | **+20.49%** | [2026-10-18](mining_results.750.sealcrypto_r.2026-10-18.md) |
 | `753.ns3_r` | — | — | not mined yet | — | |
 | `777.zstd_r` | — | — | not mined yet | — | |
-| **Suite geomean gain (14, unmined = 1.00×)** | | | | **+14.15%** | |
-| Mined-only geomean (12 of 14) | 28.26 | 32.98 | | +16.70% | |
+| **Suite geomean gain (14, unmined = 1.00×)** | | | | **+14.82%** | |
+| Mined-only geomean (12 of 14) | 28.26 | 33.20 | | +17.50% | |
 
-¹ From the interleaved LTO/PGO follow-up (`cfm measure`, 3 rounds), not from the mine itself, whose shape filter
-excluded both. The mine's own winner was `-O3 -march=native` at 21.48 (+1.31%).
+¹ From an interleaved LTO/PGO follow-up (`cfm measure`, 3 rounds), not from the mine itself, whose shape filter
+excluded both. The mines' own winners were `-O3 -fprefetch-loop-arrays` at 24.70 (sqlite, +1.76%) and
+`-O3 -march=native` at 21.48 (vpr, +1.31%).
 
 ### fprate (0 of 12 mined)
 
@@ -163,6 +164,7 @@ Suite geomean gain over every benchmark in the suite, unmined = 1.00×, recorded
 | `734.vpr_r` LTO/PGO follow-up | +13.30% | +0.00% | +0.00% | +0.00% |
 | `721.gcc_r` | +13.30% | +0.00% | +0.00% | +0.00% |
 | `735.gem5_r` | +14.15% | +0.00% | +0.00% | +0.00% |
+| `708.sqlite_r` LTO/PGO follow-up | +14.82% | +0.00% | +0.00% | +0.00% |
 
 cfm has only mined `_r` (SPECrate) benchmarks so far, on either host. The `_s` speed suites are listed
 for completeness. Whether `cfm mine` handles a speed benchmark correctly (threads rather than copies) hasn't
@@ -175,7 +177,7 @@ been checked.
 | `706.stockfish_r` | `-march=native` +48.75% | `-march=native` +48.42% |
 | `714.cpython_r` | `-flto` + PGO +41.65% | `-flto` + PGO +36.49% |
 | `714.cpython_r`, `-march=native` | -5.32% (screening only) | -4.77% (confirmed) |
-| `708.sqlite_r` | not mined | `-fprefetch-loop-arrays` +1.76% (re-check: +1.68%; prefetch-latency sweep: no better setting) |
+| `708.sqlite_r` | not mined | `-fprefetch-loop-arrays` +1.76% (re-check: +1.68%; prefetch-latency sweep: no better setting); follow-up `-fprefetch-loop-arrays -fprofile-use` +10.48% (`-flto` -0.7%) |
 | `729.abc_r` | not mined | nothing accepted (0.0%; re-measure: `-march=znver5` +0.55%) |
 | `707.ntest_r` | `-march=native` +14.83% | `-march=native` +14.27% |
 | `750.sealcrypto_r` | `-march=native` +14.17% / +15.63% | `-march=native` +20.49% |

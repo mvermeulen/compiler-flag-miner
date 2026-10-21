@@ -169,3 +169,30 @@ two flag sets. All 6 built and passed `--action=validate`.
 2. A local-shape cross-check would show whether LTO and PGO were really ruled out correctly, given that the
    corpus shape is low-confidence (memory-bound 39.7%). Options: one `deep-cpu` characterization, or a direct
    `cfm measure` of `-O3 -flto`.
+
+## Follow-up: LTO and PGO on top of the winner (2026-10-21)
+
+Opportunity #2. The mine never tried `-flto` or PGO, because the low-confidence memory-bound shape (39.7%)
+excluded both. After vpr showed that exclusion hiding +14.7%, this check measured them directly: three
+interleaved rounds of four flag sets, each a `cfm measure` run at its default 3 iterations (median),
+experiments 58-69, 01:41Z-05:13Z.
+
+| Flags | Round 1 | Round 2 | Round 3 | Mean | 95% CI | vs control | vs mine's `-O3` (24.27) |
+|---|---|---|---|---|---|---|---|
+| `-O3 -fprefetch-loop-arrays` (control) | 24.50 | 24.40 | 24.46 | 24.45 | [24.32, 24.59] | — | +0.76% |
+| `+ -flto` | 24.30 | 24.26 | 24.30 | 24.29 | [24.22, 24.35] | -0.69% | +0.06% |
+| `+ -fprofile-use` | 26.78 | 26.81 | 26.85 | 26.81 | [26.73, 26.90] | **+9.65%** | **+10.48%** |
+| `+ -flto -fprofile-use` | 26.75 | 26.78 | 27.02 | 26.85 | [26.48, 27.21] | +9.79% | +10.63% |
+
+- **PGO is worth +9.7%, and the shape filter hid it.** Its CI is far clear of the control's, and the three
+  rounds agree within 0.3%.
+- **LTO doesn't help sqlite.** Alone it reads -0.69% (CI clear of the control, so a small real loss), and on
+  top of PGO it adds +0.14% with overlapping CIs. sqlite is one big amalgamated translation unit
+  (`sqlite3.c`, plus the small `speedtest1.c` driver), so the compiler already sees nearly the whole program without LTO.
+- **sqlite's winner is now `-O3 -fprefetch-loop-arrays -fprofile-use`, +10.48% over plain `-O3`**, against the
+  mine's +1.76%. The version without `-flto` is the pick: same speed within noise, a tighter CI, and a
+  cheaper build.
+- The control again measured below the mine's own winner (24.45 vs 24.70), as in the earlier sweep and
+  re-check. The gain above is against the mine's `-O3` (24.27); against this run's control it's +9.65%.
+- Every build passed validate, and every audit confirmed `-O3`, `-fprefetch-loop-arrays` and (where present)
+  `-fprofile-use` compiled in.
