@@ -132,3 +132,33 @@ reached as if there were no profile, instead of as cold. Added to the opportunit
 1. **PGO with `-fprofile-partial-training`** on top of `-O3 -flto`, interleaved against `-O3 -flto`. If the
    regression is a training-coverage problem, this should remove it and might turn it into a gain (#21).
 2. Opportunity #15: `-march=native` fast-tracked and rejected again (1 of 6 now).
+
+## Follow-up: PGO with `-fprofile-partial-training` (2026-10-21)
+
+Opportunity #21, the check follow-up 1 above called for. Three interleaved rounds of three flag sets, each a
+`cfm measure` run at its default 3 iterations (median), experiments 94-102, 14:33Z-18:08Z.
+
+| Flags | Round 1 | Round 2 | Round 3 | Mean | 95% CI | vs control | vs mine's `-O3` (34.06) |
+|---|---|---|---|---|---|---|---|
+| `-O3 -flto` (control) | 36.92 | 36.31 | 36.66 | 36.63 | [35.87, 37.39] | — | +7.53% |
+| `-O3 -flto -fprofile-use` | 32.61 | 32.39 | 32.80 | 32.60 | [32.09, 33.11] | -10.99% | -4.29% |
+| `-O3 -flto -fprofile-use -fprofile-partial-training` | 37.13 | 37.00 | 37.20 | 37.11 | [36.85, 37.37] | +1.32% | +8.95% |
+
+- **Plain PGO's regression reproduces**: -11.0% here against -10.6% in the mine, and lower than `-flto` in
+  every round.
+- **`-fprofile-partial-training` removes it completely.** It was above the control in every round, by
+  +1.3% on average, but the CIs overlap, so that part isn't a demonstrated gain. Code the training run never
+  reached is what plain PGO was getting wrong, which supports the training-coverage reading. Once that code is
+  optimized normally rather than for size, the profile gives back about what it took away, and adds little
+  beyond what `-flto` already gets.
+- **gem5's winner stays `-O3 -flto`.** Partial training isn't distinguishable from it here, and its mean
+  (37.11) is below the mine's own `-O3 -flto` result (37.81). This round's control ran about 3% below the
+  mine's `-O3 -flto` and was noisier (36.31-36.92), so the comparisons above are against the control in the
+  same session, not the mine.
+- **The flag is applied as intended.** The SPEC build log shows it on the compile and link lines of both
+  builds (with `-fprofile-generate` in pass 1, `-fprofile-use` in pass 2), GCC raised no warnings about it,
+  and the audit confirms `-fprofile-use` and `-fprofile-partial-training` compiled in. Every build passed
+  validate, and no audit logged a warning.
+
+For the pipeline, this suggests Phase 6 could try `-fprofile-partial-training` as a second PGO variant when
+plain PGO regresses. Here it would have turned a -10.6% reject into a near-tie, not into a new winner.
