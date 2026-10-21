@@ -179,3 +179,28 @@ excluded both. This check measured them directly: three interleaved rounds of fo
   here measured 0.6% below the mine's baseline, so against this run's own control the gain is +3.10%; the host
   page uses the more conservative figure.
 - Every build passed validate, and no audit logged a warning.
+
+## Follow-up: PGO with `-fprofile-partial-training` (2026-10-21)
+
+Opportunity #21, the same check as `735.gem5_r`'s
+([write-up](mining_results.735.gem5_r.2026-10-20.md#follow-up-pgo-with--fprofile-partial-training-2026-10-21)).
+Three interleaved rounds of three flag sets on top of the `-O3 -flto` winner, each a `cfm measure` run at its
+default 3 iterations (median), experiments 103-111, 18:08Z-20:59Z.
+
+| Flags | Round 1 | Round 2 | Round 3 | Mean | 95% CI | vs control | vs mine's `-O3` (27.43) |
+|---|---|---|---|---|---|---|---|
+| `-O3 -flto` (control) | 28.21 | 28.04 | 27.85 | 28.04 | [27.59, 28.48] | — | +2.22% |
+| `-O3 -flto -fprofile-use` | 25.51 | 25.61 | 25.61 | 25.58 | [25.43, 25.73] | -8.77% | -6.75% |
+| `-O3 -flto -fprofile-use -fprofile-partial-training` | 27.15 | 26.97 | 27.00 | 27.04 | [26.80, 27.28] | -3.54% | -1.40% |
+
+- **Plain PGO on top of LTO regresses again**, -8.8% against the control. The previous check had it at
+  -8.2% (25.80 against 28.11).
+- **`-fprofile-partial-training` recovers about 60% of the loss but not all of it.** It's still -3.5%
+  below `-O3 -flto`, with the CIs clear of each other, in every round. That's different from gem5, where the
+  flag removed the whole regression. On abc, poor training coverage explains only part of PGO's loss. What's
+  left is a loss in code the training run *did* reach, so the train workload's hot paths differ in weight
+  from the reference run's, not just in which ones run at all.
+- **abc's winner stays `-O3 -flto`** (+2.49% on the host page). The control matched the previous check's
+  `-O3 -flto` (28.04 against 28.11).
+- The audit confirms `-fprofile-use` and `-fprofile-partial-training` compiled in. Every build passed validate,
+  and no audit logged a warning.
