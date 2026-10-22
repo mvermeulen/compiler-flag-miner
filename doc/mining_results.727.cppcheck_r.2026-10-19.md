@@ -122,7 +122,7 @@ None of the trials logged an audit warning.
 ## Follow-up: LTO and PGO together (2026-10-22)
 
 Opportunity #18, the check follow-up 1 above called for. Three interleaved rounds of four flag sets, each a
-`cfm measure` run at its default 3 iterations (median), experiments 126-137, 14:12Z-17:40Z.
+`cfm measure` run at its default 3 iterations (median), experiments 126-137, 14:24Z-17:49Z.
 
 | Flags | Round 1 | Round 2 | Round 3 | Mean | 95% CI | vs control | vs mine's `-O3` (24.85) |
 |---|---|---|---|---|---|---|---|
