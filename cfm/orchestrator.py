@@ -953,6 +953,67 @@ def greedy_combine(
 
 
 @dataclass
+class BaselineRecheck:
+    """``recheck_baseline()``'s result: one extra baseline-flags rep after
+    Phase 4. ``flagged`` means the baseline looks offset (see
+    ``BASELINE_RECHECK_WARN_PCT``); it's reported, never acted on."""
+
+    trial_id: int
+    ratio: Optional[float]
+    delta_pct: Optional[float]
+    flagged: bool
+    reason: str
+
+
+def recheck_baseline(
+    cfg: CfmConfig,
+    *,
+    experiment_id: int,
+    benchmark: str,
+    baseline: BaselineResult,
+    workload: Optional[WorkloadBackend] = None,
+    instrumentation: Optional[InstrumentationBackend] = None,
+) -> BaselineRecheck:
+    """One calibration-grade rep of ``baseline.flags`` after Phase 4, compared
+    against ``baseline.ci``. An offset baseline inflates or deflates every
+    Phase 4 delta and the knowledge-table means built from them, and nothing
+    else in a mine would notice. This only detects it: the result is logged as a
+    hypothesis, printed when flagged, and reported in ``cfm mine``'s summary."""
+    result = run_one_trial(
+        cfg, benchmark=benchmark, flags=baseline.flags, phase="confirmation",
+        profile=CALIBRATION_PROFILE, iterations=CALIBRATION_ITERATIONS,
+        experiment_id=experiment_id, workload=workload, instrumentation=instrumentation,
+    )
+    ratio = result.get("ratio")
+    if ratio is None:
+        recheck = BaselineRecheck(
+            trial_id=result["trial_id"], ratio=None, delta_pct=None, flagged=False,
+            reason=f"baseline re-check produced no usable ratio (build_status={result['build_status']!r})",
+        )
+    else:
+        delta_pct = (ratio - baseline.ci.mean) / baseline.ci.mean * 100.0
+        outside = ratio < baseline.ci.low or ratio > baseline.ci.high
+        flagged = outside and abs(delta_pct) >= BASELINE_RECHECK_WARN_PCT
+        recheck = BaselineRecheck(
+            trial_id=result["trial_id"], ratio=ratio, delta_pct=delta_pct, flagged=flagged,
+            reason=(
+                f"baseline re-check after Phase 4: ratio {ratio:.6g} vs baseline mean "
+                f"{baseline.ci.mean:.6g} (95% CI [{baseline.ci.low:.6g}, {baseline.ci.high:.6g}]), "
+                f"{delta_pct:+.2f}%"
+                + (" -- FLAGGED: baseline may be offset; Phase 4 deltas may be biased" if flagged else "")
+            ),
+        )
+    conn = db.connect(cfg.db_path)
+    try:
+        db.record_hypothesis(conn, trial_id=recheck.trial_id, proposed_by="rule", rationale=recheck.reason)
+    finally:
+        conn.close()
+    if recheck.flagged:
+        print(f"warning: {recheck.reason}")
+    return recheck
+
+
+@dataclass
 class MultiplierResult:
     """Phase 6's output for a single compounding multiplier -- PGO (real
     two-pass `-fprofile-use`, cfm/workloads/spec_cpu2026.py's PASS1/PASS2
@@ -1127,65 +1188,3 @@ def run_microarch_multiplier(
         attempted=True, winning_flags=current_flags, winning_ci=current_ci,
         outcome=winner, outcomes=outcomes,
     )
-
-
-@dataclass
-class BaselineRecheck:
-    """``recheck_baseline()``'s result: one extra baseline-flags rep after
-    Phase 4. ``flagged`` means the baseline looks offset (see
-    ``BASELINE_RECHECK_WARN_PCT``); it's reported, never acted on."""
-
-    trial_id: int
-    ratio: Optional[float]
-    delta_pct: Optional[float]
-    flagged: bool
-    reason: str
-
-
-def recheck_baseline(
-    cfg: CfmConfig,
-    *,
-    experiment_id: int,
-    benchmark: str,
-    baseline: BaselineResult,
-    workload: Optional[WorkloadBackend] = None,
-    instrumentation: Optional[InstrumentationBackend] = None,
-) -> BaselineRecheck:
-    """One calibration-grade rep of ``baseline.flags`` after Phase 4, compared
-    against ``baseline.ci``. An offset baseline inflates or deflates every
-    Phase 4 delta and the knowledge-table means built from them, and nothing
-    else in a mine would notice. This only detects it: the result is logged as a
-    hypothesis, printed when flagged, and reported in ``cfm mine``'s summary."""
-    result = run_one_trial(
-        cfg, benchmark=benchmark, flags=baseline.flags, phase="confirmation",
-        profile=CALIBRATION_PROFILE, iterations=CALIBRATION_ITERATIONS,
-        experiment_id=experiment_id, workload=workload, instrumentation=instrumentation,
-    )
-    ratio = result.get("ratio")
-    if ratio is None:
-        recheck = BaselineRecheck(
-            trial_id=result["trial_id"], ratio=None, delta_pct=None, flagged=False,
-            reason=f"baseline re-check produced no usable ratio (build_status={result['build_status']!r})",
-        )
-    else:
-        delta_pct = (ratio - baseline.ci.mean) / baseline.ci.mean * 100.0
-        outside = ratio < baseline.ci.low or ratio > baseline.ci.high
-        flagged = outside and abs(delta_pct) >= BASELINE_RECHECK_WARN_PCT
-        recheck = BaselineRecheck(
-            trial_id=result["trial_id"], ratio=ratio, delta_pct=delta_pct, flagged=flagged,
-            reason=(
-                f"baseline re-check after Phase 4: ratio {ratio:.6g} vs baseline mean "
-                f"{baseline.ci.mean:.6g} (95% CI [{baseline.ci.low:.6g}, {baseline.ci.high:.6g}]), "
-                f"{delta_pct:+.2f}%"
-                + (" -- FLAGGED: baseline may be offset; Phase 4 deltas may be biased" if flagged else "")
-            ),
-        )
-    conn = db.connect(cfg.db_path)
-    try:
-        db.record_hypothesis(conn, trial_id=recheck.trial_id, proposed_by="rule", rationale=recheck.reason)
-    finally:
-        conn.close()
-    if recheck.flagged:
-        print(f"warning: {recheck.reason}")
-    return recheck
-
