@@ -680,12 +680,15 @@ def _confirm_flagset(
     parent_trial_id: Optional[int] = None,
     workload: Optional[WorkloadBackend] = None,
     instrumentation: Optional[InstrumentationBackend] = None,
+    record_knowledge: bool = True,
 ) -> ConfirmationOutcome:
     """Shared confirmation-grade measurement + accept/reject machinery for both
     Phase 4 (doc/DESIGN.md sec. 6, one candidate flag re-run against the
     *baseline*) and Phase 5 (a cumulative or pair flagset re-run against the
     *current running set* -- ``compare_ci`` is which of those two this call means,
     letting Phase 5 re-use this unchanged rather than duplicating it).
+    ``record_knowledge=False`` skips the knowledge-table upsert, for a trial
+    whose ``flags[-1]`` isn't the only thing it adds (the near-miss PGO variant).
     """
     def confirmation_rep():
         return run_one_trial(
@@ -777,7 +780,7 @@ def _confirm_flagset(
         # length/shape (baseline.flags + [flag]) -- phase is the only reliable
         # signal. The candidate itself is flags[-1] (the newly-added one), not
         # flags[0] (now baseline's own first flag, e.g. "-O3").
-        if phase in ("confirmation", "multiplier") and ratios:
+        if record_knowledge and phase in ("confirmation", "multiplier") and ratios:
             db.upsert_knowledge(
                 conn, cluster_key=baseline.resource_dominance or "unknown", compiler="gcc",
                 compiler_version=None, target_arch=None, flag=flags[-1], accepted=accepted,
@@ -1109,6 +1112,26 @@ def defer_vector_width_candidates(
     return deferred, remaining
 
 
+def find_near_miss_flags(
+    confirmed: list[ConfirmationOutcome], baseline: BaselineResult, winning_flags: list[str],
+) -> list[str]:
+    """Phase 4 rejects whose CI sits clear above the baseline's but whose
+    delta missed ``MIN_PRACTICAL_SIGNIFICANCE_PCT``, best delta first, minus
+    any flag already in ``winning_flags``. Alone such a flag isn't worth
+    keeping, but it can stack under PGO: on ``727.cppcheck_r`` (niwot,
+    2026-10-22) ``-flto`` read +0.96% alone and added +2.62% on top of PGO.
+    ``run_pgo_multiplier()`` tries the first one as a second PGO base.
+    """
+    misses = [
+        o for o in confirmed
+        if not o.accepted and o.ci is not None and o.delta_vs_baseline_pct is not None
+        and o.delta_vs_baseline_pct > 0 and non_overlapping(baseline.ci, o.ci)
+        and o.flags[-1] not in winning_flags
+    ]
+    misses.sort(key=lambda o: o.delta_vs_baseline_pct, reverse=True)
+    return [o.flags[-1] for o in misses]
+
+
 def run_pgo_multiplier(
     cfg: CfmConfig,
     *,
@@ -1117,6 +1140,7 @@ def run_pgo_multiplier(
     baseline: BaselineResult,
     combination: CombinationResult,
     compiler: Optional[GccCompiler] = None,
+    near_miss_flags: Optional[list[str]] = None,
     workload: Optional[WorkloadBackend] = None,
     instrumentation: Optional[InstrumentationBackend] = None,
 ) -> MultiplierResult:
@@ -1142,6 +1166,13 @@ def run_pgo_multiplier(
     real PASS1_OPTIMIZE/PASS2_OPTIMIZE two-pass config, and this is the same
     "flags is the trial's full logical identity" convention every other
     candidate in this module already uses.
+
+    When ``near_miss_flags`` (``find_near_miss_flags()``) is non-empty, a second
+    variant also runs: PGO on ``winning_flags + [near_miss_flags[0]]``, against
+    the same ``combination.winning_ci``. It wins if plain PGO was rejected, or
+    if both were accepted and its CI sits clear above plain PGO's -- the same
+    bar ``greedy_combine()``'s pair tournament uses to replace a winner. Its
+    knowledge upsert is skipped, since its delta isn't PGO's alone.
     """
     compiler = compiler or GccCompiler()
     signals = compiler.pgo_topdown_signals()
@@ -1163,14 +1194,35 @@ def run_pgo_multiplier(
         flags=combination.winning_flags + [PGO_FLAG], phase="multiplier",
         compare_ci=combination.winning_ci, workload=workload, instrumentation=instrumentation,
     )
-    if outcome.accepted:
+    outcomes = [outcome]
+    best = outcome if outcome.accepted else None
+
+    if near_miss_flags:
+        near_miss = near_miss_flags[0]
+        print(
+            f"info: also trying PGO with near-miss {near_miss} added "
+            f"(CI clear of baseline, under the {MIN_PRACTICAL_SIGNIFICANCE_PCT}% bar alone)"
+        )
+        variant = _confirm_flagset(
+            cfg, experiment_id=experiment_id, benchmark=benchmark, baseline=baseline,
+            flags=combination.winning_flags + [near_miss, PGO_FLAG], phase="multiplier",
+            compare_ci=combination.winning_ci, workload=workload, instrumentation=instrumentation,
+            record_knowledge=False,
+        )
+        outcomes.append(variant)
+        if variant.accepted and (
+            best is None or (variant.ci.mean > best.ci.mean and non_overlapping(best.ci, variant.ci))
+        ):
+            best = variant
+
+    if best is not None:
         return MultiplierResult(
-            attempted=True, winning_flags=outcome.flags, winning_ci=outcome.ci,
-            outcome=outcome, outcomes=[outcome],
+            attempted=True, winning_flags=best.flags, winning_ci=best.ci,
+            outcome=best, outcomes=outcomes,
         )
     return MultiplierResult(
         attempted=True, winning_flags=combination.winning_flags,
-        winning_ci=combination.winning_ci, outcome=outcome, outcomes=[outcome],
+        winning_ci=combination.winning_ci, outcome=outcomes[-1], outcomes=outcomes,
     )
 
 

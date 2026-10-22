@@ -216,11 +216,17 @@ def main(argv=None) -> int:
                     baseline=baseline, confirmed=confirmed_known + confirmed,
                 )
 
+                # Phase 4 rejects that were CI-clear but under the 1% bar get
+                # a second chance as a PGO base (find_near_miss_flags()).
+                near_miss_flags = orchestrator.find_near_miss_flags(
+                    confirmed_known + confirmed, baseline, combination.winning_flags,
+                )
                 pgo_result = None
                 if not args.skip_pgo:
                     pgo_result = orchestrator.run_pgo_multiplier(
                         cfg, experiment_id=baseline.experiment_id, benchmark=args.benchmark,
                         baseline=baseline, combination=combination, compiler=compiler,
+                        near_miss_flags=near_miss_flags,
                     )
 
                 microarch_result = None
@@ -332,6 +338,11 @@ def main(argv=None) -> int:
             "pgo_attempted": pgo_result.attempted if pgo_result else False,
             "pgo_skip_reason": pgo_result.skip_reason if pgo_result else "--skip-pgo",
             "pgo_accepted": bool(pgo_result and pgo_result.outcome and pgo_result.outcome.accepted),
+            "pgo_near_miss_flags": near_miss_flags,
+            "pgo_near_miss_variant_won": bool(
+                pgo_result and pgo_result.outcome and pgo_result.outcome.accepted and near_miss_flags
+                and near_miss_flags[0] in pgo_result.outcome.flags
+            ),
             "microarch_attempted": microarch_result.attempted if microarch_result else False,
             "microarch_skip_reason": microarch_result.skip_reason if microarch_result else "--skip-microarch",
             "microarch_accepted": bool(

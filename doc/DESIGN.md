@@ -440,6 +440,16 @@ plain `-O3`, `714.cpython_r` picked deliberately as the one previously-mined ben
 `doc/mining_results.714.cpython_r.2026-08-23.md` for the full write-up, and CLAUDE.md's matching
 traps-log entry for a real audit false-negative (`-flto` on an LTO build) found and fixed along the way.
 
+**Near-miss PGO base (2026-10-22).** A Phase 4 reject whose CI sits clear above baseline's but whose delta
+misses `MIN_PRACTICAL_SIGNIFICANCE_PCT` is dropped before Phase 6, so it never stacks under PGO. On `niwot`,
+`727.cppcheck_r`'s `-flto` read +0.96% alone, and a later check found it adds +2.62% on top of PGO.
+`find_near_miss_flags()` lists those rejects, best delta first, and `run_pgo_multiplier()` runs a second PGO
+variant on `winning_flags + [the first one]`, compared against the same Phase 5 CI. The variant wins if plain
+PGO was rejected, or if both were accepted and its CI sits clear above plain PGO's (the pair tournament's
+replacement bar). It costs one more set of PGO confirmation reps, only when a near-miss exists, and its
+knowledge upsert is skipped because its delta isn't PGO's alone. The summary JSON reports
+`pgo_near_miss_flags` and `pgo_near_miss_variant_won`.
+
 **Microarch multiplier: implemented and live-verified (2026-08-23).** `cfm/hostinfo.py`'s
 `detect_microarch_flags()` shells out to `vendor/wspy`'s own `cpu_info` binary (a real, always-built
 Makefile target) and parses its plain-text core listing — deliberately narrow, mapping only the AMD

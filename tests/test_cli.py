@@ -359,6 +359,43 @@ def test_mine_pgo_accepted_becomes_the_final_winning_flagset(tmp_path, monkeypat
     assert summary["winning_ratio_mean"] == pytest.approx(130.0)
 
 
+def test_mine_passes_near_miss_flags_to_pgo_and_reports_the_variant(tmp_path, monkeypatch, capsys):
+    baseline = _fake_baseline()
+    combination = CombinationResult(winning_flags=["-O3"], winning_ci=baseline.ci)
+    near_ci = confidence_interval([baseline.ci.high + 0.5] * 3)
+    near_miss = ConfirmationOutcome(
+        flags=["-O3", "-flto"], trial_ids=[5, 6, 7], ratios=[near_ci.mean] * 3, ci=near_ci,
+        delta_vs_baseline_pct=0.9, accepted=False, reason="fake near miss",
+    )
+    variant_ci = confidence_interval([130.0, 130.0, 130.0])
+    variant_flags = ["-O3", "-flto", "-fprofile-use"]
+    pgo_result = MultiplierResult(
+        attempted=True, winning_flags=variant_flags, winning_ci=variant_ci,
+        outcome=ConfirmationOutcome(
+            flags=variant_flags, trial_ids=[10, 11, 12], ratios=[130.0] * 3,
+            ci=variant_ci, delta_vs_baseline_pct=30.0, accepted=True, reason="fake accept",
+        ),
+    )
+    _mine_common_mocks(monkeypatch, baseline, combination)
+    monkeypatch.setattr(cli.orchestrator, "confirm_candidates", lambda *a, **k: [near_miss])
+    seen = {}
+
+    def fake_pgo(*a, near_miss_flags, **k):
+        seen["near_miss_flags"] = near_miss_flags
+        return pgo_result
+
+    monkeypatch.setattr(cli.orchestrator, "run_pgo_multiplier", fake_pgo)
+
+    exit_code = cli.main(["mine", "fake_r", "--db", str(tmp_path / "cfm.db"), "--lock-file", str(tmp_path / "test.lock")])
+    assert exit_code == 0
+
+    assert seen["near_miss_flags"] == ["-flto"]
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["pgo_near_miss_flags"] == ["-flto"]
+    assert summary["pgo_near_miss_variant_won"] is True
+    assert summary["winning_flags"] == variant_flags
+
+
 def test_mine_pgo_rejected_keeps_phase5s_winning_flagset(tmp_path, monkeypatch, capsys):
     baseline = _fake_baseline()
     combination = CombinationResult(winning_flags=["-O3", "-flto"], winning_ci=baseline.ci)
