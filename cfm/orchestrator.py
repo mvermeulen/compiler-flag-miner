@@ -122,6 +122,15 @@ PGO_FLAG = "-fprofile-use"
 # fixed fallback instead.
 MIN_PRACTICAL_SIGNIFICANCE_PCT = 1.0
 
+# Phase 2's resource_dominance-based exclusions (and Phase 6's matching PGO skip)
+# only apply when the baseline's shape is a clear majority. Below this margin,
+# the shape is a weak read and the excluded flag families can still be the big
+# win: on niwot (doc/opportunities_niwot.md #8), four memory-bound benchmarks at
+# 38-45% excluded LTO/PGO that later measured +3% to +16% (vpr, gcc, sqlite,
+# abc), while zstd at 64% excluded them correctly. An unknown pct counts as not
+# confident, same "absence of information never excludes" rule as everywhere else.
+CONFIDENT_SHAPE_MIN_PCT = 55.0
+
 
 @dataclass
 class BaselineResult:
@@ -392,12 +401,30 @@ def _signal_is_implausible(signal: str, baseline: BaselineResult) -> bool:
     if signal == "vectorization-density-high":
         return baseline.vectorization_density == "low"
     if signal == "memory-bound-corroborated":
-        if baseline.resource_dominance is not None and baseline.resource_dominance != "memory-bound":
+        if (
+            _shape_is_confident(baseline)
+            and baseline.resource_dominance is not None
+            and baseline.resource_dominance != "memory-bound"
+        ):
             return True
         return False  # memory_attribution isn't tracked on BaselineResult (M1 scope)
     if signal in RESOURCE_DOMINANCE_SIGNALS:
-        return baseline.resource_dominance is not None and baseline.resource_dominance != signal
+        return (
+            _shape_is_confident(baseline)
+            and baseline.resource_dominance is not None
+            and baseline.resource_dominance != signal
+        )
     return False
+
+
+def _shape_is_confident(baseline: BaselineResult) -> bool:
+    """Is ``baseline.resource_dominance`` a clear enough majority to exclude
+    candidates on? See ``CONFIDENT_SHAPE_MIN_PCT``. Only gates the
+    resource_dominance-based signals; ``vectorization-density-high`` has its own
+    low/moderate/high bucketing and isn't affected.
+    """
+    pct = baseline.resource_dominance_pct
+    return pct is not None and pct >= CONFIDENT_SHAPE_MIN_PCT
 
 
 def _filter_implausible_candidates(
@@ -411,6 +438,12 @@ def _filter_implausible_candidates(
     not any part of it). Logged to stderr, not persisted -- there's no trial row
     to attach a hypothesis to for a candidate that never ran.
     """
+    if baseline.resource_dominance is not None and not _shape_is_confident(baseline):
+        print(
+            f"info: baseline shape {baseline.resource_dominance!r} at "
+            f"{baseline.resource_dominance_pct}% is below the {CONFIDENT_SHAPE_MIN_PCT:g}% "
+            "confidence margin -- not excluding any candidate on resource_dominance"
+        )
     survivors = []
     for candidate in candidates:
         if candidate.topdown_signals and all(
@@ -419,7 +452,8 @@ def _filter_implausible_candidates(
             print(
                 f"info: excluding {candidate.flag!r} from Phase 2 candidates -- "
                 f"topdown_signals {candidate.topdown_signals} implausible given baseline shape "
-                f"(resource_dominance={baseline.resource_dominance!r}, "
+                f"(resource_dominance={baseline.resource_dominance!r} at "
+                f"{baseline.resource_dominance_pct}%, "
                 f"vectorization_density={baseline.vectorization_density!r})"
             )
             continue
@@ -933,7 +967,8 @@ def run_pgo_multiplier(
     if signals and all(_signal_is_implausible(s, baseline) for s in signals):
         reason = (
             f"skipping PGO -- topdown_signals {signals} implausible given baseline shape "
-            f"(resource_dominance={baseline.resource_dominance!r}, "
+            f"(resource_dominance={baseline.resource_dominance!r} at "
+            f"{baseline.resource_dominance_pct}%, "
             f"vectorization_density={baseline.vectorization_density!r})"
         )
         print(f"info: {reason}")
