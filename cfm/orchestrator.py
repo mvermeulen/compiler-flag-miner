@@ -123,21 +123,6 @@ PGO_FLAG = "-fprofile-use"
 # fixed fallback instead.
 MIN_PRACTICAL_SIGNIFICANCE_PCT = 1.0
 
-# A confirmation (or baseline calibration) rep further than this from the median
-# of its sibling reps is re-run once and replaced before the CI is computed. Same-
-# flags reps on niwot normally agree within about 1%; 777.zstd_r's trial 542
-# measured 12.20 against 17.08-17.22 (all 16 copies uniformly slow, cause
-# unknown), which skewed that flag's knowledge mean to -2.97%. Only one outlier
-# per flagset is re-run; two or more disagreeing reps are left as measured.
-OUTLIER_RERUN_PCT = 10.0
-
-# After Phase 4, one extra baseline-flags rep checks that the baseline hasn't
-# drifted. It's flagged (logged and reported, never used to change a verdict)
-# when it falls outside baseline.ci *and* differs from the mean by at least this
-# much. 729.abc_r's calibration sampled about 0.5% low, found only by a later
-# hand re-measure (doc/opportunities_niwot.md #7).
-BASELINE_RECHECK_WARN_PCT = 0.5
-
 
 @dataclass
 class BaselineResult:
@@ -206,6 +191,22 @@ class ScreeningOutcome:
     delta_vs_baseline_pct: Optional[float]
     survived: bool
     reason: str
+
+
+# A confirmation (or baseline calibration) rep further than this from the median
+# of its sibling reps is re-run once and replaced before the CI is computed. Same-
+# flags reps on niwot normally agree within about 1%; 777.zstd_r's trial 542
+# measured 12.20 against 17.08-17.22 (all 16 copies uniformly slow, cause
+# unknown), which skewed that flag's knowledge mean to -2.97%. Only one outlier
+# per flagset is re-run; two or more disagreeing reps are left as measured.
+OUTLIER_RERUN_PCT = 10.0
+
+# After Phase 4, one extra baseline-flags rep checks that the baseline hasn't
+# drifted. It's flagged (logged and reported, never used to change a verdict)
+# when it falls outside baseline.ci *and* differs from the mean by at least this
+# much. 729.abc_r's calibration sampled about 0.5% low, found only by a later
+# hand re-measure (doc/opportunities_niwot.md #7).
+BASELINE_RECHECK_WARN_PCT = 0.5
 
 
 def _single_outlier_index(ratios: list[float]) -> Optional[int]:
