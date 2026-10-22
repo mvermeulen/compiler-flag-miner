@@ -905,6 +905,12 @@ compiler-flag-miner/
        the workload's own characterized shape (item 1's new signature fields) is the *first*, cheapest
        line of defense — better to never spend a trial on a mechanically-implausible flag than to
        correctly reject it later at real cost.
+       **Refined 2026-10-22:** the `resource_dominance`-based part of this exclusion (and Phase 6's
+       matching PGO skip) only applies when `resource_dominance_pct` is at least
+       `CONFIDENT_SHAPE_MIN_PCT` (55%). On `niwot`, four memory-bound benchmarks at 38-45% excluded
+       LTO/PGO that later measured +3% to +16%, while the one at 64% excluded them correctly
+       (`doc/opportunities_niwot.md` #8). A weak-majority shape isn't confident enough to rule out a
+       whole flag family; below the margin every candidate gets a screening trial instead.
      - Phase 4/5 confirmation uses a small, fixed number of `quick`-profile reps (not `deep-cpu`'s 3)
        and an **asymmetric accept bar**: require a clearly large, unambiguous improvement to accept
        (statistical *and* practical significance — non-overlapping CI is necessary but not sufficient;

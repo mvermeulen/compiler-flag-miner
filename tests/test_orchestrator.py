@@ -276,11 +276,13 @@ def test_run_baseline_raises_when_every_repetition_fails_to_build(tmp_path):
 # -- screen_candidates ----------------------------------------------------------
 
 def _baseline(mean_ratio=100.0, resource_dominance="memory-bound",
-              vectorization_density=None, allocation_pressure=None):
+              vectorization_density=None, allocation_pressure=None, resource_dominance_pct=80.0):
+    # resource_dominance_pct defaults to a confident 80% so the shape-based
+    # exclusion tests exercise the exclusion itself, not CONFIDENT_SHAPE_MIN_PCT's gate.
     ci = confidence_interval([mean_ratio, mean_ratio, mean_ratio])
     return BaselineResult(
         experiment_id=1, flags=["-O3"], ratios=[mean_ratio] * 3, ci=ci,
-        resource_dominance=resource_dominance,
+        resource_dominance=resource_dominance, resource_dominance_pct=resource_dominance_pct,
         vectorization_density=vectorization_density, allocation_pressure=allocation_pressure,
         trial_ids=[1, 2, 3],
     )
@@ -522,6 +524,37 @@ def test_filter_excludes_resource_dominance_signal_only_on_confident_mismatch(
     candidates = [_signaled_candidate("-flag", ["backend-bound"])]
     survivors = _filter_implausible_candidates(candidates, baseline)
     assert (survivors == []) is expect_excluded
+
+
+@pytest.mark.parametrize("pct,expect_excluded", [
+    (64.0, True),   # 777.zstd_r's real margin -- confident, exclusion applies
+    (55.0, True),   # exactly at CONFIDENT_SHAPE_MIN_PCT
+    (45.4, False),  # 734.vpr_r's real margin -- LTO/PGO measured +14.65% there
+    (None, False),  # unknown margin never excludes
+])
+def test_filter_resource_dominance_exclusion_needs_a_confident_margin(pct, expect_excluded):
+    baseline = _baseline(resource_dominance="memory-bound", resource_dominance_pct=pct)
+    survivors = _filter_implausible_candidates([_signaled_candidate("-flto", ["frontend-bound"])], baseline)
+    assert (survivors == []) is expect_excluded
+
+
+def test_filter_memory_bound_corroborated_exclusion_needs_a_confident_margin():
+    baseline = _baseline(resource_dominance="frontend-bound", resource_dominance_pct=40.6)
+    survivors = _filter_implausible_candidates(
+        [_signaled_candidate("-prefetch", ["memory-bound-corroborated"])], baseline,
+    )
+    assert [c.flag for c in survivors] == ["-prefetch"]
+
+
+def test_filter_low_margin_still_applies_vectorization_density_exclusion():
+    # The margin gate only covers resource_dominance; vectorization density keeps its own rule.
+    baseline = _baseline(
+        resource_dominance="memory-bound", resource_dominance_pct=45.2, vectorization_density="low",
+    )
+    survivors = _filter_implausible_candidates(
+        [_signaled_candidate("-vec", ["vectorization-density-high"])], baseline,
+    )
+    assert survivors == []
 
 
 def test_filter_excludes_vectorization_density_high_only_when_confidently_low():
@@ -1038,6 +1071,28 @@ def test_run_pgo_multiplier_skips_when_implausible_against_baseline_shape(tmp_pa
     assert "implausible" in result.skip_reason
     assert result.winning_flags == combination.winning_flags
     assert result.winning_ci is combination.winning_ci
+
+
+def test_run_pgo_multiplier_attempts_when_baseline_margin_is_low(tmp_path):
+    # 721.gcc_r's real shape (memory-bound, 45.2%): PGO was skipped, and a later
+    # check measured LTO + PGO +10.87%. Below CONFIDENT_SHAPE_MIN_PCT, PGO runs.
+    cfg = _cfg(tmp_path)
+    conn = db.connect(cfg.db_path)
+    exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
+    conn.close()
+
+    baseline = _baseline(mean_ratio=100.0, resource_dominance="memory-bound", resource_dominance_pct=45.2)
+    combination = CombinationResult(winning_flags=["-O3"], winning_ci=baseline.ci)
+    backends = ScriptedBackends(ratio_sequences={("-O3", PGO_FLAG): [106.0, 106.0, 106.0]})
+
+    result = run_pgo_multiplier(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline, combination=combination,
+        compiler=_pgo_catalog(tmp_path, ["frontend-bound", "speculation-bound"]),
+        workload=backends, instrumentation=backends,
+    )
+
+    assert result.attempted is True
+    assert result.outcome.accepted is True
 
 
 def test_run_pgo_multiplier_attempts_when_baseline_shape_is_unknown(tmp_path):
