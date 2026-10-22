@@ -180,9 +180,9 @@ def main(argv=None) -> int:
                     for k in known_flags.values():
                         print(
                             f"info: known prior for {k.flag!r} in cluster {cluster_key!r} -- "
-                            f"{'accepted' if k.has_accepted_track_record else 'rejected'} before "
-                            f"(mean {k.mean_delta_pct:+.2f}%, n={k.n_trials}, last seen on "
-                            f"{k.last_benchmark!r})"
+                            f"accepted {k.n_accepted} of {k.n_trials} before "
+                            f"(mean {k.mean_delta_pct:+.2f}%, last seen on {k.last_benchmark!r}) -- "
+                            f"{'fast-tracked' if k.qualifies_for_fast_track else 'screened normally'}"
                         )
                 # -mprefer-vector-width= is a no-op without an -march=, so it
                 # waits for Phase 6 (run_vector_width_multiplier()) instead.

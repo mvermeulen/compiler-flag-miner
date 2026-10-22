@@ -61,3 +61,19 @@ def test_known_flags_for_cluster_scoped_to_the_right_cluster(tmp_path):
 
     assert known_flags_for_cluster(cfg, cluster_key="memory-bound") == []
     assert [k.flag for k in known_flags_for_cluster(cfg, cluster_key="frontend-bound")] == ["-flto"]
+
+
+def test_qualifies_for_fast_track_needs_a_strict_majority_of_accepts():
+    def k(n_accepted, n_trials):
+        return KnownFlag(flag="-f", mean_delta_pct=5.0, n_trials=n_trials, n_accepted=n_accepted, last_benchmark="b")
+
+    assert k(1, 1).qualifies_for_fast_track is True
+    assert k(5, 6).qualifies_for_fast_track is True   # niwot's frontend-bound -flto
+    assert k(2, 2).qualifies_for_fast_track is True   # niwot's compute-bound -march=native
+    assert k(1, 2).qualifies_for_fast_track is False  # a tie isn't a majority (omnetpp's -march=native case)
+    assert k(2, 5).qualifies_for_fast_track is False  # niwot's memory-bound -march=native
+    assert k(1, 7).qualifies_for_fast_track is False  # niwot's frontend-bound -march=native
+    assert k(0, 3).qualifies_for_fast_track is False
+    # has_accepted_track_record keeps its old "any accept" meaning.
+    assert k(1, 7).has_accepted_track_record is True
+

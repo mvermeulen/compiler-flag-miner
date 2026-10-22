@@ -971,8 +971,9 @@ compiler-flag-miner/
   no separate `wspy-archetype --nearest`/`--kmeans` discovery step needed, since the "which benchmarks
   does this one resemble" question §8 point 1 originally posed is already answered for free by the
   cluster key every benchmark already computes). `cfm/orchestrator.py`'s
-  `split_candidates_by_known_prior()` partitions Phase 2's candidate list into flags with a real
-  *accepted* prior in this cluster (fast-tracked straight to Phase 4 via `confirm_known_candidates()`,
+  `split_candidates_by_known_prior()` partitions Phase 2's candidate list into flags with a
+  majority-*accepted* prior in this cluster (since 2026-10-22; any single accept qualified before, and on
+  `niwot` that fast-tracked `-march=native` on one +48% outlier 11 times, every one rejected) (fast-tracked straight to Phase 4 via `confirm_known_candidates()`,
   skipping Phase 3's screening trial entirely -- "already been screened once, elsewhere," §8 point 3) and
   everything else (a rejected prior, or no prior at all -- unchanged, still goes through the normal
   screen-then-confirm flow). `cli.py`'s `mine` command prints an `"info: known prior for ..."` line per

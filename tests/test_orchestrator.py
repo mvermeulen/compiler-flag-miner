@@ -1332,6 +1332,21 @@ def test_split_candidates_by_known_prior_orders_fast_tracked_by_best_evidence_fi
     assert remaining == []
 
 
+def test_split_candidates_by_known_prior_screens_a_minority_accepted_prior(tmp_path):
+    # 735.gem5_r's real case: -march=native at 1 of 5 accepted, mean still +8.62%
+    # (one +48% outlier). It used to be fast-tracked; now it's screened like anything else.
+    candidates = [_candidate("-march=native"), _candidate("-flto")]
+    known_flags = {
+        "-march=native": _known("-march=native", mean_delta_pct=8.62, n_accepted=1, n_trials=5),
+        "-flto": _known("-flto", mean_delta_pct=5.93, n_accepted=3, n_trials=4),
+    }
+
+    fast_tracked, remaining = split_candidates_by_known_prior(candidates, known_flags)
+
+    assert [c.flag for c in fast_tracked] == ["-flto"]
+    assert [c.flag for c in remaining] == ["-march=native"]
+
+
 def test_split_candidates_by_known_prior_no_priors_leaves_everything_in_remaining(tmp_path):
     candidates = [_candidate("-a"), _candidate("-b")]
     fast_tracked, remaining = split_candidates_by_known_prior(candidates, known_flags={})

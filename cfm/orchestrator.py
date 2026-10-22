@@ -736,12 +736,12 @@ def split_candidates_by_known_prior(
 ) -> tuple[list[FlagCandidate], list[FlagCandidate]]:
     """doc/DESIGN.md sec. 8 point 3 (M4): partitions Phase 2's candidate list
     into ``(fast_tracked, remaining)`` -- ``fast_tracked`` is every candidate
-    whose flag has a real *accepted* prior in this cluster
-    (``KnownFlag.has_accepted_track_record``), sorted by that prior's own
+    whose flag has a majority-accepted prior in this cluster
+    (``KnownFlag.qualifies_for_fast_track``), sorted by that prior's own
     ``mean_delta_pct`` descending (best-evidenced first, "seed Phase 2's
     candidate queue with those flags first, ahead of the generic rule-based
     catalog"). ``remaining`` is everything else, in original catalog order --
-    including candidates with a real but *rejected* prior, which still get a
+    including candidates with a real but *rejected* (or only minority-accepted) prior, which still get a
     full, real screening trial against this benchmark (a reject elsewhere
     isn't trusted as a reject here without a real measurement, same posture
     as accepts) -- unchanged from the pre-M4 pipeline.
@@ -752,7 +752,7 @@ def split_candidates_by_known_prior(
     without a real ``cfm.db`` involved.
     """
     fast_tracked = sorted(
-        (c for c in candidates if known_flags.get(c.flag) and known_flags[c.flag].has_accepted_track_record),
+        (c for c in candidates if known_flags.get(c.flag) and known_flags[c.flag].qualifies_for_fast_track),
         key=lambda c: known_flags[c.flag].mean_delta_pct, reverse=True,
     )
     fast_tracked_flags = {c.flag for c in fast_tracked}
