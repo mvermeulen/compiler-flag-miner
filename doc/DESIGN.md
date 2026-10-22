@@ -933,6 +933,14 @@ compiler-flag-miner/
        is a real, sound refinement (bigger prior against an implausible category needs more evidence to
        overcome) but explicitly deferred past this first cut, per the user's own stated preference for
        starting simple.
+     - **Measurement guards (2026-10-22).** A confirmation or baseline-calibration rep more than
+       `OUTLIER_RERUN_PCT` (10%) from the median of its siblings is re-run once and replaced before the
+       CI is computed (the outlier's trial row stays, with a hypothesis saying why it was excluded).
+       `777.zstd_r`'s trial 542 (12.20 against 17.08-17.22, all copies uniformly slow) motivated this.
+       And after Phase 4, `recheck_baseline()` measures one more baseline rep and flags it in the
+       summary when it sits outside `baseline.ci` by at least `BASELINE_RECHECK_WARN_PCT` (0.5%), to
+       catch a calibration that sampled offset (`729.abc_r`, about 0.5% low). It only detects; it
+       never changes a verdict.
      The reference matrix's own historical spread (`stddev`/`cv_percent` across its many prior
      repetitions) is a real, data-backed noise-floor estimate for calibrating "clearly large" above, once
      available for a given benchmark — a fixed conservative fallback threshold otherwise. Phase 1

@@ -15,8 +15,22 @@ import pytest
 
 import cfm.cli as cli
 from cfm.compilers.base import FlagCandidate
-from cfm.orchestrator import BaselineResult, CombinationResult, ConfirmationOutcome, MultiplierResult
+from cfm.orchestrator import (
+    BaselineRecheck, BaselineResult, CombinationResult, ConfirmationOutcome, MultiplierResult,
+)
 from cfm.stats import confidence_interval
+
+
+@pytest.fixture(autouse=True)
+def _fake_baseline_recheck(monkeypatch):
+    """orchestrator.recheck_baseline() runs a real trial, so every mine test in
+    this file stubs it with an unflagged result unless it overrides this itself."""
+    monkeypatch.setattr(
+        cli.orchestrator, "recheck_baseline",
+        lambda *a, baseline, **k: BaselineRecheck(
+            trial_id=0, ratio=baseline.ci.mean, delta_pct=0.0, flagged=False, reason="fake",
+        ),
+    )
 
 
 def _fake_baseline(exp_id=1):
@@ -88,6 +102,26 @@ def test_mine_reports_a_winning_flagset(tmp_path, monkeypatch, capsys):
     assert summary["budget_exhausted"] is False
     assert summary["baseline_resource_dominance_pct"] == pytest.approx(80.0)
 
+
+def test_mine_reports_a_flagged_baseline_recheck(tmp_path, monkeypatch, capsys):
+    baseline = _fake_baseline()
+    combination = CombinationResult(winning_flags=["-O3"], winning_ci=baseline.ci)
+    _mine_common_mocks(monkeypatch, baseline, combination)
+    monkeypatch.setattr(
+        cli.orchestrator, "run_pgo_multiplier",
+        lambda *a, combination, **k: _fake_pgo_not_attempted(combination),
+    )
+    monkeypatch.setattr(
+        cli.orchestrator, "recheck_baseline",
+        lambda *a, **k: BaselineRecheck(trial_id=9, ratio=101.0, delta_pct=1.0, flagged=True, reason="fake"),
+    )
+
+    exit_code = cli.main(["mine", "fake_r", "--db", str(tmp_path / "cfm.db"), "--lock-file", str(tmp_path / "test.lock")])
+    assert exit_code == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["baseline_recheck_flagged"] is True
+    assert summary["baseline_recheck_ratio"] == pytest.approx(101.0)
+    assert summary["baseline_recheck_delta_pct"] == pytest.approx(1.0)
 
 def test_mine_max_trials_truncates_candidate_list_and_flags_budget_exhausted(tmp_path, monkeypatch):
     baseline = _fake_baseline()  # 3 baseline trial_ids already "spent"

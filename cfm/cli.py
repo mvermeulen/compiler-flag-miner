@@ -205,6 +205,12 @@ def main(argv=None) -> int:
                     cfg, experiment_id=baseline.experiment_id, benchmark=args.benchmark,
                     baseline=baseline, candidates=fast_tracked,
                 )
+                # One extra baseline rep: detects (never corrects) a baseline
+                # that sampled offset, which would bias every delta above.
+                baseline_recheck = orchestrator.recheck_baseline(
+                    cfg, experiment_id=baseline.experiment_id, benchmark=args.benchmark,
+                    baseline=baseline,
+                )
                 combination = orchestrator.greedy_combine(
                     cfg, experiment_id=baseline.experiment_id, benchmark=args.benchmark,
                     baseline=baseline, confirmed=confirmed_known + confirmed,
@@ -315,6 +321,9 @@ def main(argv=None) -> int:
             "baseline_vectorization_density": baseline.vectorization_density,
             "baseline_allocation_pressure": baseline.allocation_pressure,
             "baseline_characterization_source": baseline.characterization_source,
+            "baseline_recheck_ratio": baseline_recheck.ratio,
+            "baseline_recheck_delta_pct": baseline_recheck.delta_pct,
+            "baseline_recheck_flagged": baseline_recheck.flagged,
             "candidates_screened": len(screened),
             "candidates_confirmed": sum(1 for c in confirmed + confirmed_known if c.accepted),
             "candidates_fast_tracked_from_prior_knowledge": [c.flag for c in fast_tracked],
