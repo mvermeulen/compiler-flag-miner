@@ -468,6 +468,14 @@ flag, forcing the guard not to fire) exercised the actual trial path for real: b
 `-mtune=znver5` ran genuine SPEC builds and were correctly rejected. See CLAUDE.md's matching traps-log
 entry and `doc/mining_results.706.stockfish_r.2026-08-23.md` for the full detail.
 
+**Vector-width slice (2026-10-22).** `-mprefer-vector-width=256/512` only changes code generation when the
+target ISA has vectors wider than 128 bits, and the `-O3` baseline targets generic x86-64, so screening
+them on top of it measured a no-op on every `niwot` mine. `defer_vector_width_candidates()` now holds them
+out of Phases 3-5 whenever the base flags have no `-march=`, and `run_vector_width_multiplier()` tries each
+one last in Phase 6, on top of whatever microarch (or PGO, or Phase 5) left behind, only when that winning
+set carries an `-march=`. Phase 2's `vectorization-density-high` exclusion still applies first, so a
+low-vectorization benchmark never reaches this slice.
+
 ### Phase 7 — Finalize and report
 Winning flag set assembled into a real `runcpu` peak config; one final confirmation run at higher
 repetition count (locks in the number being reported); Report agent renders a curated Markdown report

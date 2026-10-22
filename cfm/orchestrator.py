@@ -122,6 +122,13 @@ PGO_FLAG = "-fprofile-use"
 # fixed fallback instead.
 MIN_PRACTICAL_SIGNIFICANCE_PCT = 1.0
 
+# -mprefer-vector-width=N only changes code generation when the target ISA has
+# vectors wider than 128 bits. The baseline (-O3) targets generic x86-64, so on
+# it both settings are no-ops -- every niwot mine measured them flat. They're
+# deferred out of Phase 3-5 and tried in Phase 6 instead, on top of a winning set
+# that carries an -march= (run_vector_width_multiplier()).
+VECTOR_WIDTH_FLAG_PREFIX = "-mprefer-vector-width="
+
 
 @dataclass
 class BaselineResult:
@@ -894,6 +901,26 @@ class MultiplierResult:
     outcomes: list[ConfirmationOutcome] = field(default_factory=list)
 
 
+def _has_march(flags: list[str]) -> bool:
+    return any(f.startswith("-march=") for f in flags)
+
+
+def defer_vector_width_candidates(
+    candidates: list[FlagCandidate], base_flags: list[str],
+) -> tuple[list[FlagCandidate], list[FlagCandidate]]:
+    """Splits Phase 2's candidates into ``(deferred, remaining)``: the
+    ``-mprefer-vector-width=`` candidates are deferred to
+    ``run_vector_width_multiplier()`` when ``base_flags`` has no ``-march=``
+    (see ``VECTOR_WIDTH_FLAG_PREFIX``). With an ``-march=`` already in the base,
+    nothing is deferred and they're screened normally.
+    """
+    if _has_march(base_flags):
+        return [], list(candidates)
+    deferred = [c for c in candidates if c.flag.startswith(VECTOR_WIDTH_FLAG_PREFIX)]
+    remaining = [c for c in candidates if not c.flag.startswith(VECTOR_WIDTH_FLAG_PREFIX)]
+    return deferred, remaining
+
+
 def run_pgo_multiplier(
     cfg: CfmConfig,
     *,
@@ -1030,6 +1057,64 @@ def run_microarch_multiplier(
     # The winning outcome if one was accepted, else the last one tried --
     # never None once at least one trial ran, same contract run_pgo_multiplier()
     # already has for its own (always exactly one) trial.
+    winner = next((o for o in outcomes if o.flags == current_flags), None) or outcomes[-1]
+    return MultiplierResult(
+        attempted=True, winning_flags=current_flags, winning_ci=current_ci,
+        outcome=winner, outcomes=outcomes,
+    )
+
+
+def run_vector_width_multiplier(
+    cfg: CfmConfig,
+    *,
+    experiment_id: int,
+    benchmark: str,
+    baseline: BaselineResult,
+    combination,
+    candidates: list[FlagCandidate],
+    workload: Optional[WorkloadBackend] = None,
+    instrumentation: Optional[InstrumentationBackend] = None,
+) -> MultiplierResult:
+    """Phase 6's last slice: the ``-mprefer-vector-width=`` candidates
+    ``defer_vector_width_candidates()`` held back, each tried independently on
+    top of the incoming winning set and compared against its CI, same shape as
+    ``run_microarch_multiplier()`` (``combination`` is duck-typed the same way).
+    Skipped, with no trial spent, when there are no deferred candidates (none in
+    the catalog, or Phase 2 excluded them on a low vectorization density) or when
+    the winning set has no ``-march=`` (the flag is a no-op on generic x86-64).
+    """
+    if not candidates:
+        reason = "skipping vector-width multiplier -- no deferred -mprefer-vector-width= candidates"
+        print(f"info: {reason}")
+        return MultiplierResult(
+            attempted=False, winning_flags=combination.winning_flags,
+            winning_ci=combination.winning_ci, skip_reason=reason,
+        )
+    if not _has_march(combination.winning_flags):
+        reason = (
+            f"skipping vector-width multiplier -- winning set {combination.winning_flags} has no "
+            "-march=, and -mprefer-vector-width= has no effect on the generic x86-64 target"
+        )
+        print(f"info: {reason}")
+        return MultiplierResult(
+            attempted=False, winning_flags=combination.winning_flags,
+            winning_ci=combination.winning_ci, skip_reason=reason,
+        )
+
+    current_flags = combination.winning_flags
+    current_ci = combination.winning_ci
+    outcomes: list[ConfirmationOutcome] = []
+    for candidate in candidates:
+        outcome = _confirm_flagset(
+            cfg, experiment_id=experiment_id, benchmark=benchmark, baseline=baseline,
+            flags=combination.winning_flags + [candidate.flag], phase="multiplier",
+            compare_ci=combination.winning_ci, workload=workload, instrumentation=instrumentation,
+        )
+        outcomes.append(outcome)
+        if outcome.accepted and outcome.ci.mean > current_ci.mean:
+            current_flags = outcome.flags
+            current_ci = outcome.ci
+
     winner = next((o for o in outcomes if o.flags == current_flags), None) or outcomes[-1]
     return MultiplierResult(
         attempted=True, winning_flags=current_flags, winning_ci=current_ci,

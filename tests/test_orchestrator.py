@@ -30,6 +30,7 @@ from cfm.orchestrator import (
     ConfirmationOutcome,
     ScreeningOutcome,
     _filter_implausible_candidates,
+    defer_vector_width_candidates,
     confirm_candidates,
     confirm_known_candidates,
     generate_candidates,
@@ -37,6 +38,7 @@ from cfm.orchestrator import (
     run_baseline,
     run_microarch_multiplier,
     run_pgo_multiplier,
+    run_vector_width_multiplier,
     screen_candidates,
     split_candidates_by_known_prior,
 )
@@ -1316,3 +1318,76 @@ def test_confirm_known_candidates_skips_screening_and_confirms_directly(tmp_path
         assert phases == {"confirmation"}  # never "screening"
     finally:
         conn.close()
+
+
+# -- vector-width deferral and multiplier ---------------------------------------
+
+def test_defer_vector_width_candidates_holds_them_back_without_march():
+    candidates = [_candidate("-flto"), _candidate("-mprefer-vector-width=256"), _candidate("-mprefer-vector-width=512")]
+    deferred, remaining = defer_vector_width_candidates(candidates, ["-O3"])
+    assert [c.flag for c in deferred] == ["-mprefer-vector-width=256", "-mprefer-vector-width=512"]
+    assert [c.flag for c in remaining] == ["-flto"]
+
+
+def test_defer_vector_width_candidates_keeps_them_when_base_already_has_march():
+    candidates = [_candidate("-flto"), _candidate("-mprefer-vector-width=512")]
+    deferred, remaining = defer_vector_width_candidates(candidates, ["-O3", "-march=znver5"])
+    assert deferred == []
+    assert [c.flag for c in remaining] == ["-flto", "-mprefer-vector-width=512"]
+
+
+def test_run_vector_width_multiplier_skips_without_march_in_winning_set(tmp_path):
+    cfg = _cfg(tmp_path)
+    baseline = _baseline(mean_ratio=100.0)
+    combination = CombinationResult(winning_flags=["-O3", "-flto"], winning_ci=baseline.ci)
+    backends = ScriptedBackends(ratio_sequences={})  # any trial would hit an empty queue
+
+    result = run_vector_width_multiplier(
+        cfg, experiment_id=1, benchmark="fake_r", baseline=baseline, combination=combination,
+        candidates=[_candidate("-mprefer-vector-width=512")], workload=backends, instrumentation=backends,
+    )
+
+    assert result.attempted is False
+    assert "no -march=" in result.skip_reason
+    assert result.winning_flags == ["-O3", "-flto"]
+
+
+def test_run_vector_width_multiplier_skips_with_no_candidates(tmp_path):
+    cfg = _cfg(tmp_path)
+    baseline = _baseline(mean_ratio=100.0)
+    combination = CombinationResult(winning_flags=["-O3", "-march=native"], winning_ci=baseline.ci)
+
+    result = run_vector_width_multiplier(
+        cfg, experiment_id=1, benchmark="fake_r", baseline=baseline, combination=combination,
+        candidates=[],
+    )
+
+    assert result.attempted is False
+    assert result.winning_flags == ["-O3", "-march=native"]
+
+
+def test_run_vector_width_multiplier_layers_on_march_and_keeps_the_best(tmp_path):
+    cfg = _cfg(tmp_path)
+    conn = db.connect(cfg.db_path)
+    exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
+    conn.close()
+
+    baseline = _baseline(mean_ratio=100.0)
+    combination = CombinationResult(
+        winning_flags=["-O3", "-march=native"], winning_ci=confidence_interval([110.0, 110.0, 110.0]),
+    )
+    backends = ScriptedBackends(ratio_sequences={
+        ("-O3", "-march=native", "-mprefer-vector-width=256"): [110.2, 110.1, 110.3],  # flat
+        ("-O3", "-march=native", "-mprefer-vector-width=512"): [116.0, 116.0, 116.0],
+    })
+
+    result = run_vector_width_multiplier(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline, combination=combination,
+        candidates=[_candidate("-mprefer-vector-width=256"), _candidate("-mprefer-vector-width=512")],
+        workload=backends, instrumentation=backends,
+    )
+
+    assert result.attempted is True
+    assert result.winning_flags == ["-O3", "-march=native", "-mprefer-vector-width=512"]
+    assert len(result.outcomes) == 2
+
