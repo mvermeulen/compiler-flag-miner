@@ -544,7 +544,8 @@ def test_mine_prints_known_priors_including_a_rejected_one(tmp_path, monkeypatch
 
     out = capsys.readouterr().out
     assert "known prior for '-fgraphite-identity'" in out
-    assert "rejected before" in out
+    assert "accepted 0 of 1 before" in out
+    assert "screened normally" in out
     # The "info:" prior line and the final JSON summary share stdout -- the
     # summary is the trailing "{...}" block (json.dumps(..., indent=2) spans
     # multiple lines, so split on the first "{" rather than take one line).

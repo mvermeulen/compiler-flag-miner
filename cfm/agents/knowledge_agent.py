@@ -26,7 +26,8 @@ from ..config import CfmConfig
 @dataclass
 class KnownFlag:
     """One `knowledge` table row, as read back for a new benchmark's own
-    candidate generation. ``has_accepted_track_record`` is what
+    candidate generation. ``qualifies_for_fast_track`` (a majority-accepted
+    record, since 2026-10-22; any single accept before that) is what
     `cfm/orchestrator.py`'s `split_candidates_by_known_prior()` uses to decide
     which candidates skip Phase 3 screening entirely (doc/DESIGN.md sec. 8
     point 3: "a flag with a strong track record ... skips straight to Phase 4")
@@ -46,6 +47,18 @@ class KnownFlag:
     @property
     def has_accepted_track_record(self) -> bool:
         return self.n_accepted > 0
+
+    @property
+    def qualifies_for_fast_track(self) -> bool:
+        """A strict majority of this flag's trials in the cluster were accepts.
+        Any single accept used to be enough, and a cluster mean can be one
+        outlier: on niwot, ``-march=native`` was fast-tracked on 1-of-2 through
+        1-of-6 records (one +48% stockfish accept) and rejected 11 times, each
+        costing 3 confirmation trials where 1 screening trial would have pruned
+        it (doc/opportunities_niwot.md #15). A flag without a majority still gets
+        a normal screening trial, so a real win isn't lost, only not rushed.
+        """
+        return 2 * self.n_accepted > self.n_trials
 
 
 def known_flags_for_cluster(
