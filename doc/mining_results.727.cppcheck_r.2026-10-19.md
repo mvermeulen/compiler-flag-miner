@@ -118,3 +118,28 @@ None of the trials logged an audit warning.
 2. **A pipeline gap this run shows:** a flag rejected only by the practical-significance bar, with its CI
    clear of baseline's, is never offered to Phase 6 as part of the base. A "near-miss" rule could carry it into
    the PGO trial as a second variant.
+
+## Follow-up: LTO and PGO together (2026-10-22)
+
+Opportunity #18, the check follow-up 1 above called for. Three interleaved rounds of four flag sets, each a
+`cfm measure` run at its default 3 iterations (median), experiments 126-137, 14:12Z-17:40Z.
+
+| Flags | Round 1 | Round 2 | Round 3 | Mean | 95% CI | vs control | vs mine's `-O3` (24.85) |
+|---|---|---|---|---|---|---|---|
+| `-O3` (control) | 24.86 | 25.01 | 24.88 | 24.92 | [24.71, 25.12] | — | +0.25% |
+| `-O3 -flto` | 25.12 | 25.12 | 25.02 | 25.09 | [24.95, 25.23] | +0.70% | +0.95% |
+| `-O3 -fprofile-use` | 26.77 | 26.76 | 26.63 | 26.72 | [26.52, 26.93] | +7.25% | +7.51% |
+| `-O3 -flto -fprofile-use` | 27.44 | 27.42 | 27.41 | 27.42 | [27.38, 27.46] | **+10.06%** | **+10.33%** |
+
+- **LTO and PGO stack here too.** `-flto` alone is still small (+0.7%, CIs overlapping the control, close to
+  the mine's +0.96%). On top of PGO it adds **+2.62%** (27.42 against 26.72), with the CIs clear of each other
+  and every round above every PGO-only round. With a profile, LTO's cross-module inlining has better
+  information about which calls are hot.
+- **cppcheck's winner is now `-O3 -flto -fprofile-use`, +10.33% over the mine's `-O3`**, against the mine's
+  +7.78%. Both reference points agree: the control sat within 0.3% of the mine's `-O3`, and PGO alone
+  (26.72) within 0.3% of the mine's PGO result (26.79).
+- Every build passed validate, and no audit logged a warning.
+
+For the pipeline, this is the case opportunity #19 describes: the mine's `-flto` reject was correct on its own
+(+0.96% is under the 1% bar), but dropping it before Phase 6 meant PGO never ran on the better base. On the
+old host the same thing happened (`-flto` +4.20% rejected, then PGO on plain `-O3`).
