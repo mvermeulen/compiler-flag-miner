@@ -1190,7 +1190,7 @@ straight to Phase 4 via `orchestrator.confirm_known_candidates()`, and everythin
 accept/reject vs. baseline, `knowledge` table upsert; since 2026-10-22 a single rep more than `OUTLIER_RERUN_PCT` (10%) from its siblings' median is re-run once and replaced, here and in Phase 1's calibration reps) → `orchestrator.recheck_baseline()` (since 2026-10-22: one extra baseline-flags rep, flagged in the summary JSON when it sits outside `baseline.ci` by at least `BASELINE_RECHECK_WARN_PCT`; detection only, never changes a verdict) → `orchestrator.greedy_combine()` (Phase 5,
 cumulative re-confirmation plus a bounded random-pair tournament) → `orchestrator.run_pgo_multiplier()`
 (Phase 6's PGO slice, real two-pass `-fprofile-use` layered on Phase 5's winning set, skippable via
-`--skip-pgo`) → `orchestrator.run_microarch_multiplier()` (Phase 6's microarch slice, the detected
+`--skip-pgo`; since 2026-10-22 it also tries a second variant with the best `find_near_miss_flags()` flag added -- a Phase 4 reject that was CI-clear of baseline but under the 1% bar) → `orchestrator.run_microarch_multiplier()` (Phase 6's microarch slice, the detected
 `-march=`/`-mtune=` pair layered on whatever PGO left behind, skippable via `--skip-microarch`) → `orchestrator.run_vector_width_multiplier()` (since 2026-10-22: the `-mprefer-vector-width=` candidates `defer_vector_width_candidates()` held out of Phases 3-5, tried only on top of a winning set with an `-march=`, skippable via `--skip-vector-width`) → a plain
 JSON summary on stdout, every trial along the way still landing in `cfm.db` regardless of phase or
 outcome, same as M0.

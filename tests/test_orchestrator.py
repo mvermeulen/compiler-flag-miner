@@ -31,6 +31,7 @@ from cfm.orchestrator import (
     ScreeningOutcome,
     _filter_implausible_candidates,
     defer_vector_width_candidates,
+    find_near_miss_flags,
     confirm_candidates,
     confirm_known_candidates,
     generate_candidates,
@@ -1280,6 +1281,106 @@ def test_run_pgo_multiplier_upserts_knowledge_keyed_by_pgo_flag(tmp_path):
     finally:
         conn.close()
     assert combination.winning_ci is baseline.ci
+
+
+# -- find_near_miss_flags / near-miss PGO variant --------------------------------
+
+def _measured(flag, ratios, accepted=False, base_mean=100.0):
+    ci = confidence_interval(ratios)
+    return ConfirmationOutcome(
+        flags=["-O3", flag], trial_ids=[0], ratios=ratios, ci=ci,
+        delta_vs_baseline_pct=(ci.mean - base_mean) / base_mean * 100.0, accepted=accepted, reason="test",
+    )
+
+
+def test_find_near_miss_flags_keeps_only_ci_clear_sub_threshold_rejects():
+    baseline = _baseline(mean_ratio=100.0)  # zero-width CI at 100.0
+    confirmed = [
+        _measured("-small", [100.4, 100.5, 100.6]),          # +0.5%, CI clear -> near miss
+        _measured("-bigger", [100.8, 100.9, 101.0]),         # +0.9%, CI clear -> near miss, first
+        _measured("-overlaps", [99.0, 100.5, 102.0]),        # CI overlaps baseline
+        _measured("-worse", [99.0, 99.1, 99.2]),             # CI clear, but below
+        _measured("-won", [105.0, 105.0, 105.1], accepted=True),
+        ConfirmationOutcome(flags=["-O3", "-nobuild"], trial_ids=[0], ratios=[], ci=None,
+                            delta_vs_baseline_pct=None, accepted=False, reason="test"),
+    ]
+
+    assert find_near_miss_flags(confirmed, baseline, ["-O3", "-won"]) == ["-bigger", "-small"]
+
+
+def test_find_near_miss_flags_skips_a_flag_already_in_the_winning_set():
+    baseline = _baseline(mean_ratio=100.0)
+    confirmed = [_measured("-flto", [100.9, 101.0, 100.95])]
+
+    assert find_near_miss_flags(confirmed, baseline, ["-O3", "-flto"]) == []
+
+
+def _near_miss_pgo(tmp_path, ratio_sequences):
+    cfg = _cfg(tmp_path)
+    conn = db.connect(cfg.db_path)
+    exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
+    conn.close()
+    baseline = _baseline(mean_ratio=100.0, resource_dominance="frontend-bound")
+    combination = CombinationResult(winning_flags=["-O3"], winning_ci=baseline.ci)
+    backends = ScriptedBackends(ratio_sequences=ratio_sequences)
+    result = run_pgo_multiplier(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline, combination=combination,
+        compiler=_pgo_catalog(tmp_path, []), near_miss_flags=["-flto"],
+        workload=backends, instrumentation=backends,
+    )
+    return cfg, result
+
+
+def test_run_pgo_multiplier_near_miss_variant_wins_when_clear_of_plain_pgo(tmp_path):
+    # 727.cppcheck_r's real shape on niwot: PGO 26.72, -flto + PGO 27.42.
+    cfg, result = _near_miss_pgo(tmp_path, {
+        ("-O3", PGO_FLAG): [107.5, 107.6, 107.0],
+        ("-O3", "-flto", PGO_FLAG): [110.4, 110.3, 110.3],
+    })
+
+    assert [o.flags for o in result.outcomes] == [["-O3", PGO_FLAG], ["-O3", "-flto", PGO_FLAG]]
+    assert result.winning_flags == ["-O3", "-flto", PGO_FLAG]
+    assert result.outcome is result.outcomes[1]
+
+    # Only plain PGO's delta is PGO's alone, so only it lands in the knowledge table.
+    conn = db.connect(cfg.db_path)
+    try:
+        row = conn.execute("SELECT n_trials FROM knowledge WHERE flag=?", (PGO_FLAG,)).fetchone()
+        assert row["n_trials"] == 1
+    finally:
+        conn.close()
+
+
+def test_run_pgo_multiplier_keeps_plain_pgo_when_the_variant_overlaps_it(tmp_path):
+    _, result = _near_miss_pgo(tmp_path, {
+        ("-O3", PGO_FLAG): [107.0, 108.0, 109.0],
+        ("-O3", "-flto", PGO_FLAG): [107.5, 108.5, 109.5],  # higher mean, CIs overlap
+    })
+
+    assert result.outcomes[1].accepted is True
+    assert result.winning_flags == ["-O3", PGO_FLAG]
+    assert result.outcome is result.outcomes[0]
+
+
+def test_run_pgo_multiplier_near_miss_variant_wins_when_plain_pgo_rejects(tmp_path):
+    _, result = _near_miss_pgo(tmp_path, {
+        ("-O3", PGO_FLAG): [99.0, 100.0, 101.0],
+        ("-O3", "-flto", PGO_FLAG): [105.0, 105.1, 105.2],
+    })
+
+    assert result.outcomes[0].accepted is False
+    assert result.winning_flags == ["-O3", "-flto", PGO_FLAG]
+
+
+def test_run_pgo_multiplier_both_rejected_keeps_the_incoming_set(tmp_path):
+    _, result = _near_miss_pgo(tmp_path, {
+        ("-O3", PGO_FLAG): [95.0, 95.1, 95.2],
+        ("-O3", "-flto", PGO_FLAG): [96.0, 96.1, 96.2],
+    })
+
+    assert result.attempted is True
+    assert result.winning_flags == ["-O3"]
+    assert result.outcome is result.outcomes[-1]
 
 
 # -- run_microarch_multiplier (Phase 6, microarch slice) ------------------------
