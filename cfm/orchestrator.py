@@ -122,13 +122,6 @@ PGO_FLAG = "-fprofile-use"
 # fixed fallback instead.
 MIN_PRACTICAL_SIGNIFICANCE_PCT = 1.0
 
-# -mprefer-vector-width=N only changes code generation when the target ISA has
-# vectors wider than 128 bits. The baseline (-O3) targets generic x86-64, so on
-# it both settings are no-ops -- every niwot mine measured them flat. They're
-# deferred out of Phase 3-5 and tried in Phase 6 instead, on top of a winning set
-# that carries an -march= (run_vector_width_multiplier()).
-VECTOR_WIDTH_FLAG_PREFIX = "-mprefer-vector-width="
-
 
 @dataclass
 class BaselineResult:
@@ -899,6 +892,14 @@ class MultiplierResult:
     skip_reason: Optional[str] = None
     outcome: Optional[ConfirmationOutcome] = None
     outcomes: list[ConfirmationOutcome] = field(default_factory=list)
+
+
+# -mprefer-vector-width=N only changes code generation when the target ISA has
+# vectors wider than 128 bits. The baseline (-O3) targets generic x86-64, so on
+# it both settings are no-ops -- every niwot mine measured them flat. They're
+# deferred out of Phase 3-5 and tried in Phase 6 instead, on top of a winning set
+# that carries an -march= (run_vector_width_multiplier()).
+VECTOR_WIDTH_FLAG_PREFIX = "-mprefer-vector-width="
 
 
 def _has_march(flags: list[str]) -> bool:
