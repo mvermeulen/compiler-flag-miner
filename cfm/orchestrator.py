@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import itertools
 import random
+import statistics
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -122,6 +123,21 @@ PGO_FLAG = "-fprofile-use"
 # fixed fallback instead.
 MIN_PRACTICAL_SIGNIFICANCE_PCT = 1.0
 
+# A confirmation (or baseline calibration) rep further than this from the median
+# of its sibling reps is re-run once and replaced before the CI is computed. Same-
+# flags reps on niwot normally agree within about 1%; 777.zstd_r's trial 542
+# measured 12.20 against 17.08-17.22 (all 16 copies uniformly slow, cause
+# unknown), which skewed that flag's knowledge mean to -2.97%. Only one outlier
+# per flagset is re-run; two or more disagreeing reps are left as measured.
+OUTLIER_RERUN_PCT = 10.0
+
+# After Phase 4, one extra baseline-flags rep checks that the baseline hasn't
+# drifted. It's flagged (logged and reported, never used to change a verdict)
+# when it falls outside baseline.ci *and* differs from the mean by at least this
+# much. 729.abc_r's calibration sampled about 0.5% low, found only by a later
+# hand re-measure (doc/opportunities_niwot.md #7).
+BASELINE_RECHECK_WARN_PCT = 0.5
+
 
 @dataclass
 class BaselineResult:
@@ -190,6 +206,68 @@ class ScreeningOutcome:
     delta_vs_baseline_pct: Optional[float]
     survived: bool
     reason: str
+
+
+def _single_outlier_index(ratios: list[float]) -> Optional[int]:
+    """Index of the one ratio further than ``OUTLIER_RERUN_PCT`` from the median
+    of ``ratios``, or None (fewer than 3 ratios, no outlier, or more than one)."""
+    if len(ratios) < 3:
+        return None
+    median = statistics.median(ratios)
+    if median <= 0:
+        return None
+    outliers = [i for i, r in enumerate(ratios) if abs(r - median) / median * 100.0 > OUTLIER_RERUN_PCT]
+    return outliers[0] if len(outliers) == 1 else None
+
+
+def _rerun_single_outlier(cfg: CfmConfig, measured: list[dict], rerun) -> tuple[list[dict], Optional[dict]]:
+    """If exactly one of ``measured`` (trial-result dicts with a usable ratio) is
+    an outlier, calls ``rerun()`` for one replacement trial and returns
+    ``(measured with the outlier swapped for the replacement, replacement)``. The
+    outlier's trial row stays in cfm.db with a hypothesis saying why it was
+    excluded. If the replacement produced no usable ratio, ``measured`` comes back
+    unchanged (outlier kept) but the replacement is still returned, since its
+    trial row exists. Returns ``(measured, None)`` when nothing was re-run."""
+    idx = _single_outlier_index([r["ratio"] for r in measured])
+    if idx is None:
+        return measured, None
+    outlier = measured[idx]
+    replacement = rerun()
+    conn = db.connect(cfg.db_path)
+    try:
+        others = [r["ratio"] for i, r in enumerate(measured) if i != idx]
+        if replacement.get("ratio") is None:
+            db.record_hypothesis(
+                conn, trial_id=outlier["trial_id"], proposed_by="rule",
+                rationale=(
+                    f"outlier rep: ratio {outlier['ratio']:.6g} vs sibling reps {others}; re-run as "
+                    f"trial {replacement['trial_id']} produced no usable ratio, so the outlier was kept"
+                ),
+            )
+            print(
+                f"info: outlier rep (trial {outlier['trial_id']}, ratio {outlier['ratio']:.6g}) "
+                f"re-run as trial {replacement['trial_id']} produced no ratio -- kept the outlier"
+            )
+            return measured, replacement
+        db.record_hypothesis(
+            conn, trial_id=outlier["trial_id"], proposed_by="rule",
+            rationale=(
+                f"outlier rep excluded from the CI: ratio {outlier['ratio']:.6g} vs sibling reps "
+                f"{others} (more than {OUTLIER_RERUN_PCT:g}% from the median); replaced by re-run "
+                f"trial {replacement['trial_id']} (ratio {replacement['ratio']:.6g})"
+            ),
+        )
+        db.record_hypothesis(
+            conn, trial_id=replacement["trial_id"], proposed_by="rule",
+            rationale=f"re-run replacing outlier trial {outlier['trial_id']} (ratio {outlier['ratio']:.6g})",
+        )
+    finally:
+        conn.close()
+    print(
+        f"info: outlier rep (trial {outlier['trial_id']}, ratio {outlier['ratio']:.6g}) replaced by "
+        f"re-run trial {replacement['trial_id']} (ratio {replacement['ratio']:.6g})"
+    )
+    return measured[:idx] + [replacement] + measured[idx + 1:], replacement
 
 
 def _characterize_baseline(
@@ -314,19 +392,26 @@ def run_baseline(
     finally:
         conn.close()
 
-    ratios: list[float] = []
-    wspy_run_refs: list[str] = []
-    for _ in range(CONFIRMATION_REPETITIONS):
-        result = run_one_trial(
+    def calibration_rep():
+        return run_one_trial(
             cfg, benchmark=benchmark, flags=base_flags, phase="confirmation",
             profile=CALIBRATION_PROFILE, iterations=CALIBRATION_ITERATIONS,
             experiment_id=experiment_id, workload=workload, instrumentation=instrumentation,
         )
+
+    measured: list[dict] = []
+    wspy_run_refs: list[str] = []
+    for _ in range(CONFIRMATION_REPETITIONS):
+        result = calibration_rep()
         trial_ids.append(result["trial_id"])
         if result.get("ratio") is not None:
-            ratios.append(result["ratio"])
+            measured.append(result)
         if result.get("wspy_run_ref"):
             wspy_run_refs.append(result["wspy_run_ref"])
+    measured, replacement = _rerun_single_outlier(cfg, measured, calibration_rep)
+    if replacement is not None:
+        trial_ids.append(replacement["trial_id"])
+    ratios = [r["ratio"] for r in measured]
 
     if not ratios:
         # Every individual run_one_trial() call above returned normally (no
@@ -567,17 +652,23 @@ def _confirm_flagset(
     *current running set* -- ``compare_ci`` is which of those two this call means,
     letting Phase 5 re-use this unchanged rather than duplicating it).
     """
-    trial_results = []
-    for _ in range(CONFIRMATION_REPETITIONS):
-        trial_results.append(run_one_trial(
+    def confirmation_rep():
+        return run_one_trial(
             cfg, benchmark=benchmark, flags=flags, phase=phase,
             profile=CALIBRATION_PROFILE, iterations=CALIBRATION_ITERATIONS,
             experiment_id=experiment_id,
             parent_trial_id=parent_trial_id, workload=workload, instrumentation=instrumentation,
-        ))
+        )
+
+    trial_results = [confirmation_rep() for _ in range(CONFIRMATION_REPETITIONS)]
+    measured, replacement = _rerun_single_outlier(
+        cfg, [r for r in trial_results if r.get("ratio") is not None], confirmation_rep,
+    )
+    if replacement is not None:
+        trial_results.append(replacement)
 
     trial_ids = [r["trial_id"] for r in trial_results]
-    ratios = [r["ratio"] for r in trial_results if r.get("ratio") is not None]
+    ratios = [r["ratio"] for r in measured]
 
     if not ratios:
         ci = None
@@ -1035,3 +1126,65 @@ def run_microarch_multiplier(
         attempted=True, winning_flags=current_flags, winning_ci=current_ci,
         outcome=winner, outcomes=outcomes,
     )
+
+
+@dataclass
+class BaselineRecheck:
+    """``recheck_baseline()``'s result: one extra baseline-flags rep after
+    Phase 4. ``flagged`` means the baseline looks offset (see
+    ``BASELINE_RECHECK_WARN_PCT``); it's reported, never acted on."""
+
+    trial_id: int
+    ratio: Optional[float]
+    delta_pct: Optional[float]
+    flagged: bool
+    reason: str
+
+
+def recheck_baseline(
+    cfg: CfmConfig,
+    *,
+    experiment_id: int,
+    benchmark: str,
+    baseline: BaselineResult,
+    workload: Optional[WorkloadBackend] = None,
+    instrumentation: Optional[InstrumentationBackend] = None,
+) -> BaselineRecheck:
+    """One calibration-grade rep of ``baseline.flags`` after Phase 4, compared
+    against ``baseline.ci``. An offset baseline inflates or deflates every
+    Phase 4 delta and the knowledge-table means built from them, and nothing
+    else in a mine would notice. This only detects it: the result is logged as a
+    hypothesis, printed when flagged, and reported in ``cfm mine``'s summary."""
+    result = run_one_trial(
+        cfg, benchmark=benchmark, flags=baseline.flags, phase="confirmation",
+        profile=CALIBRATION_PROFILE, iterations=CALIBRATION_ITERATIONS,
+        experiment_id=experiment_id, workload=workload, instrumentation=instrumentation,
+    )
+    ratio = result.get("ratio")
+    if ratio is None:
+        recheck = BaselineRecheck(
+            trial_id=result["trial_id"], ratio=None, delta_pct=None, flagged=False,
+            reason=f"baseline re-check produced no usable ratio (build_status={result['build_status']!r})",
+        )
+    else:
+        delta_pct = (ratio - baseline.ci.mean) / baseline.ci.mean * 100.0
+        outside = ratio < baseline.ci.low or ratio > baseline.ci.high
+        flagged = outside and abs(delta_pct) >= BASELINE_RECHECK_WARN_PCT
+        recheck = BaselineRecheck(
+            trial_id=result["trial_id"], ratio=ratio, delta_pct=delta_pct, flagged=flagged,
+            reason=(
+                f"baseline re-check after Phase 4: ratio {ratio:.6g} vs baseline mean "
+                f"{baseline.ci.mean:.6g} (95% CI [{baseline.ci.low:.6g}, {baseline.ci.high:.6g}]), "
+                f"{delta_pct:+.2f}%"
+                + (" -- FLAGGED: baseline may be offset; Phase 4 deltas may be biased" if flagged else "")
+            ),
+        )
+    conn = db.connect(cfg.db_path)
+    try:
+        db.record_hypothesis(conn, trial_id=recheck.trial_id, proposed_by="rule", rationale=recheck.reason)
+    finally:
+        conn.close()
+    if recheck.flagged:
+        print(f"warning: {recheck.reason}")
+    return recheck
+

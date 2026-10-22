@@ -1187,7 +1187,7 @@ straight to Phase 4 via `orchestrator.confirm_known_candidates()`, and everythin
 `orchestrator.screen_candidates()` (Phase 3,
 1× `run_one_trial()` per non-fast-tracked candidate at the `quick` profile, prunes clearly-worse) →
 `orchestrator.confirm_candidates()` (Phase 4, 3× `run_one_trial()` per survivor, `cfm/stats.py`'s CI
-accept/reject vs. baseline, `knowledge` table upsert) → `orchestrator.greedy_combine()` (Phase 5,
+accept/reject vs. baseline, `knowledge` table upsert; since 2026-10-22 a single rep more than `OUTLIER_RERUN_PCT` (10%) from its siblings' median is re-run once and replaced, here and in Phase 1's calibration reps) → `orchestrator.recheck_baseline()` (since 2026-10-22: one extra baseline-flags rep, flagged in the summary JSON when it sits outside `baseline.ci` by at least `BASELINE_RECHECK_WARN_PCT`; detection only, never changes a verdict) → `orchestrator.greedy_combine()` (Phase 5,
 cumulative re-confirmation plus a bounded random-pair tournament) → `orchestrator.run_pgo_multiplier()`
 (Phase 6's PGO slice, real two-pass `-fprofile-use` layered on Phase 5's winning set, skippable via
 `--skip-pgo`) → `orchestrator.run_microarch_multiplier()` (Phase 6's microarch slice, the detected

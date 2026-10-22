@@ -34,6 +34,7 @@ from cfm.orchestrator import (
     confirm_known_candidates,
     generate_candidates,
     greedy_combine,
+    recheck_baseline,
     run_baseline,
     run_microarch_multiplier,
     run_pgo_multiplier,
@@ -1316,3 +1317,132 @@ def test_confirm_known_candidates_skips_screening_and_confirms_directly(tmp_path
         assert phases == {"confirmation"}  # never "screening"
     finally:
         conn.close()
+
+
+# -- outlier re-run and baseline re-check ---------------------------------------
+
+def test_single_outlier_index():
+    from cfm.orchestrator import _single_outlier_index
+    assert _single_outlier_index([17.22, 17.08, 12.20]) == 2  # 777.zstd_r trial 542's real numbers
+    assert _single_outlier_index([17.46, 17.45, 17.40]) is None
+    assert _single_outlier_index([100.0, 80.0, 120.0]) is None  # two outliers -- left as measured
+    assert _single_outlier_index([100.0, 50.0]) is None  # too few reps to call one an outlier
+
+
+def test_confirm_reruns_a_single_outlier_rep_and_replaces_it(tmp_path):
+    cfg = _cfg(tmp_path)
+    conn = db.connect(cfg.db_path)
+    exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
+    conn.close()
+
+    baseline = _baseline(mean_ratio=17.15)
+    backends = ScriptedBackends(ratio_sequences={
+        ("-O3", "-mprefer-vector-width=256"): [17.22, 17.08, 12.20, 17.15],
+    })
+
+    [outcome] = confirm_candidates(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline,
+        screened=[_screened("-mprefer-vector-width=256")], workload=backends, instrumentation=backends,
+    )
+
+    assert outcome.ratios == [17.22, 17.08, 17.15]
+    assert len(outcome.trial_ids) == 4  # 3 reps + 1 re-run, all persisted
+    assert outcome.delta_vs_baseline_pct == pytest.approx(0.0, abs=0.5)  # not -9.6%
+    conn = db.connect(cfg.db_path)
+    try:
+        rationales = [
+            r[0] for r in conn.execute(
+                "SELECT rationale FROM hypotheses WHERE trial_id = ?", (outcome.trial_ids[2],),
+            )
+        ]
+        k = conn.execute(
+            "SELECT mean_delta_pct FROM knowledge WHERE flag = '-mprefer-vector-width=256'"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert any(r.startswith("outlier rep excluded") for r in rationales)
+    assert abs(k[0]) < 0.5  # the knowledge table no longer sees the outlier
+
+
+def test_confirm_keeps_the_outlier_when_the_rerun_has_no_ratio(tmp_path):
+    cfg = _cfg(tmp_path)
+    conn = db.connect(cfg.db_path)
+    exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
+    conn.close()
+
+    baseline = _baseline(mean_ratio=100.0)
+    # Only 3 queued ratios: the re-run hits an empty queue (validate-failed, no ratio).
+    backends = ScriptedBackends(ratio_sequences={("-O3", "-x"): [100.0, 101.0, 60.0]})
+
+    [outcome] = confirm_candidates(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline,
+        screened=[_screened("-x")], workload=backends, instrumentation=backends,
+    )
+
+    assert outcome.ratios == [100.0, 101.0, 60.0]
+    assert len(outcome.trial_ids) == 4
+
+
+def test_run_baseline_reruns_a_single_outlier_calibration_rep(tmp_path):
+    cfg = _cfg(tmp_path)
+    backends = ScriptedBackends(
+        ratio_sequences={("-O3",): [999.0, 777.0, 777.0, 100.0, 70.0, 101.0, 99.0]},
+    )
+
+    result = run_baseline(
+        cfg, benchmark="fake_r", base_flags=["-O3"],
+        workload=backends, instrumentation=backends, reference_matrix_fetch=_no_reference_matrix,
+    )
+
+    assert result.ratios == [100.0, 99.0, 101.0]
+    assert len(result.trial_ids) == 7  # 1 characterization + 2 warm-up + 3 calibration + 1 re-run
+
+
+@pytest.mark.parametrize("ratio,expect_flagged", [
+    (100.0, False),  # dead on the mean
+    (100.4, False),  # outside a zero-width CI but under BASELINE_RECHECK_WARN_PCT
+    (99.3, True),    # 0.7% low and outside the CI
+])
+def test_recheck_baseline_flags_only_a_real_offset(tmp_path, ratio, expect_flagged):
+    cfg = _cfg(tmp_path)
+    conn = db.connect(cfg.db_path)
+    exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
+    conn.close()
+    baseline = _baseline(mean_ratio=100.0)
+    backends = ScriptedBackends(ratio_sequences={("-O3",): [ratio]})
+
+    recheck = recheck_baseline(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline,
+        workload=backends, instrumentation=backends,
+    )
+
+    assert recheck.ratio == pytest.approx(ratio)
+    assert recheck.flagged is expect_flagged
+    conn = db.connect(cfg.db_path)
+    try:
+        # Filter by prefix: run_one_trial() also records the real host's package-power reading.
+        rationales = [
+            r[0] for r in conn.execute(
+                "SELECT rationale FROM hypotheses WHERE trial_id = ?", (recheck.trial_id,),
+            )
+        ]
+    finally:
+        conn.close()
+    assert any(r.startswith("baseline re-check after Phase 4") for r in rationales)
+
+
+def test_recheck_baseline_with_no_ratio_is_not_flagged(tmp_path):
+    cfg = _cfg(tmp_path)
+    conn = db.connect(cfg.db_path)
+    exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
+    conn.close()
+    backends = ScriptedBackends(ratio_sequences={})
+
+    recheck = recheck_baseline(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=_baseline(),
+        workload=backends, instrumentation=backends,
+    )
+
+    assert recheck.ratio is None
+    assert recheck.flagged is False
+
