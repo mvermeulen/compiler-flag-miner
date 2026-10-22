@@ -1191,7 +1191,7 @@ accept/reject vs. baseline, `knowledge` table upsert) → `orchestrator.greedy_c
 cumulative re-confirmation plus a bounded random-pair tournament) → `orchestrator.run_pgo_multiplier()`
 (Phase 6's PGO slice, real two-pass `-fprofile-use` layered on Phase 5's winning set, skippable via
 `--skip-pgo`) → `orchestrator.run_microarch_multiplier()` (Phase 6's microarch slice, the detected
-`-march=`/`-mtune=` pair layered on whatever PGO left behind, skippable via `--skip-microarch`) → a plain
+`-march=`/`-mtune=` pair layered on whatever PGO left behind, skippable via `--skip-microarch`) → `orchestrator.run_vector_width_multiplier()` (since 2026-10-22: the `-mprefer-vector-width=` candidates `defer_vector_width_candidates()` held out of Phases 3-5, tried only on top of a winning set with an `-march=`, skippable via `--skip-vector-width`) → a plain
 JSON summary on stdout, every trial along the way still landing in `cfm.db` regardless of phase or
 outcome, same as M0.
 

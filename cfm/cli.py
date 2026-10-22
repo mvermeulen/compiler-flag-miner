@@ -76,6 +76,11 @@ def build_parser() -> argparse.ArgumentParser:
              "focused run",
     )
     mine.add_argument(
+        "--skip-vector-width", action="store_true",
+        help="skip Phase 6's vector-width multiplier (-mprefer-vector-width=256/512, tried "
+             "only on top of a winning set that has an -march=)",
+    )
+    mine.add_argument(
         "--skip-microarch", action="store_true",
         help="skip Phase 6's microarch multiplier trial (doc/DESIGN.md sec. 6) -- the "
              "detected host's -march=/-mtune= pair, layered on top of whatever PGO left "
@@ -179,6 +184,11 @@ def main(argv=None) -> int:
                             f"(mean {k.mean_delta_pct:+.2f}%, n={k.n_trials}, last seen on "
                             f"{k.last_benchmark!r})"
                         )
+                # -mprefer-vector-width= is a no-op without an -march=, so it
+                # waits for Phase 6 (run_vector_width_multiplier()) instead.
+                deferred_vector_width, candidates = orchestrator.defer_vector_width_candidates(
+                    candidates, baseline.flags,
+                )
                 fast_tracked, remaining_candidates = orchestrator.split_candidates_by_known_prior(
                     candidates, known_flags,
                 )
@@ -219,6 +229,16 @@ def main(argv=None) -> int:
                     microarch_result = orchestrator.run_microarch_multiplier(
                         cfg, experiment_id=baseline.experiment_id, benchmark=args.benchmark,
                         baseline=baseline, combination=pgo_result or combination,
+                    )
+
+                # Only called when something was deferred, so a mine with no
+                # vector-width candidates logs nothing extra.
+                vector_width_result = None
+                if not args.skip_vector_width and deferred_vector_width:
+                    vector_width_result = orchestrator.run_vector_width_multiplier(
+                        cfg, experiment_id=baseline.experiment_id, benchmark=args.benchmark,
+                        baseline=baseline, combination=microarch_result or pgo_result or combination,
+                        candidates=deferred_vector_width,
                     )
         except RuntimeError as exc:
             print(f"cfm mine: {exc}", file=sys.stderr)
@@ -266,7 +286,9 @@ def main(argv=None) -> int:
         # microarch_result chains off pgo_result (or combination, if PGO was
         # skipped) already, so its own winning_flags/winning_ci is always the
         # final answer once both multipliers have had their turn.
-        if microarch_result:
+        if vector_width_result:
+            final_flags, final_ci = vector_width_result.winning_flags, vector_width_result.winning_ci
+        elif microarch_result:
             final_flags, final_ci = microarch_result.winning_flags, microarch_result.winning_ci
         elif pgo_result:
             final_flags, final_ci = pgo_result.winning_flags, pgo_result.winning_ci
@@ -305,6 +327,15 @@ def main(argv=None) -> int:
             "microarch_skip_reason": microarch_result.skip_reason if microarch_result else "--skip-microarch",
             "microarch_accepted": bool(
                 microarch_result and microarch_result.outcome and microarch_result.outcome.accepted
+            ),
+            "vector_width_attempted": vector_width_result.attempted if vector_width_result else False,
+            "vector_width_skip_reason": (
+                vector_width_result.skip_reason if vector_width_result
+                else "--skip-vector-width" if args.skip_vector_width
+                else "no deferred -mprefer-vector-width= candidates"
+            ),
+            "vector_width_accepted": bool(
+                vector_width_result and vector_width_result.outcome and vector_width_result.outcome.accepted
             ),
             "winning_flags": final_flags,
             "winning_ratio_mean": final_ci.mean,

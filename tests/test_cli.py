@@ -551,3 +551,69 @@ def test_mine_prints_known_priors_including_a_rejected_one(tmp_path, monkeypatch
     summary = json.loads(out[out.index("{"):])
     # A rejected prior still gets a real screening trial -- never fast-tracked.
     assert summary["candidates_fast_tracked_from_prior_knowledge"] == []
+
+
+# -- vector-width deferral wiring -------------------------------------------------
+
+def test_mine_defers_vector_width_candidates_to_phase_6(tmp_path, monkeypatch, capsys):
+    baseline = _fake_baseline()
+    combination = CombinationResult(
+        winning_flags=["-O3", "-march=native"], winning_ci=confidence_interval([110.0, 110.0, 110.0]),
+    )
+    candidates = [
+        FlagCandidate(flag="-fake-a", category="misc", risk="safe"),
+        FlagCandidate(flag="-mprefer-vector-width=512", category="vector", risk="safe"),
+    ]
+    seen = {}
+
+    def fake_screen(cfg, *, experiment_id, benchmark, baseline, candidates, **kwargs):
+        seen["screened"] = [c.flag for c in candidates]
+        return []
+
+    def fake_vector_width(*a, combination, candidates, **k):
+        seen["vector_width"] = [c.flag for c in candidates]
+        seen["vector_width_base"] = combination.winning_flags
+        return MultiplierResult(
+            attempted=True, winning_flags=combination.winning_flags + ["-mprefer-vector-width=512"],
+            winning_ci=confidence_interval([115.0, 115.0, 115.0]),
+        )
+
+    _mine_common_mocks(monkeypatch, baseline, combination)
+    monkeypatch.setattr(cli.orchestrator, "generate_candidates", lambda *a, **k: candidates)
+    monkeypatch.setattr(cli.orchestrator, "screen_candidates", fake_screen)
+    monkeypatch.setattr(
+        cli.orchestrator, "run_pgo_multiplier",
+        lambda *a, combination, **k: _fake_pgo_not_attempted(combination),
+    )
+    monkeypatch.setattr(cli.orchestrator, "run_vector_width_multiplier", fake_vector_width)
+
+    exit_code = cli.main(["mine", "fake_r", "--db", str(tmp_path / "cfm.db"), "--lock-file", str(tmp_path / "test.lock")])
+    assert exit_code == 0
+    assert seen["screened"] == ["-fake-a"]
+    assert seen["vector_width"] == ["-mprefer-vector-width=512"]
+    assert seen["vector_width_base"] == ["-O3", "-march=native"]
+
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["vector_width_attempted"] is True
+    assert summary["winning_flags"] == ["-O3", "-march=native", "-mprefer-vector-width=512"]
+    assert summary["gain_vs_baseline_pct"] == pytest.approx(15.0)
+
+
+def test_mine_without_vector_width_candidates_never_calls_the_multiplier(tmp_path, monkeypatch, capsys):
+    baseline = _fake_baseline()
+    combination = CombinationResult(winning_flags=["-O3"], winning_ci=baseline.ci)
+    _mine_common_mocks(monkeypatch, baseline, combination)
+    monkeypatch.setattr(
+        cli.orchestrator, "run_pgo_multiplier",
+        lambda *a, combination, **k: _fake_pgo_not_attempted(combination),
+    )
+    calls = []
+    monkeypatch.setattr(cli.orchestrator, "run_vector_width_multiplier", lambda *a, **k: calls.append(1))
+
+    exit_code = cli.main(["mine", "fake_r", "--db", str(tmp_path / "cfm.db"), "--lock-file", str(tmp_path / "test.lock")])
+    assert exit_code == 0
+    assert calls == []
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["vector_width_attempted"] is False
+    assert summary["vector_width_skip_reason"] == "no deferred -mprefer-vector-width= candidates"
+
