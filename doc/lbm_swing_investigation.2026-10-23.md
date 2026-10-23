@@ -175,9 +175,19 @@ So the throttle comes on under sustained memory load, at an unpredictable point 
 memory-side thermal or power limit with a fast cool-down better than anything else seen so far. It's still
 unconfirmed, since the module temperatures can't be read.
 
+## Next steps
 
 1. ~~**DIMM temperatures**~~: not readable on this board (above).
-2. **BIOS memory settings** on the PN54 (needs a reboot): look for memory power-down, DRAM or memory-controller
-   thermal throttling, and channel interleaving options. Then repeat a few single-iteration lbm runs with
-   probes: the fix is right if every run lands at about 6.33.
+2. ~~**BIOS memory settings**~~: the PN54's BIOS only offers memory frequency, with no power-down, thermal
+   throttling or interleaving options (checked 2026-10-23).
+4. **Airflow test:** a desk fan blowing on the case (or across the SO-DIMM side), then a few
+   single-iteration lbm runs with probes. If every run lands at about 6.33, the throttle is thermal.
+   This is the cheapest direct test left, and needs no reboot.
+5. **Lower memory frequency** (BIOS, DDR5-5600 → 4800): less heat and power in the memory subsystem. If
+   that stops the throttle, the ceiling drops by up to about 14% but becomes repeatable; measure a few lbm
+   runs at each setting before deciding.
+6. **Pipeline workaround, whatever the cause:** for memory-bound benchmarks, idle 60 seconds and probe
+   bandwidth before each trial, record the probe with the trial, and re-run any trial whose ratio sits far
+   below its siblings (the fast state is repeatable to within 1%, so slow reps stand out). That makes
+   measurements usable without fixing the host, at the cost of extra trials.
 3. ~~**Recovery time**~~: done above, under 30 seconds of idle.
