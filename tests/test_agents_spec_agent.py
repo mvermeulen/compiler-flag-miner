@@ -310,3 +310,42 @@ def test_run_one_trial_skips_package_power_hypothesis_when_absent(tmp_path):
         assert rows == []
     finally:
         conn.close()
+
+
+# -- bandwidth gate -------------------------------------------------------------
+
+def test_run_one_trial_records_the_bandwidth_gate_result(tmp_path):
+    from cfm.bandwidth import BandwidthGate
+    cfg = CfmConfig.from_env(
+        db_path=str(tmp_path / "cfm.db"), output_root=str(tmp_path / "results"),
+    )
+    gate = BandwidthGate(tmp_path, probe=lambda: 45.0, sleep=lambda s: None)
+    result = run_one_trial(
+        cfg, benchmark="fake_r", flags=["-O3"],
+        workload=_FullySucceedingWorkload(audit_dump=None), instrumentation=_FullySucceedingInstrumentation(),
+        power_reader=lambda: None, bandwidth_gate=gate,
+    )
+    assert result["bandwidth_probe_gbps"] == pytest.approx(45.0)
+    conn = db.connect(cfg.db_path)
+    try:
+        rows = conn.execute(
+            "SELECT rationale FROM hypotheses WHERE trial_id=? AND rationale LIKE 'memory bandwidth probe%'",
+            (result["trial_id"],),
+        ).fetchall()
+        assert len(rows) == 1
+        assert "45.0 GB/s" in rows[0][0]
+    finally:
+        conn.close()
+
+
+def test_run_one_trial_has_no_gate_unless_the_config_asks(tmp_path):
+    cfg = CfmConfig.from_env(
+        db_path=str(tmp_path / "cfm.db"), output_root=str(tmp_path / "results"),
+    )
+    assert cfg.bandwidth_gate is False
+    result = run_one_trial(
+        cfg, benchmark="fake_r", flags=["-O3"],
+        workload=_FullySucceedingWorkload(audit_dump=None), instrumentation=_FullySucceedingInstrumentation(),
+        power_reader=lambda: None,
+    )
+    assert result["bandwidth_probe_gbps"] is None

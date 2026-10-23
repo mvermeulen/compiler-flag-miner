@@ -49,6 +49,11 @@ def build_parser() -> argparse.ArgumentParser:
     measure.add_argument("--db", dest="db_path", default=None)
     measure.add_argument("--wspy-profile", default=None)
     measure.add_argument("--lock-file", default=None)
+    measure.add_argument(
+        "--no-bandwidth-gate", action="store_true",
+        help="don't probe memory bandwidth and wait out a throttled state before the run "
+             "(cfm/bandwidth.py)",
+    )
 
     mine = sub.add_parser(
         "mine",
@@ -92,6 +97,11 @@ def build_parser() -> argparse.ArgumentParser:
     mine.add_argument("--output-root", default=None)
     mine.add_argument("--db", dest="db_path", default=None)
     mine.add_argument("--lock-file", default=None)
+    mine.add_argument(
+        "--no-bandwidth-gate", action="store_true",
+        help="don't probe memory bandwidth and wait out a throttled state before each "
+             "trial (cfm/bandwidth.py)",
+    )
 
     init_db = sub.add_parser("init-db", help="create/upgrade cfm.db at the configured path")
     init_db.add_argument("--db", dest="db_path", default=None)
@@ -112,7 +122,7 @@ def main(argv=None) -> int:
         cfg = CfmConfig.from_env(
             spec_dir=args.spec_dir, spec_config=args.spec_config, wspy_dir=args.wspy_dir,
             output_root=args.output_root, db_path=args.db_path, wspy_profile=args.wspy_profile,
-            lock_file=args.lock_file,
+            lock_file=args.lock_file, bandwidth_gate=not args.no_bandwidth_gate,
         )
         try:
             with host_lock(cfg, command=f"cfm measure {args.benchmark}"):
@@ -144,6 +154,7 @@ def main(argv=None) -> int:
         cfg = CfmConfig.from_env(
             spec_dir=args.spec_dir, spec_config=args.spec_config, wspy_dir=args.wspy_dir,
             output_root=args.output_root, db_path=args.db_path, lock_file=args.lock_file,
+            bandwidth_gate=not args.no_bandwidth_gate,
         )
         compiler = GccCompiler(catalog_path=args.catalog) if args.catalog else GccCompiler()
         base_flags = args.base_flags.split()

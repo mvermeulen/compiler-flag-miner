@@ -273,6 +273,22 @@ def test_measure_calls_finish_experiment_as_converged_on_a_successful_build(tmp_
     assert calls == [(7, "converged")]
 
 
+@pytest.mark.parametrize("extra,expected", [([], True), (["--no-bandwidth-gate"], False)])
+def test_measure_turns_the_bandwidth_gate_on_unless_told_not_to(tmp_path, monkeypatch, extra, expected):
+    seen = []
+    monkeypatch.setattr(cli.db, "connect", lambda path: _FakeConn())
+    monkeypatch.setattr(cli.db, "finish_experiment", lambda conn, exp_id, status: None)
+    monkeypatch.setattr(
+        cli, "run_one_trial",
+        lambda cfg, **k: seen.append(cfg.bandwidth_gate) or {"experiment_id": 7, "trial_id": 1, "build_status": "ok"},
+    )
+    cli.main([
+        "measure", "fake_r", "--flags", "-O3 -flto",
+        "--db", str(tmp_path / "cfm.db"), "--lock-file", str(tmp_path / "test.lock"), *extra,
+    ])
+    assert seen == [expected]
+
+
 def test_measure_still_calls_finish_experiment_as_converged_on_a_build_failure(tmp_path, monkeypatch):
     # A build/validate failure is itself a normal, recorded trial outcome (not
     # an orchestration crash) -- the experiment still "converged" (ran to

@@ -201,13 +201,18 @@ class ScreeningOutcome:
     reason: str
 
 
-# A confirmation (or baseline calibration) rep further than this from the median
-# of its sibling reps is re-run once and replaced before the CI is computed. Same-
-# flags reps on niwot normally agree within about 1%; 777.zstd_r's trial 542
-# measured 12.20 against 17.08-17.22 (all 16 copies uniformly slow, cause
-# unknown), which skewed that flag's knowledge mean to -2.97%. Only one outlier
-# per flagset is re-run; two or more disagreeing reps are left as measured.
-OUTLIER_RERUN_PCT = 10.0
+# A confirmation (or baseline calibration) rep more than this far below the
+# fastest of its sibling reps is re-run and replaced before the CI is computed,
+# up to MAX_SLOW_REP_RERUNS times per flagset. Same-flags reps on niwot normally
+# agree within about 1%. The rule is one-sided because the slowdowns seen here
+# only ever slow a run: 777.zstd_r's trial 542 (12.20 against 17.08-17.22, all 16
+# copies uniformly slow) and 782.lbm_r's memory-bandwidth throttle (ratios from
+# 6.33 down to 3.02 for the same -O3 binary,
+# doc/lbm_swing_investigation.2026-10-23.md), which could leave two of three reps
+# slow -- the symmetric "exactly one outlier from the median" rule this replaced
+# (2026-10-22) left those as measured.
+SLOW_REP_RERUN_PCT = 10.0
+MAX_SLOW_REP_RERUNS = 3
 
 # After Phase 4, one extra baseline-flags rep checks that the baseline hasn't
 # drifted. It's flagged (logged and reported, never used to change a verdict)
@@ -217,66 +222,71 @@ OUTLIER_RERUN_PCT = 10.0
 BASELINE_RECHECK_WARN_PCT = 0.5
 
 
-def _single_outlier_index(ratios: list[float]) -> Optional[int]:
-    """Index of the one ratio further than ``OUTLIER_RERUN_PCT`` from the median
-    of ``ratios``, or None (fewer than 3 ratios, no outlier, or more than one)."""
-    if len(ratios) < 3:
-        return None
-    median = statistics.median(ratios)
-    if median <= 0:
-        return None
-    outliers = [i for i, r in enumerate(ratios) if abs(r - median) / median * 100.0 > OUTLIER_RERUN_PCT]
-    return outliers[0] if len(outliers) == 1 else None
+def _slow_rep_indices(ratios: list[float]) -> list[int]:
+    """Indices of the ratios more than ``SLOW_REP_RERUN_PCT`` below the fastest of
+    ``ratios``, slowest first. Empty with fewer than two ratios."""
+    if len(ratios) < 2:
+        return []
+    fastest = max(ratios)
+    if fastest <= 0:
+        return []
+    slow = [i for i, r in enumerate(ratios) if (fastest - r) / fastest * 100.0 > SLOW_REP_RERUN_PCT]
+    return sorted(slow, key=lambda i: ratios[i])
 
 
-def _rerun_single_outlier(cfg: CfmConfig, measured: list[dict], rerun) -> tuple[list[dict], Optional[dict]]:
-    """If exactly one of ``measured`` (trial-result dicts with a usable ratio) is
-    an outlier, calls ``rerun()`` for one replacement trial and returns
-    ``(measured with the outlier swapped for the replacement, replacement)``. The
-    outlier's trial row stays in cfm.db with a hypothesis saying why it was
-    excluded. If the replacement produced no usable ratio, ``measured`` comes back
-    unchanged (outlier kept) but the replacement is still returned, since its
-    trial row exists. Returns ``(measured, None)`` when nothing was re-run."""
-    idx = _single_outlier_index([r["ratio"] for r in measured])
-    if idx is None:
-        return measured, None
-    outlier = measured[idx]
-    replacement = rerun()
-    conn = db.connect(cfg.db_path)
-    try:
-        others = [r["ratio"] for i, r in enumerate(measured) if i != idx]
-        if replacement.get("ratio") is None:
+def _rerun_slow_reps(cfg: CfmConfig, measured: list[dict], rerun) -> tuple[list[dict], list[dict]]:
+    """Re-runs the reps of ``measured`` (trial-result dicts with a usable ratio)
+    that ``_slow_rep_indices()`` flags, slowest first, one ``rerun()`` call each,
+    until none is left or ``MAX_SLOW_REP_RERUNS`` re-runs have been spent.
+    Returns ``(measured with each replaced rep swapped out, every re-run made)``.
+    A replaced rep's trial row stays in cfm.db with a hypothesis saying why it was
+    excluded. A re-run with no usable ratio keeps the slow rep and stops, rather
+    than spending more trials on a build or validate that's failing."""
+    replacements: list[dict] = []
+    while len(replacements) < MAX_SLOW_REP_RERUNS:
+        slow = _slow_rep_indices([r["ratio"] for r in measured])
+        if not slow:
+            break
+        idx = slow[0]
+        rep = measured[idx]
+        fastest = max(r["ratio"] for r in measured)
+        replacement = rerun()
+        replacements.append(replacement)
+        conn = db.connect(cfg.db_path)
+        try:
+            if replacement.get("ratio") is None:
+                db.record_hypothesis(
+                    conn, trial_id=rep["trial_id"], proposed_by="rule",
+                    rationale=(
+                        f"slow rep: ratio {rep['ratio']:.6g} vs fastest sibling {fastest:.6g}; re-run as "
+                        f"trial {replacement['trial_id']} produced no usable ratio, so the slow rep was kept"
+                    ),
+                )
+                print(
+                    f"info: slow rep (trial {rep['trial_id']}, ratio {rep['ratio']:.6g}) re-run as "
+                    f"trial {replacement['trial_id']} produced no ratio -- kept the slow rep"
+                )
+                break
             db.record_hypothesis(
-                conn, trial_id=outlier["trial_id"], proposed_by="rule",
+                conn, trial_id=rep["trial_id"], proposed_by="rule",
                 rationale=(
-                    f"outlier rep: ratio {outlier['ratio']:.6g} vs sibling reps {others}; re-run as "
-                    f"trial {replacement['trial_id']} produced no usable ratio, so the outlier was kept"
+                    f"slow rep excluded from the CI: ratio {rep['ratio']:.6g} vs fastest sibling "
+                    f"{fastest:.6g} (more than {SLOW_REP_RERUN_PCT:g}% below); replaced by re-run "
+                    f"trial {replacement['trial_id']} (ratio {replacement['ratio']:.6g})"
                 ),
             )
-            print(
-                f"info: outlier rep (trial {outlier['trial_id']}, ratio {outlier['ratio']:.6g}) "
-                f"re-run as trial {replacement['trial_id']} produced no ratio -- kept the outlier"
+            db.record_hypothesis(
+                conn, trial_id=replacement["trial_id"], proposed_by="rule",
+                rationale=f"re-run replacing slow trial {rep['trial_id']} (ratio {rep['ratio']:.6g})",
             )
-            return measured, replacement
-        db.record_hypothesis(
-            conn, trial_id=outlier["trial_id"], proposed_by="rule",
-            rationale=(
-                f"outlier rep excluded from the CI: ratio {outlier['ratio']:.6g} vs sibling reps "
-                f"{others} (more than {OUTLIER_RERUN_PCT:g}% from the median); replaced by re-run "
-                f"trial {replacement['trial_id']} (ratio {replacement['ratio']:.6g})"
-            ),
+        finally:
+            conn.close()
+        print(
+            f"info: slow rep (trial {rep['trial_id']}, ratio {rep['ratio']:.6g}) replaced by "
+            f"re-run trial {replacement['trial_id']} (ratio {replacement['ratio']:.6g})"
         )
-        db.record_hypothesis(
-            conn, trial_id=replacement["trial_id"], proposed_by="rule",
-            rationale=f"re-run replacing outlier trial {outlier['trial_id']} (ratio {outlier['ratio']:.6g})",
-        )
-    finally:
-        conn.close()
-    print(
-        f"info: outlier rep (trial {outlier['trial_id']}, ratio {outlier['ratio']:.6g}) replaced by "
-        f"re-run trial {replacement['trial_id']} (ratio {replacement['ratio']:.6g})"
-    )
-    return measured[:idx] + [replacement] + measured[idx + 1:], replacement
+        measured = measured[:idx] + [replacement] + measured[idx + 1:]
+    return measured, replacements
 
 
 def _characterize_baseline(
@@ -417,9 +427,8 @@ def run_baseline(
             measured.append(result)
         if result.get("wspy_run_ref"):
             wspy_run_refs.append(result["wspy_run_ref"])
-    measured, replacement = _rerun_single_outlier(cfg, measured, calibration_rep)
-    if replacement is not None:
-        trial_ids.append(replacement["trial_id"])
+    measured, replacements = _rerun_slow_reps(cfg, measured, calibration_rep)
+    trial_ids.extend(r["trial_id"] for r in replacements)
     ratios = [r["ratio"] for r in measured]
 
     if not ratios:
@@ -698,11 +707,10 @@ def _confirm_flagset(
         )
 
     trial_results = [confirmation_rep() for _ in range(CONFIRMATION_REPETITIONS)]
-    measured, replacement = _rerun_single_outlier(
+    measured, replacements = _rerun_slow_reps(
         cfg, [r for r in trial_results if r.get("ratio") is not None], confirmation_rep,
     )
-    if replacement is not None:
-        trial_results.append(replacement)
+    trial_results.extend(replacements)
 
     trial_ids = [r["trial_id"] for r in trial_results]
     ratios = [r["ratio"] for r in measured]

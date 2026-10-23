@@ -1137,6 +1137,19 @@ Full branch/PR discipline, same shape as wspy's:
   problem until a second run missed the same way. Direct checks without `CFM_SPEC_CONFIG` set had "worked",
   which hid it. Fixed by keeping only the config name's last `.`-separated part. **Lesson:** reproduce a
   "works when I try it" discrepancy with the exact environment the real run used before calling it transient.
+- **2026-10-23: `niwot`'s memory side throttles under sustained bandwidth load, halving bandwidth for minutes
+  at a time.** `782.lbm_r`'s first mine here measured the same `-O3` binary at 6.32, 3.02, 4.15 and 4.26, and
+  was stopped. The core clock and instruction count were identical every trial; only IPC changed (0.25-0.53).
+  A 16-thread triad reads about 45 or about 22.5 GB/s. Ruled out with real measurements: the power profile
+  (`performance` changed nothing), core clock/power/temperature limits, huge pages, other load, and page
+  placement (a long-lived buffer slows and recovers in step with fresh ones). Bandwidth recovers within
+  about 30 seconds of idle, but the throttle also starts mid-run. The DIMM temperature sensors aren't
+  readable (`spd5118` binds at no SMBus address), and the PN54 BIOS has no memory throttling settings.
+  Full write-up: `doc/lbm_swing_investigation.2026-10-23.md`. Worked around, not fixed: `cfm/bandwidth.py`'s
+  pre-trial gate plus the one-sided slow-rep rerun (doc/DESIGN.md's measurement-guards bullets). Intrate
+  barely saw it (zstd's trial 542 was probably one case); expect it on every bandwidth-heavy fprate
+  benchmark. **Lesson:** a probe that runs straight into the next load measures the previous load's tail
+  state. Leave idle time before a probe when the question is "what state is the machine in now".
 
 ## Build & test
 
@@ -1187,7 +1200,7 @@ straight to Phase 4 via `orchestrator.confirm_known_candidates()`, and everythin
 `orchestrator.screen_candidates()` (Phase 3,
 1× `run_one_trial()` per non-fast-tracked candidate at the `quick` profile, prunes clearly-worse) →
 `orchestrator.confirm_candidates()` (Phase 4, 3× `run_one_trial()` per survivor, `cfm/stats.py`'s CI
-accept/reject vs. baseline, `knowledge` table upsert; since 2026-10-22 a single rep more than `OUTLIER_RERUN_PCT` (10%) from its siblings' median is re-run once and replaced, here and in Phase 1's calibration reps) → `orchestrator.recheck_baseline()` (since 2026-10-22: one extra baseline-flags rep, flagged in the summary JSON when it sits outside `baseline.ci` by at least `BASELINE_RECHECK_WARN_PCT`; detection only, never changes a verdict) → `orchestrator.greedy_combine()` (Phase 5,
+accept/reject vs. baseline, `knowledge` table upsert; since 2026-10-23 any rep more than `SLOW_REP_RERUN_PCT` (10%) below its fastest sibling is re-run and replaced, slowest first, up to `MAX_SLOW_REP_RERUNS` (3) per flagset, here and in Phase 1's calibration reps; before that, from 2026-10-22, only a single outlier from the median was) → `orchestrator.recheck_baseline()` (since 2026-10-22: one extra baseline-flags rep, flagged in the summary JSON when it sits outside `baseline.ci` by at least `BASELINE_RECHECK_WARN_PCT`; detection only, never changes a verdict) → `orchestrator.greedy_combine()` (Phase 5,
 cumulative re-confirmation plus a bounded random-pair tournament) → `orchestrator.run_pgo_multiplier()`
 (Phase 6's PGO slice, real two-pass `-fprofile-use` layered on Phase 5's winning set, always attempted whatever the baseline's shape since 2026-10-23 (the shape-based skip hid +4% to +11% on five of seven niwot benchmarks, `doc/opportunities_niwot.md` #25), skippable only via
 `--skip-pgo`; since 2026-10-22 it also tries a second variant with the best `find_near_miss_flags()` flag added -- a Phase 4 reject that was CI-clear of baseline but under the 1% bar) → `orchestrator.run_microarch_multiplier()` (Phase 6's microarch slice, the detected
@@ -1199,6 +1212,7 @@ outcome, same as M0.
 |---|---|
 | `cfm/util.py` | `parse_kv_lines()` — shared `key=value`-per-line parser for both wspy's trace-style CLI output and SPEC's `.rsf` format; `normalize_flag_base()`/`catalog_flag_base()` — shared flag-name normalization between `scripts/audit_flags_from_spec_results.py` and `compilers/gcc.py`. |
 | `cfm/config.py` | `CfmConfig.from_env()` — env-var-driven paths/hostname (`CFM_SPEC_DIR`, `CFM_WSPY_DIR`, ... — see the file for the full list and defaults), explicit kwargs > environment > built-in default, resolved at call time. |
+| `cfm/bandwidth.py` | `BandwidthGate` — the pre-trial memory-bandwidth gate (2026-10-23). `run_one_trial()` calls `wait()` between the build and the timed run when `cfg.bandwidth_gate` is set (`cfm mine`/`cfm measure` set it; `--no-bandwidth-gate` clears it; off in `from_env()` so unit tests never probe). Probes with a small OpenMP triad compiled once into `<output_root>/.cache/`, idles and re-probes every 30 s (up to 5 min) while bandwidth reads below 85% of the session's best, and records the probe as a `hypotheses` row. Degrades to letting the trial through on any probe failure. See Non-obvious traps' 2026-10-23 entry. |
 | `cfm/lock.py` | `host_lock()` — the host-wide `flock`-based mutex `cfm measure`/`cfm mine` hold for their entire invocation (doc/DESIGN.md §11's "cross-invocation exclusivity" bullet); raises `MiningLockHeld` immediately (never queues/waits) if another invocation already holds it. See Non-obvious traps below for why it's `flock`-based, not a PID file. |
 | `cfm/db.py` | Applies `schema/cfm_schema.sql` (idempotent) and provides typed `create_experiment`/`record_trial`/`update_trial_verdict`/`get_experiment`/`list_trials`/`list_trials_by_phase`/`finish_experiment`/`set_baseline_run_ref`/`record_hypothesis`/`upsert_knowledge` accessors. No ORM. |
 | `cfm/stats.py` | Confidence-interval statistics for Phase 4's confirmation stage — `confidence_interval()`/`non_overlapping()`, replicating `wspy-summary`'s own documented CI formula (mean, sample stddev, Student's t 95%) applied to `cfm.db`'s own `trials.ratio` values, since `wspy-summary` itself has no way to see SPEC's `ratio` field (doc/DESIGN.md §6 Phase 4). |
