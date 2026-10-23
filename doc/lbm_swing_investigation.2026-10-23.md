@@ -175,6 +175,52 @@ So the throttle comes on under sustained memory load, at an unpredictable point 
 memory-side thermal or power limit with a fast cool-down better than anything else seen so far. It's still
 unconfirmed, since the module temperatures can't be read.
 
+## Did intrate see this? (2026-10-23)
+
+Every niwot trial already has its ratio, CPU temperature and package power in `cfm.db`, so this checks the
+intrate runs for the same thing. Reps are grouped by flags: within a mine, every confirmation-phase rep of one
+flagset (warm-up, calibration, confirmation and re-check reps); across the interleaved `cfm measure` checks,
+the same benchmark and flags on the same day (each a median of 3 iterations, so a little smoother). That's
+539 reps in groups of three or more, lbm excluded. For each rep, the *deficit* is how far it sits below the
+fastest rep in its group.
+
+| Benchmark | Reps | Median deficit | 90th percentile | Max | Mean CPU temp |
+|---|---|---|---|---|---|
+| `710.omnetpp_r` | 29 | 0.61% | 1.34% | 2.45% | 94.2°C |
+| `735.gem5_r` | 44 | 0.56% | 1.59% | 2.53% | 94.4°C |
+| `729.abc_r` | 47 | 0.42% | 1.40% | 1.89% | 88.6°C |
+| `753.ns3_r` | 35 | 0.39% | 1.31% | 1.82% | 96.2°C |
+| `714.cpython_r` | 36 | 0.34% | 1.65% | 2.38% | 90.4°C |
+| `723.llvm_r` | 29 | 0.26% | 1.04% | 1.56% | 90.6°C |
+| `706.stockfish_r` | 36 | 0.21% | 0.70% | 1.23% | 91.4°C |
+| `708.sqlite_r` | 52 | 0.17% | 0.72% | 1.36% | 92.8°C |
+| `734.vpr_r` | 32 | 0.14% | 0.41% | 0.78% | 96.8°C |
+| `727.cppcheck_r` | 41 | 0.11% | 0.65% | 0.71% | 94.2°C |
+| `721.gcc_r` | 32 | 0.10% | 0.38% | 0.74% | 90.6°C |
+| `707.ntest_r` | 59 | 0.10% | 1.25% | 2.14% | 92.9°C |
+| `777.zstd_r` | 32 | 0.10% | 0.63% | **29.18%** | 91.9°C |
+| `750.sealcrypto_r` | 35 | 0.07% | 1.33% | 2.50% | 94.1°C |
+
+- **Intrate noise is small, and it isn't this throttle.** Only one of 539 reps sits 3% or more below its
+  siblings, and nearly all are within 2.5%. The noisiest benchmarks are the frontend-bound ones (omnetpp, gem5,
+  ns3, cpython), not the memory-bound ones. vpr, gcc, sqlite and zstd are among the quietest. Frontend-bound
+  noise of about half a percent is more plausibly code layout, branch-predictor and cache-aliasing variation
+  between runs than anything on the memory side.
+- **Temperature doesn't predict noise.** Across benchmarks, mean temperature against median deficit gives
+  r = +0.04: the hottest (vpr 96.8°C, ns3 96.2°C) and coolest (abc 88.6°C) are both ordinary. Within a group,
+  slower reps run slightly cooler (r = -0.19 against the group's mean temperature, n = 537), the same direction
+  as lbm: a stalled rep does less work and heats the chip less. That's a consequence of being slow, not a cause.
+  Package power shows nothing (r = -0.02).
+- **The one large drop, `777.zstd_r` trial 542 (-29.2%), looks like this throttle.** It has the same signature
+  as lbm's slow runs: all 16 copies uniformly slow, temperature at the low end of the run (83.9°C), power
+  ordinary, nothing else running. And zstd is the most clearly memory-bound benchmark in intrate (64.0%).
+  That's a probable, not a proven, match. Nothing in that trial's data separates a memory throttle from any
+  other system-wide slowdown.
+
+So the throttle is rare and nearly invisible on intrate. It took sustained, bandwidth-heavy load to trigger it
+(zstd once, lbm constantly). That supports expecting it on fprate's streaming benchmarks, and it means the
+intrate results stand as measured.
+
 ## Next steps
 
 1. ~~**DIMM temperatures**~~: not readable on this board (above).
