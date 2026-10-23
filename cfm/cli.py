@@ -225,7 +225,7 @@ def main(argv=None) -> int:
                 if not args.skip_pgo:
                     pgo_result = orchestrator.run_pgo_multiplier(
                         cfg, experiment_id=baseline.experiment_id, benchmark=args.benchmark,
-                        baseline=baseline, combination=combination, compiler=compiler,
+                        baseline=baseline, combination=combination,
                         near_miss_flags=near_miss_flags,
                     )
 
