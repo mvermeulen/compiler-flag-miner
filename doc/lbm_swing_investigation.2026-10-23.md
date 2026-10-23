@@ -144,12 +144,40 @@ would test it. The `spd5118` driver is installed but not loaded, and loading it 
   reads above, say, 40 GB/s. That won't catch a flip partway through a run, but here a fast start meant a fast run
   in three of four cases.
 
-## Next steps
+## Module temperatures and recovery time (2026-10-23)
 
-1. **DIMM temperatures** (needs root): `sudo modprobe spd5118`. If the hwmon devices don't appear, the SPD hubs
-   may need instantiating on the SMBus (`i2c_piix4`). Then repeat two lbm runs with the sampler logging DIMM
-   temperatures alongside the probes.
-2. **BIOS memory settings** on the PN54: look for memory power-down, DRAM or memory-controller thermal throttling,
-   and channel interleaving options.
-3. **Recovery time:** when a probe reads 22.5, probe every 30 seconds for 10 minutes to see whether idling brings
-   it back, and how long it takes. That tells whether a probe-and-wait guard is practical.
+**DIMM temperatures can't be read on this board.** With `spd5118` loaded, the SPD hubs were instantiated by
+hand at every SPD address (0x50-0x57) on all three PIIX4 SMBus ports (`i2c-2`/`3`/`4`), and the driver bound
+to none of them. On AMD mobile platforms the SMU typically owns the SPD bus after boot. The only temperatures
+the OS sees are CPU Tctl, the ACPI zone and the GPU edge sensor, so the two temperature-logged lbm runs weren't
+possible.
+
+**Recovery time.** One single-iteration `-O3` run (experiment 164, 18:44Z-19:13Z, ratio 5.29, so partly slow),
+then a short 50-rep probe (a few seconds of load) right after the run and every 30 seconds:
+
+| Time after the run | Probe | Tctl |
+|---|---|---|
+| +4 s | 22.6 GB/s | 66.1°C |
+| +32 s | 45.4 GB/s | 53.8°C |
+| +64 s | 45.7 GB/s | 50.6°C |
+| +96 s | 45.6 GB/s | 49.2°C |
+
+- **Bandwidth comes back within half a minute of idling.** So the slow state needs ongoing load to persist.
+- **That explains the earlier "flips between runs" pattern.** In the 12-run check, each 30-second "after" probe
+  ran straight into the next 30-second "before" probe and then the next build, with no idle gap in between. Those
+  probes were measuring the tail of the previous run's slow state, not a separate state that only changes at run
+  boundaries. The one run with 60 seconds of idle before it (`balanced` 1) started fast.
+- **But the state also changes during a run.** This run's 5.29, and the earlier 3.46-5.49 values, are a mix
+  of fast and slow time within one 24-50 minute run. Idling before a trial only fixes the start.
+
+So the throttle comes on under sustained memory load, at an unpredictable point (sometimes not for a whole
+24-minute run, sometimes within a minute), and lets go within about 30 seconds of idle. That fits a
+memory-side thermal or power limit with a fast cool-down better than anything else seen so far. It's still
+unconfirmed, since the module temperatures can't be read.
+
+
+1. ~~**DIMM temperatures**~~: not readable on this board (above).
+2. **BIOS memory settings** on the PN54 (needs a reboot): look for memory power-down, DRAM or memory-controller
+   thermal throttling, and channel interleaving options. Then repeat a few single-iteration lbm runs with
+   probes: the fix is right if every run lands at about 6.33.
+3. ~~**Recovery time**~~: done above, under 30 seconds of idle.
