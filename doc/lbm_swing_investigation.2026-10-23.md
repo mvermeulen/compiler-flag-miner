@@ -180,6 +180,7 @@ unconfirmed, since the module temperatures can't be read.
 1. ~~**DIMM temperatures**~~: not readable on this board (above).
 2. ~~**BIOS memory settings**~~: the PN54's BIOS only offers memory frequency, with no power-down, thermal
    throttling or interleaving options (checked 2026-10-23).
+3. ~~**Recovery time**~~: done above, under 30 seconds of idle.
 4. **Airflow test:** a desk fan blowing on the case (or across the SO-DIMM side), then a few
    single-iteration lbm runs with probes. If every run lands at about 6.33, the throttle is thermal.
    This is the cheapest direct test left, and needs no reboot.
@@ -190,4 +191,3 @@ unconfirmed, since the module temperatures can't be read.
    bandwidth before each trial, record the probe with the trial, and re-run any trial whose ratio sits far
    below its siblings (the fast state is repeatable to within 1%, so slow reps stand out). That makes
    measurements usable without fixing the host, at the cost of extra trials.
-3. ~~**Recovery time**~~: done above, under 30 seconds of idle.
