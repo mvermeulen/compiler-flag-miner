@@ -956,6 +956,18 @@ compiler-flag-miner/
        summary when it sits outside `baseline.ci` by at least `BASELINE_RECHECK_WARN_PCT` (0.5%), to
        catch a calibration that sampled offset (`729.abc_r`, about 0.5% low). It only detects; it
        never changes a verdict.
+     - **Memory-bandwidth throttle guards (2026-10-23).** On `niwot` the memory side throttles under
+       sustained bandwidth load (about 45 → 22.5 GB/s; `782.lbm_r` from 6.33 down to 3.02 for the same
+       binary), recovering within about 30 seconds of idle, cause unknown
+       (`doc/lbm_swing_investigation.2026-10-23.md`). Two guards: (1) `cfm/bandwidth.py`'s gate probes
+       bandwidth between each trial's build and its timed run, idling and re-probing every 30 s (up to
+       5 min) while it reads below 85% of the session's best, and records the probe with the trial; on
+       by default for `cfm mine`/`cfm measure`, `--no-bandwidth-gate` turns it off. (2) The outlier rule
+       above became one-sided: any rep more than `SLOW_REP_RERUN_PCT` (10%) below its fastest sibling is
+       re-run, slowest first, up to `MAX_SLOW_REP_RERUNS` (3) per flagset. The throttle only ever slows a
+       run, and it could leave two of three reps slow, which the old "exactly one outlier" rule left as
+       measured. The gate fixes a trial's start; the rerun catches a throttle that begins mid-run.
+       Residual risk: all of one flagset's reps throttled the same way.
      The reference matrix's own historical spread (`stddev`/`cv_percent` across its many prior
      repetitions) is a real, data-backed noise-floor estimate for calibrating "clearly large" above, once
      available for a given benchmark — a fixed conservative fallback threshold otherwise. Phase 1

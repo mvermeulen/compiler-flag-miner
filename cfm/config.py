@@ -44,6 +44,10 @@ class CfmConfig:
     hostname: str
     lock_file: Path
     reference_matrix_url: str
+    # cfm/bandwidth.py's pre-trial memory-bandwidth gate. Off unless asked for:
+    # `cfm mine`/`cfm measure` turn it on (--no-bandwidth-gate turns it off), and
+    # the unit tests, which build configs straight from from_env(), never probe.
+    bandwidth_gate: bool = False
 
     @classmethod
     def from_env(
@@ -58,6 +62,7 @@ class CfmConfig:
         hostname: Optional[str] = None,
         lock_file: Optional[str] = None,
         reference_matrix_url: Optional[str] = None,
+        bandwidth_gate: Optional[bool] = None,
     ) -> "CfmConfig":
         """Resolve config: explicit keyword argument (e.g. from argparse) wins over
         the environment; the environment wins over the built-in default. Read
@@ -93,4 +98,8 @@ class CfmConfig:
                 reference_matrix_url
                 or _env_str("CFM_REFERENCE_MATRIX_URL", "https://mvermeulen.org/workload")
             ).rstrip("/"),
+            bandwidth_gate=(
+                bandwidth_gate if bandwidth_gate is not None
+                else _env_str("CFM_BANDWIDTH_GATE", "0") not in ("", "0")
+            ),
         )

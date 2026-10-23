@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from .. import db
+from ..bandwidth import BandwidthGate
 from ..config import CfmConfig
 from ..hostinfo import read_package_power_watts
 from ..instrumentation.base import InstrumentationBackend
@@ -138,6 +139,18 @@ def _extract_cpu_temp_c(raw_output: str) -> Optional[float]:
     return float(match.group(1)) if match else None
 
 
+# One gate per output root for the life of the process, so the session's best
+# bandwidth reading carries across every trial of a `cfm mine` run.
+_SESSION_GATES: dict = {}
+
+
+def _session_gate(cfg: CfmConfig) -> BandwidthGate:
+    key = cfg.output_root.resolve()
+    if key not in _SESSION_GATES:
+        _SESSION_GATES[key] = BandwidthGate(cfg.output_root / ".cache")
+    return _SESSION_GATES[key]
+
+
 def run_one_trial(
     cfg: CfmConfig,
     *,
@@ -152,6 +165,7 @@ def run_one_trial(
     workload: Optional[WorkloadBackend] = None,
     instrumentation: Optional[InstrumentationBackend] = None,
     power_reader=read_package_power_watts,
+    bandwidth_gate: Optional[BandwidthGate] = None,
 ) -> dict:
     """``workload``/``instrumentation`` are injectable (defaulting to the real
     ``SpecCpu2026Workload``/``WspyInstrumentation`` backends built from ``cfg``) so
@@ -176,6 +190,9 @@ def run_one_trial(
     fully faked workload/instrumentation backends -- confirmed live, 2026-08-24
     (a real test failure caught this the same day the feature was added, not
     inspection). Tests pass ``lambda: None`` to suppress it deterministically.
+    ``bandwidth_gate`` (cfm/bandwidth.py) runs between the build and the timed
+    run, waiting out a throttled memory-bandwidth state; when omitted, the
+    process-wide gate is used if ``cfg.bandwidth_gate`` is set, and none otherwise.
     """
     workload = workload or SpecCpu2026Workload(cfg.spec_dir, cfg.spec_config)
     run_index_path = cfg.output_root / "cpu2026" / "run-index.jsonl"
@@ -212,6 +229,9 @@ def run_one_trial(
                     "experiment_id": experiment_id, "trial_id": trial_id,
                     "build_status": "build-failed", "build_output": build_result.raw_output,
                 }
+
+            gate = bandwidth_gate or (_session_gate(cfg) if cfg.bandwidth_gate else None)
+            gate_result = gate.wait() if gate is not None else None
 
             run_id = new_run_id()
             command = workload.run_command(benchmark, tune, config_path, iterations=iterations)
@@ -269,6 +289,11 @@ def run_one_trial(
             # correlation gap that hypothesis was first raised from. Same
             # "squirrel it away, don't gate on it" posture as cpu_temp_c above
             # -- see read_package_power_watts()'s own docstring.
+            if gate_result is not None:
+                db.record_hypothesis(
+                    conn, trial_id=trial_id, proposed_by="rule", rationale=gate_result.rationale(),
+                )
+
             package_power_w = power_reader()
             if package_power_w is not None:
                 db.record_hypothesis(
@@ -293,6 +318,7 @@ def run_one_trial(
                 "ratio": run_result.ratio,
                 "cpu_temp_c": cpu_temp_c,
                 "package_power_w": package_power_w,
+                "bandwidth_probe_gbps": gate_result.probe_gbps if gate_result else None,
             }
         except Exception:
             # An unhandled exception here (not a build/validate *failure*, which

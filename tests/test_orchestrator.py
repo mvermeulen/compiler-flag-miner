@@ -615,15 +615,16 @@ def test_filter_never_excludes_empty_signal_candidates():
 
 # -- outlier re-run and baseline re-check ---------------------------------------
 
-def test_single_outlier_index():
-    from cfm.orchestrator import _single_outlier_index
-    assert _single_outlier_index([17.22, 17.08, 12.20]) == 2  # 777.zstd_r trial 542's real numbers
-    assert _single_outlier_index([17.46, 17.45, 17.40]) is None
-    assert _single_outlier_index([100.0, 80.0, 120.0]) is None  # two outliers -- left as measured
-    assert _single_outlier_index([100.0, 50.0]) is None  # too few reps to call one an outlier
+def test_slow_rep_indices():
+    from cfm.orchestrator import _slow_rep_indices
+    assert _slow_rep_indices([17.22, 17.08, 12.20]) == [2]  # 777.zstd_r trial 542's real numbers
+    assert _slow_rep_indices([17.46, 17.45, 17.40]) == []
+    assert _slow_rep_indices([6.33, 3.02, 4.24]) == [1, 2]  # 782.lbm_r's throttle: two slow, slowest first
+    assert _slow_rep_indices([100.0, 120.0]) == [0]
+    assert _slow_rep_indices([100.0]) == []
 
 
-def test_confirm_reruns_a_single_outlier_rep_and_replaces_it(tmp_path):
+def test_confirm_reruns_a_slow_rep_and_replaces_it(tmp_path):
     cfg = _cfg(tmp_path)
     conn = db.connect(cfg.db_path)
     exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
@@ -654,11 +655,11 @@ def test_confirm_reruns_a_single_outlier_rep_and_replaces_it(tmp_path):
         ).fetchone()
     finally:
         conn.close()
-    assert any(r.startswith("outlier rep excluded") for r in rationales)
+    assert any(r.startswith("slow rep excluded") for r in rationales)
     assert abs(k[0]) < 0.5  # the knowledge table no longer sees the outlier
 
 
-def test_confirm_keeps_the_outlier_when_the_rerun_has_no_ratio(tmp_path):
+def test_confirm_keeps_the_slow_rep_when_the_rerun_has_no_ratio(tmp_path):
     cfg = _cfg(tmp_path)
     conn = db.connect(cfg.db_path)
     exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
@@ -677,7 +678,7 @@ def test_confirm_keeps_the_outlier_when_the_rerun_has_no_ratio(tmp_path):
     assert len(outcome.trial_ids) == 4
 
 
-def test_run_baseline_reruns_a_single_outlier_calibration_rep(tmp_path):
+def test_run_baseline_reruns_a_slow_calibration_rep(tmp_path):
     cfg = _cfg(tmp_path)
     backends = ScriptedBackends(
         ratio_sequences={("-O3",): [999.0, 777.0, 777.0, 100.0, 70.0, 101.0, 99.0]},
@@ -690,6 +691,43 @@ def test_run_baseline_reruns_a_single_outlier_calibration_rep(tmp_path):
 
     assert result.ratios == [100.0, 99.0, 101.0]
     assert len(result.trial_ids) == 7  # 1 characterization + 2 warm-up + 3 calibration + 1 re-run
+
+
+def test_confirm_reruns_every_slow_rep_when_two_are_throttled(tmp_path):
+    # 782.lbm_r on niwot: the same -O3 binary at 6.33 (unthrottled) and 3.02/4.24.
+    cfg = _cfg(tmp_path)
+    conn = db.connect(cfg.db_path)
+    exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
+    conn.close()
+    baseline = _baseline(mean_ratio=6.33)
+    backends = ScriptedBackends(ratio_sequences={("-O3", "-x"): [6.33, 3.02, 4.24, 6.32, 6.34]})
+
+    [outcome] = confirm_candidates(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline,
+        screened=[_screened("-x")], workload=backends, instrumentation=backends,
+    )
+
+    assert outcome.ratios == [6.33, 6.32, 6.34]
+    assert len(outcome.trial_ids) == 5
+
+
+def test_confirm_stops_rerunning_slow_reps_at_the_cap(tmp_path):
+    from cfm.orchestrator import MAX_SLOW_REP_RERUNS
+    cfg = _cfg(tmp_path)
+    conn = db.connect(cfg.db_path)
+    exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
+    conn.close()
+    baseline = _baseline(mean_ratio=100.0)
+    # Every re-run comes back just as slow, so only the cap ends the loop.
+    backends = ScriptedBackends(ratio_sequences={("-O3", "-x"): [100.0, 60.0, 101.0] + [60.0] * 10})
+
+    [outcome] = confirm_candidates(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline,
+        screened=[_screened("-x")], workload=backends, instrumentation=backends,
+    )
+
+    assert len(outcome.trial_ids) == 3 + MAX_SLOW_REP_RERUNS
+    assert outcome.ratios == [100.0, 60.0, 101.0]
 
 
 @pytest.mark.parametrize("ratio,expect_flagged", [
