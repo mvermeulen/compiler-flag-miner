@@ -130,3 +130,33 @@ The flat rejects are probably about half a point optimistic because of the settl
    generation, or something else in znver5 targeting, accounts for the difference.
 2. **PGO and LTO were never tried** on sealcrypto on either host. The shape here (55.1% compute-bound) is a
    clearer margin than ntest's, so this is lower priority than ntest's equivalent item.
+
+## Follow-up: LTO and PGO on top of the winner (2026-10-23)
+
+Opportunity #24, follow-up 2 above. Three interleaved rounds of four flag sets, each a `cfm measure` run at its
+default 3 iterations (median), experiments 139-150 (trials 649-660), 01:38Z-04:35Z. Code at `989561a`.
+
+| Flags | Round 1 | Round 2 | Round 3 | Mean | 95% CI | vs control | vs mine's `-O3` (27.91) |
+|---|---|---|---|---|---|---|---|
+| `-O3 -march=native` (control) | 33.72 | 33.33 | 33.35 | 33.47 | [32.92, 34.01] | — | +19.91% |
+| `-O3 -march=native -flto` | 32.25 | 32.44 | 32.41 | 32.36 | [32.11, 32.62] | -3.29% | +15.96% |
+| `-O3 -march=native -fprofile-use` | 36.98 | 37.02 | 36.80 | 36.93 | [36.64, 37.23] | **+10.36%** | **+32.32%** |
+| `-O3 -march=native -flto -fprofile-use` | 37.35 | 37.06 | 37.27 | 37.23 | [36.85, 37.60] | +11.24% | +33.38% |
+
+- **PGO is a real +10.4% on top of `-march=native`**, CI clear of the control in every round. That's about the
+  same as ntest's +11.3%, the other compute-bound benchmark. SEAL's hot loops are NTT butterflies and modular
+  reductions with data-independent control flow, but the library around them (polynomial and ciphertext
+  bookkeeping, many small calls through templates) is branchy, and the profile lets GCC inline and lay out
+  that part well.
+- **`-flto` alone is a small, real loss** (-3.3%, CIs clear), the second benchmark after stockfish where it
+  hurts. With PGO it reads +0.8% over PGO alone, but the CIs overlap, so that's not a demonstrated gain.
+- **sealcrypto's winner is now `-O3 -march=native -fprofile-use`, +32.32% over the mine's `-O3`**, against
+  the mine's +20.49%. I'm counting PGO alone rather than LTO+PGO (+33.38%) because the extra 0.8% isn't
+  distinguishable. The control (33.47) matched the mine's winner (33.63) within 0.5%.
+- Every build passed validate, every audit confirmed `-O3` (and `-fprofile-use` where requested) compiled in,
+  and none logged a warning.
+
+**For the pipeline:** the 55.1% shape is above PR #48's 55% gate, so a re-mine would still have skipped PGO
+and cost 10 points. Of the seven benchmarks where a shape skipped PGO and a check then measured it, five
+gained from it (vpr, gcc, sqlite, ntest, sealcrypto) and two didn't (abc, zstd). PGO's skip is a poor
+predictor at any margin seen so far; see opportunity #25.
