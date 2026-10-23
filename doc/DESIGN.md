@@ -439,6 +439,11 @@ plain `-O3`, `714.cpython_r` picked deliberately as the one previously-mined ben
 `frontend-bound` baseline actually clears `pgo_topdown_signals()`'s plausibility check. See
 `doc/mining_results.714.cpython_r.2026-08-23.md` for the full write-up, and CLAUDE.md's matching
 traps-log entry for a real audit false-negative (`-flto` on an LTO build) found and fixed along the way.
+**Changed 2026-10-23: PGO is always attempted; the shape-based skip described above is gone.** On
+`niwot`, PGO was skipped on shape for seven benchmarks that a hand-run check later measured, and five of them
+gained from it (vpr, gcc, sqlite, ntest, sealcrypto: +4% to +11%), sealcrypto from above the 55% gate
+(`doc/opportunities_niwot.md` #25). The two that didn't (abc, zstd) cost only one rejected PGO trial set
+each. `pgo_topdown_signals()` was removed with it; `--skip-pgo` is now the only way to skip.
 
 **Near-miss PGO base (2026-10-22).** A Phase 4 reject whose CI sits clear above baseline's but whose delta
 misses `MIN_PRACTICAL_SIGNIFICANCE_PCT` is dropped before Phase 6, so it never stacks under PGO. On `niwot`,
@@ -923,8 +928,8 @@ compiler-flag-miner/
        the workload's own characterized shape (item 1's new signature fields) is the *first*, cheapest
        line of defense — better to never spend a trial on a mechanically-implausible flag than to
        correctly reject it later at real cost.
-       **Refined 2026-10-22:** the `resource_dominance`-based part of this exclusion (and Phase 6's
-       matching PGO skip) only applies when `resource_dominance_pct` is at least
+       **Refined 2026-10-22:** the `resource_dominance`-based part of this exclusion (and, until
+       2026-10-23, Phase 6's matching PGO skip) only applies when `resource_dominance_pct` is at least
        `CONFIDENT_SHAPE_MIN_PCT` (55%). On `niwot`, four memory-bound benchmarks at 38-45% excluded
        LTO/PGO that later measured +3% to +16%, while the one at 64% excluded them correctly
        (`doc/opportunities_niwot.md` #8). A weak-majority shape isn't confident enough to rule out a

@@ -123,8 +123,7 @@ PGO_FLAG = "-fprofile-use"
 # fixed fallback instead.
 MIN_PRACTICAL_SIGNIFICANCE_PCT = 1.0
 
-# Phase 2's resource_dominance-based exclusions (and Phase 6's matching PGO skip)
-# only apply when the baseline's shape is a clear majority. Below this margin,
+# Phase 2's resource_dominance-based exclusions only apply when the baseline's shape is a clear majority. Below this margin,
 # the shape is a weak read and the excluded flag families can still be the big
 # win: on niwot (doc/opportunities_niwot.md #8), four memory-bound benchmarks at
 # 38-45% excluded LTO/PGO that later measured +3% to +16% (vpr, gcc, sqlite,
@@ -1059,9 +1058,7 @@ class MultiplierResult:
     already flows through the ordinary Phase 2-5 per-flag path instead
     (`config/gcc_flag_catalog.seed.json`'s own `-flto` entry). ``attempted``
     is False when the multiplier was skipped entirely -- no trial spent --
-    either because it was implausible against baseline's characterized shape
-    (PGO's own check, mirroring Phase 2's `_filter_implausible_candidates()`)
-    or because nothing could be confidently detected/applicable (microarch's
+    because nothing could be confidently detected/applicable (microarch's
     own check: no `-march=`/`-mtune=` pair detected, or one already present in
     the incoming winning set). ``winning_flags``/``winning_ci`` are always
     populated: the incoming set/CI unchanged when nothing was attempted or
@@ -1139,7 +1136,6 @@ def run_pgo_multiplier(
     benchmark: str,
     baseline: BaselineResult,
     combination: CombinationResult,
-    compiler: Optional[GccCompiler] = None,
     near_miss_flags: Optional[list[str]] = None,
     workload: Optional[WorkloadBackend] = None,
     instrumentation: Optional[InstrumentationBackend] = None,
@@ -1150,16 +1146,13 @@ def run_pgo_multiplier(
     "compare against the current running set" principle `greedy_combine()`'s own
     cumulative steps already use via `_confirm_flagset()`'s `compare_ci` param.
 
-    Cheap plausibility check first, mirroring `_filter_implausible_candidates()`
-    (Phase 2): skip PGO entirely, spending no trial, when *every one* of the
-    `-fprofile-use` catalog entry's own `topdown_signals` is confidently
-    contradicted by ``baseline``'s characterized shape (unknown/absent signal
-    data never counts as implausible, same as Phase 2's own rule) -- PGO is a
-    real two-compile-plus-training-run trial (roughly 2x a normal confirmation's
-    build cost), not free, so this is worth the same cheap check every other
-    catalog entry already gets, even though PGO itself was deliberately excluded
-    from that shared per-flag path (`compilers/gcc.py`'s `category == "pgo"`
-    exclusion) since testing it standalone there would be meaningless.
+    Always attempted, whatever baseline's shape. Until 2026-10-23 PGO was
+    skipped when the shape confidently contradicted `-fprofile-use`'s catalog
+    `topdown_signals`, but on niwot (doc/opportunities_niwot.md #25) that skip
+    hid a real PGO gain on five of the seven benchmarks later checked by hand
+    (vpr, gcc, sqlite, ntest, sealcrypto: +4% to +11%), including sealcrypto
+    above the 55% gate. One PGO trial set per mine costs less than that, and
+    `_confirm_flagset()`'s CI test rejects PGO where it doesn't help.
 
     Always renders `flags = combination.winning_flags + [PGO_FLAG]` --
     `generate_config()` keys off `PGO_FLAG`'s literal presence to render the
@@ -1174,21 +1167,6 @@ def run_pgo_multiplier(
     bar ``greedy_combine()``'s pair tournament uses to replace a winner. Its
     knowledge upsert is skipped, since its delta isn't PGO's alone.
     """
-    compiler = compiler or GccCompiler()
-    signals = compiler.pgo_topdown_signals()
-    if signals and all(_signal_is_implausible(s, baseline) for s in signals):
-        reason = (
-            f"skipping PGO -- topdown_signals {signals} implausible given baseline shape "
-            f"(resource_dominance={baseline.resource_dominance!r} at "
-            f"{baseline.resource_dominance_pct}%, "
-            f"vectorization_density={baseline.vectorization_density!r})"
-        )
-        print(f"info: {reason}")
-        return MultiplierResult(
-            attempted=False, winning_flags=combination.winning_flags,
-            winning_ci=combination.winning_ci, skip_reason=reason,
-        )
-
     outcome = _confirm_flagset(
         cfg, experiment_id=experiment_id, benchmark=benchmark, baseline=baseline,
         flags=combination.winning_flags + [PGO_FLAG], phase="multiplier",

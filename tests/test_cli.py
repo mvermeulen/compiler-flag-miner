@@ -419,26 +419,6 @@ def test_mine_pgo_rejected_keeps_phase5s_winning_flagset(tmp_path, monkeypatch, 
     assert summary["winning_flags"] == ["-O3", "-flto"]  # Phase 5's, PGO rejected
 
 
-def test_mine_pgo_skipped_as_implausible(tmp_path, monkeypatch, capsys):
-    baseline = _fake_baseline()
-    combination = CombinationResult(winning_flags=["-O3"], winning_ci=baseline.ci)
-    pgo_result = MultiplierResult(
-        attempted=False, winning_flags=combination.winning_flags, winning_ci=combination.winning_ci,
-        skip_reason="skipping PGO -- topdown_signals [...] implausible given baseline shape (...)",
-    )
-    _mine_common_mocks(monkeypatch, baseline, combination)
-    monkeypatch.setattr(cli.orchestrator, "run_pgo_multiplier", lambda *a, **k: pgo_result)
-
-    exit_code = cli.main(["mine", "fake_r", "--db", str(tmp_path / "cfm.db"), "--lock-file", str(tmp_path / "test.lock")])
-    assert exit_code == 0
-
-    summary = json.loads(capsys.readouterr().out)
-    assert summary["pgo_attempted"] is False
-    assert "implausible" in summary["pgo_skip_reason"]
-    assert summary["pgo_accepted"] is False
-    assert summary["winning_flags"] == ["-O3"]
-
-
 # -- Phase 6 (microarch multiplier) wiring -------------------------------------
 
 def test_mine_skip_microarch_never_calls_run_microarch_multiplier(tmp_path, monkeypatch, capsys):
