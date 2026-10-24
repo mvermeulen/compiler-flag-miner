@@ -47,12 +47,13 @@ CFM_SPEC_CONFIG=ryzen350_64gb.gcc_O3.cfg .venv/bin/cfm mine <benchmark>
 | 2026-10-22 | `753.ns3_r` | frontend-bound 60.7% (corpus) | `-O3 -flto -fprofile-use` | **+26.66%** | [link](mining_results.753.ns3_r.2026-10-21.md) |
 | 2026-10-22 | `707.ntest_r` (re-mine) | compute-bound 40.6% (corpus, under the 55% gate) | `-O3 -march=native -flto -fprofile-use` | **+30.95%** | [link](mining_results.707.ntest_r.2026-10-22.md) |
 | 2026-10-22 | `777.zstd_r` | memory-bound 64.0% (corpus) | `-O3 -march=native` (LTO/PGO follow-up: no gain) | **+1.72%** | [link](mining_results.777.zstd_r.2026-10-22.md) |
+| 2026-10-24 | `834.vpr_s` | memory-bound 35.9% (corpus, under the 55% gate) | `-O3 -flto -fprofile-use -march=znver5` | **+25.17%** | [link](mining_results.834.vpr_s.2026-10-24.md) |
 
 ## Summary by suite
 
 Per benchmark: the latest converged `cfm mine` experiment on this host. *Base* is the plain `-O3` calibration
-mean, *best* is the winning flag set's confirmed mean, and *gain* is best / base. Ratios are SPECrate ratios
-from single-iteration `--action=validate` runs (16 copies), not reportable SPEC scores.
+mean, *best* is the winning flag set's confirmed mean, and *gain* is best / base. Ratios come from
+single-iteration `--action=validate` runs (rate: 16 copies; speed: 16 threads), not reportable SPEC scores.
 
 Each suite has two geomean rows:
 
@@ -112,7 +113,7 @@ and ran PGO on plain `-O3` (26.79, +7.78%), so it never measured the two togethe
 | **Suite geomean gain (12, unmined = 1.00×)** | | | | +0.00% | |
 | Mined-only geomean (0 of 12) | — | — | | — | |
 
-### intspeed (0 of 13 mined)
+### intspeed (1 of 13 mined)
 
 | Benchmark | Base (`-O3`) | Best | Winning flags | Gain | Write-up |
 |---|---|---|---|---|---|
@@ -123,14 +124,14 @@ and ran PGO on plain `-O3` (26.79, +7.78%), so it never measured the two togethe
 | `823.llvm_s` | — | — | not mined yet | — | |
 | `827.cppcheck_s` | — | — | not mined yet | — | |
 | `829.abc_s` | — | — | not mined yet | — | |
-| `834.vpr_s` | — | — | not mined yet | — | |
+| `834.vpr_s` | 4.111 | 5.145 | `-O3 -flto -fprofile-use -march=znver5` | **+25.17%** | [2026-10-24](mining_results.834.vpr_s.2026-10-24.md) |
 | `835.gem5_s` | — | — | not mined yet | — | |
 | `838.diamond_s` | — | — | not mined yet | — | |
 | `846.minizinc_s` | — | — | not mined yet | — | |
 | `853.ns3_s` | — | — | not mined yet | — | |
 | `854.graph500_s` | — | — | not mined yet | — | |
-| **Suite geomean gain (13, unmined = 1.00×)** | | | | +0.00% | |
-| Mined-only geomean (0 of 13) | — | — | | — | |
+| **Suite geomean gain (13, unmined = 1.00×)** | | | | +1.74% | |
+| Mined-only geomean (1 of 13) | 4.111 | 5.145 | | +25.17% | |
 
 ### fpspeed (0 of 13 mined)
 
@@ -179,10 +180,14 @@ Suite geomean gain over every benchmark in the suite, unmined = 1.00×, recorded
 | `727.cppcheck_r` LTO/PGO follow-up | +18.18% | +0.00% | +0.00% | +0.00% |
 | `707.ntest_r` re-mine | +19.33% | +0.00% | +0.00% | +0.00% |
 | `750.sealcrypto_r` LTO/PGO follow-up | +20.13% | +0.00% | +0.00% | +0.00% |
+| `834.vpr_s` | +20.13% | +0.00% | +1.74% | +0.00% |
 
-cfm has only mined `_r` (SPECrate) benchmarks so far, on either host. The `_s` speed suites are listed
-for completeness. Whether `cfm mine` handles a speed benchmark correctly (threads rather than copies) hasn't
-been checked.
+SPECspeed mining started on 2026-10-24 with `834.vpr_s`, the first `_s` benchmark cfm has mined on
+either host. Speed ratios come from one 16-thread process (`threads = 16`), not 16 copies. Since PR #55,
+single-threaded speed benchmarks are pinned with `taskset` to a Zen5 CPU, and OpenMP ones bind thread
+*i* to CPU *i*. pthread benchmarks (vpr_s among them) can't be pinned from outside and run unpinned.
+fprate mining moved to another host after `782.lbm_r` hit this host's memory-bandwidth throttle
+([note](lbm_swing_investigation.2026-10-23.md)).
 
 ## Cross-host comparison
 
