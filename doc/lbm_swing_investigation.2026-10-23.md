@@ -221,6 +221,45 @@ So the throttle is rare and nearly invisible on intrate. It took sustained, band
 (zstd once, lbm constantly). That supports expecting it on fprate's streaming benchmarks, and it means the
 intrate results stand as measured.
 
+## The guarded mine, and 8 copies instead of 16 (2026-10-23)
+
+**The guarded mine didn't get past the baseline.** Experiment 165 (code `f9fc7e6`, PR #54's guards on) ran
+`-O3` at 4.55 and 6.33 for its two warm-ups, then 4.35, 4.06 and 4.12 for its three calibration reps. The
+probe read 44.6-46.5 GB/s before every run, so the gate never held one back (it waited 30 s once, for the
+previous run's tail). The throttle started mid-run instead. The calibration reps sat within 7% of each
+other, under the 10% rerun threshold, so nothing was re-run either. That gave a tight baseline CI around 4.18,
+centred on the slow state. Any candidate rep that ran fast would then have read about +50% and been accepted.
+The mine was stopped at its first screening trial (690) and marked failed.
+
+**Next, 8 copies:** four single-iteration `-O3` runs straight from `runcpu --copies 8`, using cfm's own peak
+config (`cfm-782.lbm_r-41db216f1b`), under the host mining lock. Each had 45 s of idle and a probe before it,
+a probe after, and package power and Tctl sampled every minute (`results/logs/lbm_copies8.2026-10-23.log`).
+
+| Run | Probe before | Ratio | Time | Power | Tctl | Probe after |
+|---|---|---|---|---|---|---|
+| 1 | 42.8 GB/s | **6.43** | 713 s | 17.1 W steady | 59 → 65°C, rising | 23.4 GB/s |
+| 2 | 46.6 GB/s | 5.22 | 878 s | 15.1-16.0 W from minute 2 | flat 62°C | 46.4 GB/s |
+| 3 | 46.6 GB/s | 5.35 | 857 s | 15.1-16.0 W from minute 3 | flat 62°C | 46.5 GB/s |
+| 4 | 46.6 GB/s | **6.47** | 709 s | 17.1 W steady | 60 → 65°C, rising | 23.4 GB/s |
+
+- **8 copies already saturate memory.** The fast runs (6.43, 6.47) match 16 copies' 6.33 ceiling, slightly
+  above it, in half the wall-clock time per trial.
+- **It's still two states, but the gap is smaller:** about 18% (5.2-5.35 against 6.45) instead of 16
+  copies' 30-50%, and no run fell near 16 copies' 3-4 range.
+- **The states look different from the 16-copy ones.** The slow runs drew less power from their first couple
+  of minutes and ran flat and cool, then left the probe at full bandwidth. The fast runs held 17.1 W with
+  Tctl climbing all the way, and each ended with the probe at half bandwidth, so the throttle had started
+  near their end. That fits something in the memory/fabric power management choosing a lower-power state
+  early in some runs (slow from the start, but nothing to throttle) and throttling late in others. Unproven:
+  nothing on this host exposes the fabric or memory clock.
+- Tctl peaked at 65°C, against 86-92°C at 16 copies, and the slow runs were the cooler ones. CPU temperature
+  isn't driving it.
+
+What this means for mining: at 8 copies the slow state is 18% down, which the slow-rep rerun (10%) can see
+whenever at least one sibling rep ran fast. With states roughly 50/50 in these four runs, a 3-rep group
+being all slow is about 1 in 8, before reruns. That's usable, though noisier than a ~1% effect deserves.
+Running at 8 copies needs a copies setting in cfm (it has none today).
+
 ## Next steps
 
 1. ~~**DIMM temperatures**~~: not readable on this board (above).
