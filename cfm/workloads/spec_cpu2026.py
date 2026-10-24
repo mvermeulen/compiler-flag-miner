@@ -11,8 +11,9 @@ import re
 import statistics
 import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
+from ..hostinfo import fastest_cpus
 from ..util import parse_kv_lines
 from .base import BuildResult, RunResult, WorkloadBackend
 
@@ -74,12 +75,70 @@ _PGO_PASS1_EXTRA = "-fprofile-update=atomic"
 _PGO_PASS2_EXTRA = "-fprofile-correction"
 
 
+# SPECspeed thread placement (2026-10-23). A benchmark's threading model comes from SPEC's own
+# `@benchsets` line in Spec/object.pm: `openmp`, `pthread`/`cxxthreads`, or neither (single-threaded).
+_BENCHSETS_RE = re.compile(r"^@benchsets\s*=\s*qw\(([^)]*)\)", re.MULTILINE)
+
+
+def benchmark_threading(spec_dir, bench: str) -> str:
+    """'openmp', 'threads' (pthread/C++ threads) or 'serial', from the benchmark's own object.pm."""
+    object_pm = Path(spec_dir) / "benchspec" / "CPU" / bench / "Spec" / "object.pm"
+    if not object_pm.exists():
+        raise RuntimeError(f"no Spec/object.pm for benchmark {bench!r} at {object_pm}")
+    match = _BENCHSETS_RE.search(object_pm.read_text())
+    benchsets = set(match.group(1).split()) if match else set()
+    if "openmp" in benchsets:
+        return "openmp"
+    if benchsets & {"pthread", "cxxthreads"}:
+        return "threads"
+    return "serial"
+
+
 class SpecCpu2026Workload(WorkloadBackend):
-    def __init__(self, spec_dir, base_config: str = "gcc_O3.cfg"):
+    def __init__(
+        self, spec_dir, base_config: str = "gcc_O3.cfg",
+        cpu_lister: Callable[[], list[int]] = fastest_cpus,
+    ):
         self.spec_dir = Path(spec_dir)
         self.base_config = base_config
         self.config_dir = self.spec_dir / "config"
         self.result_dir = self.spec_dir / "result"
+        # Injectable so unit tests don't read this host's sysfs (CLAUDE.md's 2026-08-24
+        # package-power entry: a test that reads live host state isn't deterministic).
+        self.cpu_lister = cpu_lister
+
+    def thread_placement(self, bench: str) -> tuple[list[str], str]:
+        """Peak-section config lines that fix where a SPECspeed benchmark's threads run, plus a
+        one-line description for the trial's hypotheses. SPECrate benchmarks get nothing.
+
+        - single-threaded: `taskset` onto one of the fastest CPUs (not CPU 0, which takes most
+          interrupts, when there's a choice) -- on niwot that's a Zen5 core, never a Zen5c one;
+        - OpenMP: `OMP_PLACES=threads OMP_PROC_BIND=close`, so thread i always runs on CPU i;
+        - pthread/C++ threads: nothing outside the program can pin individual threads, so they're
+          left to the scheduler across every CPU.
+
+        `use_submit_for_speed = yes` is what makes runcpu use `submit` for a speed run at all
+        (Docs/config.txt; it defaults to no). Both lines are allowed in a `<bench>=peak:` section.
+        """
+        if not bench.endswith("_s"):
+            return [], ""
+        threading = benchmark_threading(self.spec_dir, bench)
+        if threading == "openmp":
+            return (
+                ["use_submit_for_speed = yes",
+                 "submit = env OMP_PLACES=threads OMP_PROC_BIND=close ${command}"],
+                "thread placement: OpenMP, OMP_PLACES=threads OMP_PROC_BIND=close (thread i on CPU i)",
+            )
+        if threading == "threads":
+            return [], "thread placement: pthread, not pinned (left to the scheduler across all CPUs)"
+        fast = self.cpu_lister()
+        if not fast:
+            return [], "thread placement: single-threaded, not pinned (no CPU max-frequency info)"
+        cpu = next((c for c in fast if c != 0), fast[0])
+        return (
+            ["use_submit_for_speed = yes", f"submit = taskset -c {cpu} ${{command}}"],
+            f"thread placement: single-threaded, pinned to CPU {cpu} (one of the fastest: {fast})",
+        )
 
     def _shrc_command(self, inner: str) -> list[str]:
         # Mirrors wspy's own workload/cpu2017/run_test.sh shrc-sourcing convention:
@@ -159,22 +218,17 @@ class SpecCpu2026Workload(WorkloadBackend):
         # `build_base_gcc_O3.NNNN` and reporting "Build successes for ...:
         # <bench>(base)" -- the *only* externally-visible sign anything was
         # wrong, easy to miss without specifically checking for it.
+        lines = ["basepeak = no", f"OPTIMIZE = {render_string}"]
         if pgo:
-            config_path.write_text(
-                f"include: {self.base_config}\n\n"
-                f"{bench}=peak:\n"
-                f"   basepeak = no\n"
-                f"   OPTIMIZE = {render_string}\n"
-                f"   PASS1_OPTIMIZE = {_PGO_TRAIN_FLAG} {_PGO_PASS1_EXTRA}\n"
-                f"   PASS2_OPTIMIZE = {_PGO_USE_FLAG} {_PGO_PASS2_EXTRA}\n"
-            )
-        else:
-            config_path.write_text(
-                f"include: {self.base_config}\n\n"
-                f"{bench}=peak:\n"
-                f"   basepeak = no\n"
-                f"   OPTIMIZE = {render_string}\n"
-            )
+            lines += [
+                f"PASS1_OPTIMIZE = {_PGO_TRAIN_FLAG} {_PGO_PASS1_EXTRA}",
+                f"PASS2_OPTIMIZE = {_PGO_USE_FLAG} {_PGO_PASS2_EXTRA}",
+            ]
+        lines += self.thread_placement(bench)[0]
+        config_path.write_text(
+            f"include: {self.base_config}\n\n{bench}=peak:\n"
+            + "".join(f"   {line}\n" for line in lines)
+        )
         return config_path
 
     def audit_compiled_flags(self, bench: str, tune: str) -> Optional[str]:

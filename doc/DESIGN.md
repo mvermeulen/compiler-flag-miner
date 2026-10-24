@@ -967,7 +967,18 @@ compiler-flag-miner/
        re-run, slowest first, up to `MAX_SLOW_REP_RERUNS` (3) per flagset. The throttle only ever slows a
        run, and it could leave two of three reps slow, which the old "exactly one outlier" rule left as
        measured. The gate fixes a trial's start; the rerun catches a throttle that begins mid-run.
-       Residual risk: all of one flagset's reps throttled the same way.
+       Residual risk: all of one flagset's reps throttled the same way, which is what stopped
+       `782.lbm_r`'s guarded mine (experiment 165): every probe passed, the throttle began mid-run, and
+       the three calibration reps were all slow, within 7% of each other.
+     - **SPECspeed thread placement (2026-10-23).** `niwot` mixes Zen5 (5.09 GHz) and Zen5c (3.51 GHz)
+       cores, so an unpinned single-threaded speed run lands on either. `generate_config()` adds
+       `use_submit_for_speed = yes` and a `submit` wrapper to a `_s` benchmark's peak section, by its
+       threading model from `object.pm`'s `@benchsets`: single-threaded runs get `taskset -c` onto one of
+       `hostinfo.fastest_cpus()` (not CPU 0 when there's a choice); OpenMP runs get
+       `OMP_PLACES=threads OMP_PROC_BIND=close`; pthread/C++-threads runs are left unpinned, since
+       nothing outside the program can place individual threads. Each trial records its placement as a
+       hypothesis. SPECrate runs are unchanged. Confirmed with `runcpu --fake` that SPEC really wraps the
+       benchmark commands.
      The reference matrix's own historical spread (`stddev`/`cv_percent` across its many prior
      repetitions) is a real, data-backed noise-floor estimate for calibrating "clearly large" above, once
      available for a given benchmark — a fixed conservative fallback threshold otherwise. Phase 1

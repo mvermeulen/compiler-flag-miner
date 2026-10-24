@@ -183,6 +183,67 @@ def test_audit_compiled_flags_reads_every_elf_binary_not_just_the_first(tmp_path
     assert "-fno-semantic-interposition" in dump  # gem5sim's own flag -- the one that matters for timing
 
 
+def _speed_workload(tmp_path, benchsets, fast=(0, 2, 4, 6)):
+    spec_dir = tmp_path / "spec"
+    (spec_dir / "config").mkdir(parents=True)
+    spec = spec_dir / "benchspec" / "CPU" / "800.x_s" / "Spec"
+    spec.mkdir(parents=True)
+    line = f"@benchsets = qw({benchsets});\n" if benchsets is not None else ""
+    (spec / "object.pm").write_text(f"$benchlang = 'C';\n{line}")
+    return SpecCpu2026Workload(spec_dir, base_config="gcc_O3.cfg", cpu_lister=lambda: list(fast))
+
+
+def _peak_section(text, bench):
+    return text[text.index(f"{bench}=peak:"):]
+
+
+def test_generate_config_pins_single_threaded_speed_benchmark_to_a_fast_cpu(tmp_path):
+    workload = _speed_workload(tmp_path, None)
+    text = workload.generate_config("800.x_s", "peak", ["-O3"]).read_text()
+    section = _peak_section(text, "800.x_s")
+    assert "   use_submit_for_speed = yes\n" in section
+    # CPU 0 is skipped when another fast CPU exists (it takes most interrupts).
+    assert "   submit = taskset -c 2 ${command}\n" in section
+    assert "pinned to CPU 2" in workload.thread_placement("800.x_s")[1]
+
+
+def test_generate_config_pins_to_cpu0_when_it_is_the_only_fast_cpu(tmp_path):
+    workload = _speed_workload(tmp_path, "intspeed specspeed", fast=(0,))
+    assert "submit = taskset -c 0 ${command}" in workload.generate_config("800.x_s", "peak", ["-O3"]).read_text()
+
+
+def test_generate_config_binds_openmp_speed_threads(tmp_path):
+    workload = _speed_workload(tmp_path, "specspeed openmp intspeed")
+    text = workload.generate_config("800.x_s", "peak", ["-O3"]).read_text()
+    assert "   submit = env OMP_PLACES=threads OMP_PROC_BIND=close ${command}\n" in _peak_section(text, "800.x_s")
+    assert "taskset" not in text
+
+
+def test_generate_config_leaves_pthread_speed_benchmark_unpinned(tmp_path):
+    workload = _speed_workload(tmp_path, "intspeed pthread specspeed")
+    text = workload.generate_config("800.x_s", "peak", ["-O3"]).read_text()
+    assert "submit" not in text
+    assert "not pinned" in workload.thread_placement("800.x_s")[1]
+
+
+def test_generate_config_single_threaded_without_frequency_info_is_unpinned(tmp_path):
+    workload = _speed_workload(tmp_path, None, fast=())
+    assert "submit" not in workload.generate_config("800.x_s", "peak", ["-O3"]).read_text()
+    assert "not pinned" in workload.thread_placement("800.x_s")[1]
+
+
+def test_generate_config_speed_placement_also_applies_to_pgo_configs(tmp_path):
+    workload = _speed_workload(tmp_path, None)
+    section = _peak_section(workload.generate_config("800.x_s", "peak", ["-O3", "-fprofile-use"]).read_text(), "800.x_s")
+    assert "PASS2_OPTIMIZE" in section and "submit = taskset -c 2 ${command}" in section
+
+
+def test_generate_config_never_adds_placement_to_rate_benchmarks(tmp_path):
+    workload = _make_workload(tmp_path)  # no object.pm at all: rate benchmarks never read it
+    assert "submit" not in workload.generate_config("706.stockfish_r", "peak", ["-O3"]).read_text()
+    assert workload.thread_placement("706.stockfish_r") == ([], "")
+
+
 def test_generate_config_rejects_base_tune(tmp_path):
     workload = _make_workload(tmp_path)
     with pytest.raises(ValueError):
