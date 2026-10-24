@@ -10,9 +10,9 @@ the first real mine to use PR #55's `taskset` pinning: every timed run went to C
 
 - **The same winning set as `753.ns3_r`** on this host (+26.66%), with a smaller LTO share: `-flto` +10.30%
   here against +21.40% there. PGO adds +5.59% on top, a little more than ns3_r's +4.33%.
-- **The pinned runs were very steady.** The three baseline calibration reps spread 0.18%
-  (CI ±0.23%), and every confirmed flag set had a CI under ±0.7%. That let the run resolve differences
-  well under 1%: `-Ofast` and `-ffast-math` came out CI-clear of baseline at +0.67% and +0.79%, and
+- **The pinned runs were very steady.** The three baseline calibration reps spread 0.18% (CI ±0.23%),
+  and most confirmed flag sets had a CI under ±0.5%. The widest, `-flto` and
+  `-fno-semantic-interposition`, were about ±1.3%. That let the run resolve differences well under 1%: `-Ofast` and `-ffast-math` came out CI-clear of baseline at +0.67% and +0.79%, and
   `-mtune=znver5` CI-clear *below* PGO at -0.86%.
 - **Nothing else helped.** The shape was a weak 39.4%, so Phase 2 excluded nothing and ten candidates were
   screened (ns3_r screened five). All ten were flat.
