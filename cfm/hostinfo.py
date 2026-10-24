@@ -151,3 +151,29 @@ def read_package_power_watts(hwmon_root: Path = _DEFAULT_HWMON_ROOT) -> Optional
             continue
         return microwatts / 1_000_000.0
     return None
+
+
+_DEFAULT_CPU_ROOT = Path("/sys/devices/system/cpu")
+
+
+def fastest_cpus(cpu_root: Path = _DEFAULT_CPU_ROOT) -> list[int]:
+    """Online logical CPUs whose `cpufreq/cpuinfo_max_freq` is the host's highest, sorted.
+
+    Used to pin single-threaded SPECspeed runs (2026-10-23): niwot mixes Zen5 cores (5.09 GHz) with
+    Zen5c cores (3.51 GHz), and an unpinned single-threaded benchmark lands on either. Returns `[]`
+    -- degrade, never raise -- when no CPU exposes a max frequency.
+    """
+    max_freq: dict[int, int] = {}
+    for entry in cpu_root.glob("cpu[0-9]*"):
+        try:
+            cpu = int(entry.name[3:])
+            online = entry / "online"
+            if online.exists() and online.read_text().strip() != "1":
+                continue
+            max_freq[cpu] = int((entry / "cpufreq" / "cpuinfo_max_freq").read_text().strip())
+        except (OSError, ValueError):
+            continue
+    if not max_freq:
+        return []
+    top = max(max_freq.values())
+    return sorted(cpu for cpu, freq in max_freq.items() if freq == top)

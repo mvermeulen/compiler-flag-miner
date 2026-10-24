@@ -294,6 +294,14 @@ def run_one_trial(
                     conn, trial_id=trial_id, proposed_by="rule", rationale=gate_result.rationale(),
                 )
 
+            # SPECspeed thread placement (2026-10-23), getattr-guarded like the audit above.
+            placement_fn = getattr(workload, "thread_placement", None)
+            placement_note = placement_fn(benchmark)[1] if placement_fn is not None else ""
+            if placement_note:
+                db.record_hypothesis(
+                    conn, trial_id=trial_id, proposed_by="rule", rationale=placement_note,
+                )
+
             package_power_w = power_reader()
             if package_power_w is not None:
                 db.record_hypothesis(

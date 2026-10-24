@@ -349,3 +349,39 @@ def test_run_one_trial_has_no_gate_unless_the_config_asks(tmp_path):
         power_reader=lambda: None,
     )
     assert result["bandwidth_probe_gbps"] is None
+
+
+class _PlacingWorkload(_FullySucceedingWorkload):
+    def thread_placement(self, bench):
+        return ["submit = taskset -c 2 ${command}"], "thread placement: single-threaded, pinned to CPU 2"
+
+
+def _placement_rows(cfg, trial_id):
+    conn = db.connect(cfg.db_path)
+    try:
+        return [row[0] for row in conn.execute(
+            "SELECT rationale FROM hypotheses WHERE trial_id=? AND rationale LIKE 'thread placement%'",
+            (trial_id,),
+        )]
+    finally:
+        conn.close()
+
+
+def test_run_one_trial_records_thread_placement(tmp_path):
+    cfg = CfmConfig.from_env(db_path=str(tmp_path / "cfm.db"), output_root=str(tmp_path / "results"))
+    result = run_one_trial(
+        cfg, benchmark="fake_s", flags=["-O3"],
+        workload=_PlacingWorkload(audit_dump=None), instrumentation=_FullySucceedingInstrumentation(),
+        power_reader=lambda: None,
+    )
+    assert _placement_rows(cfg, result["trial_id"]) == ["thread placement: single-threaded, pinned to CPU 2"]
+
+
+def test_run_one_trial_records_no_placement_without_the_method(tmp_path):
+    cfg = CfmConfig.from_env(db_path=str(tmp_path / "cfm.db"), output_root=str(tmp_path / "results"))
+    result = run_one_trial(
+        cfg, benchmark="fake_r", flags=["-O3"],
+        workload=_FullySucceedingWorkload(audit_dump=None), instrumentation=_FullySucceedingInstrumentation(),
+        power_reader=lambda: None,
+    )
+    assert _placement_rows(cfg, result["trial_id"]) == []

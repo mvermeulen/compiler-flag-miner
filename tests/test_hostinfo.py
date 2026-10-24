@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from cfm.hostinfo import detect_microarch_flags, read_package_power_watts
+from cfm.hostinfo import detect_microarch_flags, fastest_cpus, read_package_power_watts
 
 
 def _fake_cpu_info(tmp_path, stdout: str, exit_code: int = 0) -> Path:
@@ -166,3 +166,32 @@ def test_read_package_power_watts_against_the_real_host():
     # whatever host this happens to run on.
     result = read_package_power_watts()
     assert result is None or result > 0
+
+
+def _fake_cpu(root: Path, cpu: int, max_khz, online="1"):
+    entry = root / f"cpu{cpu}"
+    (entry / "cpufreq").mkdir(parents=True)
+    if max_khz is not None:
+        (entry / "cpufreq" / "cpuinfo_max_freq").write_text(f"{max_khz}\n")
+    if online is not None:
+        (entry / "online").write_text(f"{online}\n")
+
+
+def test_fastest_cpus_picks_the_top_max_frequency(tmp_path):
+    # niwot's shape: even CPUs Zen5 (5.09 GHz), odd ones Zen5c (3.51 GHz); cpu0 has no online file.
+    for cpu in range(8):
+        _fake_cpu(tmp_path, cpu, 5090910 if cpu % 2 == 0 else 3506494, online=None if cpu == 0 else "1")
+    (tmp_path / "cpufreq").mkdir()  # a non-CPU sibling directory, ignored
+    assert fastest_cpus(tmp_path) == [0, 2, 4, 6]
+
+
+def test_fastest_cpus_skips_offline_cpus(tmp_path):
+    _fake_cpu(tmp_path, 0, 5000000)
+    _fake_cpu(tmp_path, 1, 5000000, online="0")
+    assert fastest_cpus(tmp_path) == [0]
+
+
+def test_fastest_cpus_returns_empty_without_frequency_info(tmp_path):
+    _fake_cpu(tmp_path, 0, None)
+    assert fastest_cpus(tmp_path) == []
+    assert fastest_cpus(tmp_path / "missing") == []
