@@ -131,6 +131,13 @@ MIN_PRACTICAL_SIGNIFICANCE_PCT = 1.0
 # confident, same "absence of information never excludes" rule as everywhere else.
 CONFIDENT_SHAPE_MIN_PCT = 55.0
 
+# Flags Phase 2 never excludes on shape, however confident (2026-10-25, opportunity
+# #28). On niwot a shape exclusion hid an LTO or PGO gain on five of six memory-bound
+# benchmarks, the last at a confident 72.9% (829.abc_s, -flto +2.32%), and only zstd
+# was right to exclude. Screening -flto costs one LTO build per mine. PGO was never
+# a Phase 2 candidate; Phase 6 always tries it (PR #53).
+SHAPE_EXEMPT_FLAGS = frozenset({"-flto"})
+
 
 @dataclass
 class BaselineResult:
@@ -530,7 +537,9 @@ def _filter_implausible_candidates(
     with no signals, or with at least one plausible/unknown signal among several,
     is always kept -- excluding only requires the whole claim to be implausible,
     not any part of it). Logged to stderr, not persisted -- there's no trial row
-    to attach a hypothesis to for a candidate that never ran.
+    to attach a hypothesis to for a candidate that never ran. A flag in
+    ``SHAPE_EXEMPT_FLAGS`` is always kept, with a note when it would have been
+    excluded.
     """
     if baseline.resource_dominance is not None and not _shape_is_confident(baseline):
         print(
@@ -543,6 +552,15 @@ def _filter_implausible_candidates(
         if candidate.topdown_signals and all(
             _signal_is_implausible(s, baseline) for s in candidate.topdown_signals
         ):
+            if candidate.flag in SHAPE_EXEMPT_FLAGS:
+                print(
+                    f"info: keeping {candidate.flag!r} although its topdown_signals "
+                    f"{candidate.topdown_signals} don't match the baseline shape "
+                    f"({baseline.resource_dominance!r} at {baseline.resource_dominance_pct}%) "
+                    "-- never excluded on shape"
+                )
+                survivors.append(candidate)
+                continue
             print(
                 f"info: excluding {candidate.flag!r} from Phase 2 candidates -- "
                 f"topdown_signals {candidate.topdown_signals} implausible given baseline shape "
