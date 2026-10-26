@@ -164,6 +164,18 @@ def test_real_seed_catalog_loads_and_is_internally_consistent():
     assert result.ok is False
 
 
+def test_real_seed_catalog_never_offers_an_excluded_flag():
+    # excluded_flags lists flags already implied by -O3 (or the -march= default) on
+    # GCC 15.2 -- mining them only measures noise. Guards against one being re-added
+    # to "flags" without removing it from the exclusion list.
+    data = json.loads(_DEFAULT_CATALOG_PATH.read_text())
+    excluded = {e["flag"] for e in data["excluded_flags"]}
+    assert "-freorder-blocks-and-partition" in excluded
+    assert not excluded & {e["flag"] for e in data["flags"]}
+    compiler = GccCompiler(catalog_path=_DEFAULT_CATALOG_PATH)
+    assert compiler.validate_flagset(["-fno-pie -no-pie", "-U_FORTIFY_SOURCE"]).ok is True
+
+
 # -- M2: signature-aware ranking ------------------------------------------------
 #
 # doc/DESIGN.md sec. 4.3's signature-to-candidate table, made concrete: a
