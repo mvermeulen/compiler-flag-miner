@@ -117,6 +117,34 @@ def _summarize_compiled_flags_audit(flags: list[str], audit_dump: str) -> str:
     return "compiled-flags audit -- " + "; ".join(parts)
 
 
+def _record_compiled_flags_audit(conn, workload, benchmark: str, tune: str, trial_id: int, flags: list[str]) -> None:
+    """Independent audit of what SPEC actually compiled with, not just what
+    runcpu's own "Build successes" report claims -- see
+    workloads/spec_cpu2026.py's audit_compiled_flags() docstring and CLAUDE.md's
+    Non-obvious traps log (2026-08-21 basepeak entry) for why that report alone
+    wasn't enough once already. getattr-guarded since fake WorkloadBackends in
+    tests don't implement this (optional, degrade-gracefully signal, never
+    load-bearing for the trial's own build_status). Also recorded for a trial
+    skipped as unchanged: a stale binary that silently ignored the requested
+    flags would look exactly like "no code change", and this is what tells the
+    two apart.
+    """
+    audit_fn = getattr(workload, "audit_compiled_flags", None)
+    if audit_fn is None:
+        return
+    audit_dump = audit_fn(benchmark, tune)
+    if audit_dump is not None:
+        db.record_hypothesis(
+            # proposed_by="rule": schema/cfm_schema.sql's hypotheses.proposed_by
+            # CHECK constraint only allows ('rule','analogical','llm') -- this is
+            # a deterministic, rule-based check like every other hypothesis this
+            # module records, not a fundamentally new category; the "compiled-flags
+            # audit --" rationale prefix is what distinguishes it at a glance.
+            conn, trial_id=trial_id, proposed_by="rule",
+            rationale=_summarize_compiled_flags_audit(flags, audit_dump),
+        )
+
+
 # wspy's system.c prints "cpu temp             XX.X C" (SYSTEM_TEMP, on by
 # default in system_mask, present whenever a profile passes --system -- every
 # "quick"-profile trial already does, cfm/orchestrator.py's CALIBRATION_PROFILE/
@@ -166,6 +194,7 @@ def run_one_trial(
     instrumentation: Optional[InstrumentationBackend] = None,
     power_reader=read_package_power_watts,
     bandwidth_gate: Optional[BandwidthGate] = None,
+    skip_if_same_code_as: Optional[list[str]] = None,
 ) -> dict:
     """``workload``/``instrumentation`` are injectable (defaulting to the real
     ``SpecCpu2026Workload``/``WspyInstrumentation`` backends built from ``cfg``) so
@@ -193,6 +222,12 @@ def run_one_trial(
     ``bandwidth_gate`` (cfm/bandwidth.py) runs between the build and the timed
     run, waiting out a throttled memory-bandwidth state; when omitted, the
     process-wide gate is used if ``cfg.bandwidth_gate`` is set, and none otherwise.
+    ``skip_if_same_code_as`` names the flagset this trial builds on (the baseline,
+    or the running set it adds to). When the built code's fingerprint equals the
+    one already recorded for that flagset in this experiment, the flags under
+    test changed nothing, so the trial is recorded with no ratio and the timed
+    run is skipped; the result dict carries ``unchanged_from_trial_id``. It never
+    skips when either fingerprint is unknown.
     """
     workload = workload or SpecCpu2026Workload(cfg.spec_dir, cfg.spec_config)
     run_index_path = cfg.output_root / "cpu2026" / "run-index.jsonl"
@@ -230,6 +265,31 @@ def run_one_trial(
                     "build_status": "build-failed", "build_output": build_result.raw_output,
                 }
 
+            fingerprint_fn = getattr(workload, "code_fingerprint", None)
+            code_fingerprint = fingerprint_fn(benchmark, tune) if fingerprint_fn is not None else None
+            reference = (
+                db.latest_code_fingerprint(conn, experiment_id, skip_if_same_code_as)
+                if skip_if_same_code_as is not None and code_fingerprint is not None else None
+            )
+            if reference is not None and reference[1] == code_fingerprint:
+                reference_trial_id = reference[0]
+                trial_id = db.record_trial(
+                    conn, experiment_id=experiment_id, phase=phase, flags=flags,
+                    optimize_string=optimize_string, build_status="ok",
+                    parent_trial_id=parent_trial_id, code_fingerprint=code_fingerprint,
+                )
+                _record_compiled_flags_audit(conn, workload, benchmark, tune, trial_id, flags)
+                rationale = (
+                    f"no code change: the built executables are identical to trial "
+                    f"{reference_trial_id} ({skip_if_same_code_as}), so the timed run was skipped"
+                )
+                db.record_hypothesis(conn, trial_id=trial_id, proposed_by="rule", rationale=rationale)
+                print(f"info: trial {trial_id} {flags}: {rationale}")
+                return {
+                    "experiment_id": experiment_id, "trial_id": trial_id, "build_status": "ok",
+                    "ratio": None, "unchanged_from_trial_id": reference_trial_id,
+                }
+
             gate = bandwidth_gate or (_session_gate(cfg) if cfg.bandwidth_gate else None)
             gate_result = gate.wait() if gate is not None else None
 
@@ -246,30 +306,10 @@ def run_one_trial(
                 conn, experiment_id=experiment_id, phase=phase, flags=flags,
                 optimize_string=optimize_string, build_status=build_status,
                 wspy_run_ref=signature.wspy_run_ref, ratio=run_result.ratio,
-                parent_trial_id=parent_trial_id,
+                parent_trial_id=parent_trial_id, code_fingerprint=code_fingerprint,
             )
 
-            # Independent audit of what SPEC actually compiled with, not just
-            # what runcpu's own "Build successes" report claims -- see
-            # workloads/spec_cpu2026.py's audit_compiled_flags() docstring and
-            # CLAUDE.md's Non-obvious traps log (2026-08-21 basepeak entry) for
-            # why that report alone wasn't enough once already. getattr-guarded
-            # since fake WorkloadBackends in tests don't implement this
-            # (optional, degrade-gracefully signal, never load-bearing for the
-            # trial's own build_status).
-            audit_fn = getattr(workload, "audit_compiled_flags", None)
-            if audit_fn is not None:
-                audit_dump = audit_fn(benchmark, tune)
-                if audit_dump is not None:
-                    db.record_hypothesis(
-                        # proposed_by="rule": schema/cfm_schema.sql's hypotheses.proposed_by
-                        # CHECK constraint only allows ('rule','analogical','llm') -- this is
-                        # a deterministic, rule-based check like every other hypothesis this
-                        # module records, not a fundamentally new category; the "compiled-flags
-                        # audit --" rationale prefix is what distinguishes it at a glance.
-                        conn, trial_id=trial_id, proposed_by="rule",
-                        rationale=_summarize_compiled_flags_audit(flags, audit_dump),
-                    )
+            _record_compiled_flags_audit(conn, workload, benchmark, tune, trial_id, flags)
 
             # Per-trial thermal record -- see _extract_cpu_temp_c()'s own
             # comment for why this is worth squirreling away even though

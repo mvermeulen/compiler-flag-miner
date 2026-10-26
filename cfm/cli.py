@@ -318,6 +318,15 @@ def main(argv=None) -> int:
         else:
             final_flags, final_ci = combination.winning_flags, combination.winning_ci
         gain_pct = (final_ci.mean - baseline.ci.mean) / baseline.ci.mean * 100.0
+        # Flagsets skipped because they built the same code as the set they were
+        # layered on (run_one_trial()'s skip_if_same_code_as): no timed run spent.
+        unchanged_flagsets = [baseline.flags + [o.candidate.flag] for o in screened if o.unchanged]
+        for outcome in (
+            confirmed_known + combination.steps + combination.pair_trials
+            + [o for r in (pgo_result, microarch_result, vector_width_result) if r for o in r.outcomes]
+        ):
+            if outcome.unchanged:
+                unchanged_flagsets.append(outcome.flags)
         summary = {
             "experiment_id": baseline.experiment_id,
             "benchmark": args.benchmark,
@@ -344,6 +353,7 @@ def main(argv=None) -> int:
             "candidates_screened": len(screened),
             "candidates_confirmed": sum(1 for c in confirmed + confirmed_known if c.accepted),
             "candidates_fast_tracked_from_prior_knowledge": [c.flag for c in fast_tracked],
+            "flagsets_skipped_as_unchanged_code": unchanged_flagsets,
             "combination_winning_flags": combination.winning_flags,
             "combination_winning_ratio_mean": combination.winning_ci.mean,
             "pgo_attempted": pgo_result.attempted if pgo_result else False,

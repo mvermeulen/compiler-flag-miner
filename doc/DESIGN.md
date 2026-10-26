@@ -529,7 +529,9 @@ CREATE TABLE trials (
   delta_vs_baseline_pct REAL,
   verdict TEXT,                     -- accept|reject|inconclusive
   ci_overlap INTEGER,               -- 0/1, from wspy-summary's CI comparison
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  code_fingerprint TEXT             -- hash of the stripped built executables; a trial whose
+                                     -- code matches the flagset it builds on skips its timed run
 );
 
 -- Rationale trail: why a trial was proposed (rule-based, analogical, or LLM).

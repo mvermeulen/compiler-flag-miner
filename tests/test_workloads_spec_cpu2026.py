@@ -183,6 +183,67 @@ def test_audit_compiled_flags_reads_every_elf_binary_not_just_the_first(tmp_path
     assert "-fno-semantic-interposition" in dump  # gem5sim's own flag -- the one that matters for timing
 
 
+def _build_toy_exe(exe_dir, name, *flags):
+    src = exe_dir / "toy.c"
+    src.write_text(
+        "#include <stdio.h>\n"
+        "int main(int argc, char **argv) { long s = 0; (void)argv;\n"
+        "  for (long i = 0; i < 1000 + argc; i++) s += i * i; printf(\"%ld\\n\", s); return 0; }\n"
+    )
+    subprocess.run(
+        ["gcc", "-g", "-O3", "-frecord-gcc-switches", *flags, "-o", str(exe_dir / name), str(src)],
+        check=True,
+    )
+    src.unlink()
+
+
+@pytest.fixture
+def toy_exe_dir(tmp_path):
+    if shutil.which("gcc") is None or shutil.which("objcopy") is None:
+        pytest.skip("gcc/objcopy not available")
+    workload = _make_workload(tmp_path)
+    exe_dir = workload.spec_dir / "benchspec" / "CPU" / "782.lbm_r" / "exe"
+    exe_dir.mkdir(parents=True)
+    return workload, exe_dir
+
+
+def test_code_fingerprint_ignores_recorded_switches_and_debug_info(toy_exe_dir):
+    # Real builds, not fakes: a flag GCC 15 already enables at -O2 changes the
+    # recorded switches and DW_AT_producer (so the raw file bytes) but not the code.
+    workload, exe_dir = toy_exe_dir
+    _build_toy_exe(exe_dir, "lbm_r_peak.gcc_O3")
+    baseline_bytes = (exe_dir / "lbm_r_peak.gcc_O3").read_bytes()
+    baseline = workload.code_fingerprint("782.lbm_r", "peak")
+    _build_toy_exe(exe_dir, "lbm_r_peak.gcc_O3", "-freorder-functions")
+    assert (exe_dir / "lbm_r_peak.gcc_O3").read_bytes() != baseline_bytes
+    assert workload.code_fingerprint("782.lbm_r", "peak") == baseline
+
+
+def test_code_fingerprint_changes_when_the_code_does(toy_exe_dir):
+    workload, exe_dir = toy_exe_dir
+    _build_toy_exe(exe_dir, "lbm_r_peak.gcc_O3")
+    baseline = workload.code_fingerprint("782.lbm_r", "peak")
+    assert baseline is not None
+    _build_toy_exe(exe_dir, "lbm_r_peak.gcc_O3", "-fno-pie", "-no-pie")
+    assert workload.code_fingerprint("782.lbm_r", "peak") != baseline
+
+
+def test_code_fingerprint_covers_every_executable_and_only_this_tune(toy_exe_dir):
+    workload, exe_dir = toy_exe_dir
+    _build_toy_exe(exe_dir, "lbm_r_peak.gcc_O3")
+    _build_toy_exe(exe_dir, "lbm_compare_peak.gcc_O3")
+    _build_toy_exe(exe_dir, "lbm_r_base.gcc_O3")
+    before = workload.code_fingerprint("782.lbm_r", "peak")
+    _build_toy_exe(exe_dir, "lbm_r_base.gcc_O3", "-fno-pie", "-no-pie")  # base: not hashed for peak
+    assert workload.code_fingerprint("782.lbm_r", "peak") == before
+    _build_toy_exe(exe_dir, "lbm_compare_peak.gcc_O3", "-fno-pie", "-no-pie")  # the companion changed
+    assert workload.code_fingerprint("782.lbm_r", "peak") != before
+
+
+def test_code_fingerprint_is_none_without_executables(tmp_path):
+    assert _make_workload(tmp_path).code_fingerprint("782.lbm_r", "peak") is None
+
+
 def _speed_workload(tmp_path, benchsets, fast=(0, 2, 4, 6)):
     spec_dir = tmp_path / "spec"
     (spec_dir / "config").mkdir(parents=True)

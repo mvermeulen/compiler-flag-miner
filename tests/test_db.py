@@ -266,3 +266,48 @@ def test_get_knowledge_for_cluster_matches_null_compiler_version_and_target_arch
         assert len(rows) == 1
     finally:
         conn.close()
+
+
+def test_connect_adds_code_fingerprint_to_a_pre_1_1_database(tmp_path):
+    # A cfm.db created before schema 1.1 (no trials.code_fingerprint) keeps its
+    # rows and gains the column; CREATE TABLE IF NOT EXISTS alone wouldn't add it.
+    import sqlite3
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(str(path))
+    old.executescript(
+        "CREATE TABLE schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);"
+        "INSERT INTO schema_meta VALUES ('schema_version', '1');"
+        "CREATE TABLE trials (id INTEGER PRIMARY KEY, experiment_id INTEGER NOT NULL, "
+        "phase TEXT NOT NULL, parent_trial_id INTEGER, flags_json TEXT NOT NULL, "
+        "optimize_string TEXT NOT NULL, build_status TEXT NOT NULL, wspy_run_ref TEXT, ratio REAL, "
+        "delta_vs_baseline_pct REAL, verdict TEXT, ci_overlap INTEGER, wallclock_s REAL, "
+        "created_at TEXT NOT NULL);"
+        "INSERT INTO trials (experiment_id, phase, flags_json, optimize_string, build_status, ratio, created_at) "
+        "VALUES (7, 'screening', '[\"-O3\"]', '-O3', 'ok', 4.2, 'then');"
+    )
+    old.commit()
+    old.close()
+
+    conn = db.connect(path)
+    try:
+        assert conn.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "1.1"
+        row = conn.execute("SELECT ratio, code_fingerprint FROM trials").fetchone()
+        assert row["ratio"] == 4.2 and row["code_fingerprint"] is None
+    finally:
+        conn.close()
+    db.connect(path).close()  # idempotent on an already-migrated db
+
+
+def test_latest_code_fingerprint_matches_exact_flags_and_prefers_the_newest(tmp_path):
+    conn = db.connect(tmp_path / "x.db")
+    try:
+        exp = db.create_experiment(conn, benchmark="b", hostname="h", compiler="gcc")
+        kw = dict(experiment_id=exp, phase="confirmation", optimize_string="", build_status="ok")
+        db.record_trial(conn, flags=["-O3"], code_fingerprint="old", **kw)
+        newest = db.record_trial(conn, flags=["-O3"], code_fingerprint="new", **kw)
+        db.record_trial(conn, flags=["-O3"], **kw)  # no fingerprint: ignored
+        db.record_trial(conn, flags=["-O3", "-x"], code_fingerprint="other", **kw)
+        assert db.latest_code_fingerprint(conn, exp, ["-O3"]) == (newest, "new")
+        assert db.latest_code_fingerprint(conn, exp, ["-O2"]) is None
+    finally:
+        conn.close()

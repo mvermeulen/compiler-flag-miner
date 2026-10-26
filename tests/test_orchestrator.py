@@ -66,6 +66,7 @@ class ScriptedBackends(WorkloadBackend, InstrumentationBackend):
         allocation_pressure: str = None,
         build_fails_for: frozenset = frozenset(),
         regression_rows: list = None,
+        code_for: dict = None,
     ):
         self._queues = {k: deque(v) for k, v in ratio_sequences.items()}
         self.resource_dominance = resource_dominance
@@ -76,6 +77,9 @@ class ScriptedBackends(WorkloadBackend, InstrumentationBackend):
         self._current_flags = None
         self.regression_rows = regression_rows if regression_rows is not None else []
         self.check_regression_calls: list[str] = []
+        # flags-tuple -> code fingerprint; flagsets not listed have none (never skipped).
+        self.code_for = code_for or {}
+        self.timed_runs: list[tuple] = []
 
     # -- WorkloadBackend --
     def generate_config(self, bench, tune, flags):
@@ -88,7 +92,11 @@ class ScriptedBackends(WorkloadBackend, InstrumentationBackend):
         return BuildResult(ok=True, log_path=Path("/fake/build.log"), raw_output="ok")
 
     def run_command(self, bench, tune, config_path, iterations):
+        self.timed_runs.append(self._current_flags)
         return ["fake-run"]
+
+    def code_fingerprint(self, bench, tune):
+        return self.code_for.get(self._current_flags)
 
     def parse_result(self, bench, tune, raw_output):
         queue = self._queues.get(self._current_flags)
@@ -1615,6 +1623,122 @@ def test_confirm_known_candidates_skips_screening_and_confirms_directly(tmp_path
         assert phases == {"confirmation"}  # never "screening"
     finally:
         conn.close()
+
+
+# -- no-code-change guard -------------------------------------------------------
+
+def _experiment_with_baseline_fingerprint(cfg, flags, fingerprint):
+    """An experiment whose baseline trial for ``flags`` recorded ``fingerprint``,
+    the way run_baseline()'s real reps would."""
+    conn = db.connect(cfg.db_path)
+    try:
+        exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
+        trial_id = db.record_trial(
+            conn, experiment_id=exp_id, phase="confirmation", flags=flags,
+            optimize_string=" ".join(flags), build_status="ok", ratio=100.0, code_fingerprint=fingerprint,
+        )
+    finally:
+        conn.close()
+    return exp_id, trial_id
+
+
+def test_screen_candidates_skips_the_timed_run_when_the_code_is_unchanged(tmp_path):
+    cfg = _cfg(tmp_path)
+    exp_id, baseline_trial = _experiment_with_baseline_fingerprint(cfg, ["-O3"], "code-A")
+    backends = ScriptedBackends(
+        ratio_sequences={("-O3", "-noop"): [150.0], ("-O3", "-real"): [110.0]},
+        code_for={("-O3", "-noop"): "code-A", ("-O3", "-real"): "code-B"},
+    )
+
+    outcomes = screen_candidates(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=_baseline(mean_ratio=100.0),
+        candidates=[_candidate("-noop"), _candidate("-real")], workload=backends, instrumentation=backends,
+    )
+
+    by_flag = {o.candidate.flag: o for o in outcomes}
+    assert by_flag["-noop"].unchanged is True
+    assert by_flag["-noop"].survived is False
+    assert by_flag["-noop"].ratio is None
+    assert f"trial {baseline_trial}" in by_flag["-noop"].reason
+    assert by_flag["-real"].unchanged is False and by_flag["-real"].survived is True
+    assert backends.timed_runs == [("-O3", "-real")]  # -noop was built but never run
+
+    conn = db.connect(cfg.db_path)
+    try:
+        row = conn.execute(
+            "SELECT ratio, code_fingerprint FROM trials WHERE id=?", (by_flag["-noop"].trial_id,),
+        ).fetchone()
+        assert row["ratio"] is None and row["code_fingerprint"] == "code-A"
+    finally:
+        conn.close()
+
+
+def test_screen_candidates_never_skips_without_a_fingerprint(tmp_path):
+    # A backend (or binary) that can't be fingerprinted must never be treated as unchanged.
+    cfg = _cfg(tmp_path)
+    exp_id, _ = _experiment_with_baseline_fingerprint(cfg, ["-O3"], "code-A")
+    backends = ScriptedBackends(ratio_sequences={("-O3", "-maybe"): [101.0]})
+
+    outcomes = screen_candidates(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=_baseline(mean_ratio=100.0),
+        candidates=[_candidate("-maybe")], workload=backends, instrumentation=backends,
+    )
+
+    assert outcomes[0].unchanged is False and outcomes[0].ratio == 101.0
+
+
+def test_confirm_known_candidates_rejects_unchanged_code_after_one_build_without_a_knowledge_row(tmp_path):
+    cfg = _cfg(tmp_path)
+    exp_id, _ = _experiment_with_baseline_fingerprint(cfg, ["-O3"], "code-A")
+    backends = ScriptedBackends(
+        ratio_sequences={("-O3", "-noop"): [150.0, 150.0, 150.0]},
+        code_for={("-O3", "-noop"): "code-A"},
+    )
+
+    outcomes = confirm_known_candidates(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=_baseline(mean_ratio=100.0),
+        candidates=[_candidate("-noop")], workload=backends, instrumentation=backends,
+    )
+
+    assert outcomes[0].unchanged is True and outcomes[0].accepted is False
+    assert len(outcomes[0].trial_ids) == 1 and outcomes[0].ratios == []
+    assert backends.timed_runs == []
+    conn = db.connect(cfg.db_path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM knowledge").fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT verdict FROM trials WHERE id=?", (outcomes[0].trial_ids[0],),
+        ).fetchone()[0] == "reject"
+    finally:
+        conn.close()
+
+
+def test_greedy_combine_compares_code_against_the_running_set_not_the_baseline(tmp_path):
+    # -b changes the code on its own (Phase 4 accepted it) but not on top of -a:
+    # the greedy step adding it must be skipped against the running set's code.
+    cfg = _cfg(tmp_path)
+    exp_id, _ = _experiment_with_baseline_fingerprint(cfg, ["-O3"], "code-base")
+    backends = ScriptedBackends(
+        ratio_sequences={("-O3", "-a"): [120.0, 120.5, 121.0]},
+        code_for={("-O3", "-a"): "code-a", ("-O3", "-a", "-b"): "code-a"},
+    )
+    baseline = _baseline(mean_ratio=100.0)
+    confirmed = [
+        ConfirmationOutcome(
+            flags=["-O3", flag], trial_ids=[], ratios=[], ci=None,
+            delta_vs_baseline_pct=delta, accepted=True, reason="",
+        )
+        for flag, delta in (("-a", 20.0), ("-b", 10.0))
+    ]
+
+    result = greedy_combine(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline, confirmed=confirmed,
+        workload=backends, instrumentation=backends, max_pair_trials=0,
+    )
+
+    assert result.winning_flags == ["-O3", "-a"]
+    assert [s.unchanged for s in result.steps] == [False, True]
+    assert ("-O3", "-a", "-b") not in backends.timed_runs
 
 
 # -- vector-width deferral and multiplier ---------------------------------------
