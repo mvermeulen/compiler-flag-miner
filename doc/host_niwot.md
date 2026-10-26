@@ -53,6 +53,7 @@ CFM_SPEC_CONFIG=ryzen350_64gb.gcc_O3.cfg .venv/bin/cfm mine <benchmark>
 | 2026-10-25 | `835.gem5_s` | frontend-bound 40.4% (corpus, under the 55% gate) | `-O3 -flto` (PGO -8.63%) | **+5.35%** | [link](mining_results.835.gem5_s.2026-10-24.md) |
 | 2026-10-25 | `829.abc_s` | memory-bound 72.9% (corpus) | `-O3 -flto` (follow-up #27; the mine accepted nothing, `-flto` excluded on shape) | **+2.32%** | [link](mining_results.829.abc_s.2026-10-25.md) |
 | 2026-10-26 | `807.ntest_s` | memory-bound 41.9% (corpus, under the 55% gate) | `-O3 -march=native -flto -fprofile-use` | **+19.21%** | [link](mining_results.807.ntest_s.2026-10-26.md) |
+| 2026-10-26 | `801.xz_s` | memory-bound 56.3% (corpus) | `-O3` (nothing accepted; `-flto` kept under #28, +0.08%; PGO +0.70%) | 0.0% | [link](mining_results.801.xz_s.2026-10-26.md) |
 
 ## Summary by suite
 
@@ -118,11 +119,11 @@ and ran PGO on plain `-O3` (26.79, +7.78%), so it never measured the two togethe
 | **Suite geomean gain (12, unmined = 1.00×)** | | | | +0.00% | |
 | Mined-only geomean (0 of 12) | — | — | | — | |
 
-### intspeed (6 of 13 mined)
+### intspeed (7 of 13 mined)
 
 | Benchmark | Base (`-O3`) | Best | Winning flags | Gain | Write-up |
 |---|---|---|---|---|---|
-| `801.xz_s` | — | — | not mined yet | — | |
+| `801.xz_s` | 0.9457 | 0.9457 | `-O3` (nothing accepted) | 0.0% | [2026-10-26](mining_results.801.xz_s.2026-10-26.md) |
 | `807.ntest_s` | 0.9026 | 1.0760 | `-O3 -march=native -flto -fprofile-use` | **+19.21%** | [2026-10-26](mining_results.807.ntest_s.2026-10-26.md) |
 | `817.flac_s` | — | — | not mined yet | — | |
 | `821.gcc_s` | — | — | not mined yet | — | |
@@ -136,7 +137,7 @@ and ran PGO on plain `-O3` (26.79, +7.78%), so it never measured the two togethe
 | `853.ns3_s` | 6.527 | 7.602 | `-O3 -flto -fprofile-use` | **+16.46%** | [2026-10-24](mining_results.853.ns3_s.2026-10-24.md) |
 | `854.graph500_s` | — | — | not mined yet | — | |
 | **Suite geomean gain (13, unmined = 1.00×)** | | | | +4.95% | |
-| Mined-only geomean (6 of 13) | 3.432 | 3.811 | | +11.03% | |
+| Mined-only geomean (7 of 13) | 2.855 | 3.123 | | +9.38% | |
 
 ### fpspeed (0 of 13 mined)
 
@@ -192,6 +193,7 @@ Suite geomean gain over every benchmark in the suite, unmined = 1.00×, recorded
 | `829.abc_s` | +20.13% | +0.00% | +3.36% | +0.00% |
 | `829.abc_s` LTO follow-up | +20.13% | +0.00% | +3.54% | +0.00% |
 | `807.ntest_s` | +20.13% | +0.00% | +4.95% | +0.00% |
+| `801.xz_s` | +20.13% | +0.00% | +4.95% | +0.00% |
 
 SPECspeed mining started on 2026-10-24 with `834.vpr_s`, the first `_s` benchmark cfm has mined on
 either host. Speed ratios come from one 16-thread process (`threads = 16`), not 16 copies. Since PR #55,
