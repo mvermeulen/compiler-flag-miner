@@ -97,3 +97,30 @@ All three are flat.
 
 abc_r's LTO gain is the one thing this mine couldn't test. zstd's clear memory-bound shape was right to
 exclude LTO, but abc_r's real LTO gain says abc might be different. That's #27.
+
+## Follow-up: `-O3` against `-O3 -flto` (#27, 2026-10-25)
+
+The mine excluded `-flto` on shape, so it was measured directly: 3 interleaved rounds of single-iteration
+`cfm measure` runs (experiments 172-177, trials 989-994), pinned to CPU 2 like the mine.
+
+| Round | `-O3` | `-O3 -flto` |
+|---|---|---|
+| 1 | 2.7542 | 2.8147 |
+| 2 | 2.7528 | 2.8194 |
+| 3 | 2.7540 | 2.8189 |
+| Mean | 2.7537 | 2.8177 |
+| 95% CI | [2.7517, 2.7556] | [2.8113, 2.8241] |
+
+**`-flto` is +2.32%, CIs clear by a wide margin.** Every round agreed, and the `-O3` control matched the
+mine's baseline (2.7513, within 0.1%). Every run's bandwidth probe read 45.5-46.0 GB/s, and the audit
+confirmed `-O3` in every binary.
+
+- **abc_s's best is now `-O3 -flto`, +2.32%**, against the mine's 0.0%. That matches abc_r's `-flto`
+  (+2.49% follow-up, +3.10% in the #2 check) closely.
+- **So the 72.9% memory-bound shape was wrong to exclude `-flto` here.** That's the fifth memory-bound
+  benchmark where a shape exclusion hid an LTO or PGO gain (vpr_r, gcc_r, sqlite, abc_r, now abc_s).
+  zstd (64.0%) is still the only one where the exclusion was right. A shape that confident doesn't say
+  whether LTO pays, so the 55% gate isn't enough. The pipeline answer is to try `-flto` always, as
+  PR #53 did for PGO.
+- PGO on top of `-flto` wasn't measured. PGO alone was -0.64% in the mine and abc_r's PGO lost 4-9%, so
+  it isn't likely to add.
