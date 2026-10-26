@@ -34,33 +34,43 @@
       "topdown_signals": ["frontend-bound", "speculation-bound"]
     },
     {
-      "flag": "-freorder-blocks-and-partition",
+      "flag": "-fno-pie -no-pie",
       "languages": ["c", "cxx", "fortran"],
       "category": "codegen-layout",
-      "risk": "safe",
-      "requires": [],
-      "conflicts": [],
-      "notes": "Splits hot/cold blocks into separate sections -- reduces icache footprint of the hot path.",
-      "topdown_signals": ["frontend-bound"]
-    },
-    {
-      "flag": "-freorder-functions",
-      "languages": ["c", "cxx", "fortran"],
-      "category": "codegen-layout",
-      "risk": "safe",
-      "requires": [],
-      "conflicts": [],
-      "notes": "Groups hot functions together in the binary layout; complements -freorder-blocks-and-partition.",
-      "topdown_signals": ["frontend-bound"]
-    },
-    {
-      "flag": "-fno-semantic-interposition",
-      "languages": ["c", "cxx"],
-      "category": "ipa",
       "risk": "needs_validation",
       "requires": [],
       "conflicts": [],
-      "notes": "Lets the compiler assume non-interposable symbols even under -fPIC, unlocking inlining/devirtualization across translation units without full LTO. Can change behavior for code relying on symbol interposition (rare in SPEC-style benchmarks, still gated by validate).",
+      "notes": "Opts out of Ubuntu GCC's default position-independent executable (--enable-default-pie): absolute addressing and direct calls instead of RIP-relative/PLT indirection. Two tokens, one candidate: -fno-pie objects don't link as a PIE, so -no-pie must come with it (SPEC puts OPTIMIZE on the link line too). -no-pie is link-only and never shows up in the compiled-flags audit.",
+      "topdown_signals": ["frontend-bound"]
+    },
+    {
+      "flag": "-fno-stack-protector",
+      "languages": ["c", "cxx", "fortran"],
+      "category": "hardening-off",
+      "risk": "needs_validation",
+      "requires": [],
+      "conflicts": [],
+      "notes": "Ubuntu GCC enables -fstack-protector-strong by default: a canary store/check in every function with a local array or address-taken local. Turning it off removes that per-call overhead; matters most for call-heavy code.",
+      "topdown_signals": ["frontend-bound"]
+    },
+    {
+      "flag": "-fcf-protection=none",
+      "languages": ["c", "cxx", "fortran"],
+      "category": "hardening-off",
+      "risk": "needs_validation",
+      "requires": [],
+      "conflicts": [],
+      "notes": "Ubuntu GCC enables -fcf-protection (CET: endbr64 at every indirect-branch target) by default. The endbr64 instructions are cheap but add code bytes at every function entry and indirect target; turning them off shrinks the hot path slightly.",
+      "topdown_signals": ["frontend-bound"]
+    },
+    {
+      "flag": "-U_FORTIFY_SOURCE",
+      "languages": ["c", "cxx"],
+      "category": "hardening-off",
+      "risk": "needs_validation",
+      "requires": [],
+      "conflicts": [],
+      "notes": "Ubuntu GCC defines _FORTIFY_SOURCE=3 whenever optimizing, routing memcpy/strcpy/sprintf-family calls through glibc's bounds-checked __*_chk variants. Undefining it restores the plain calls; matters for string/memory-call-heavy code. GCC records it as '-U _FORTIFY_SOURCE' (with a space).",
       "topdown_signals": ["frontend-bound"]
     },
     {
@@ -80,7 +90,7 @@
       "risk": "safe",
       "requires": [],
       "conflicts": [],
-      "notes": "Breaks loop-carried dependency chains, can help backend/retiring-bound loops. Reverse hypothesis on speculation-bound workloads: unrolling can worsen icache pressure and branch predictability -- worth trying OFF if currently on, not just ON if off.",
+      "notes": "Breaks loop-carried dependency chains, can help backend/retiring-bound loops. Not a no-op at -O2/-O3 even though `gcc -Q -O3 --help=optimizers` lists it as enabled: on x86 that default comes with -munroll-only-small-loops, and passing -funroll-loops explicitly lifts that restriction (confirmed: changes lbm.c and sqlite3.c codegen). Reverse hypothesis on speculation-bound workloads: unrolling can worsen icache pressure and branch predictability -- worth trying OFF if currently on, not just ON if off.",
       "topdown_signals": ["compute-bound", "backend-bound"]
     },
     {
@@ -114,16 +124,6 @@
       "topdown_signals": ["vectorization-density-high"]
     },
     {
-      "flag": "-mprefer-vector-width=512",
-      "languages": ["c", "cxx", "fortran"],
-      "category": "vectorization",
-      "risk": "safe",
-      "requires": [],
-      "conflicts": ["-mprefer-vector-width=256"],
-      "notes": "Only meaningful if the detected target microarch has AVX-512; the Compiler Knowledge agent must check this against wspy's cpu_info-derived host detection before proposing it. Gated on real vector/FP work existing to widen (vectorization-density-high), not just memory-bound -- see the =256 entry's note for why and its caveat on today's deep-cpu coverage gap.",
-      "topdown_signals": ["vectorization-density-high"]
-    },
-    {
       "flag": "-march=<detected-uarch>",
       "languages": ["c", "cxx", "fortran"],
       "category": "target-tuning",
@@ -152,6 +152,36 @@
       "conflicts": [],
       "notes": "Bundles -fno-math-errno, -funsafe-math-optimizations, -ffinite-math-only, -fno-trapping-math, -fno-signed-zeros, -fassociative-math. Consider trying the sub-flags individually before the bundle on a benchmark sensitive to specific semantics (e.g. NaN/Inf handling).",
       "topdown_signals": ["compute-bound"]
+    },
+    {
+      "flag": "-fno-math-errno",
+      "languages": ["c", "cxx"],
+      "category": "fp-semantics",
+      "risk": "needs_validation",
+      "requires": [],
+      "conflicts": [],
+      "notes": "The lowest-risk piece of -ffast-math: math functions no longer have to set errno, so GCC can inline sqrt and similar calls to single instructions. No change to results, only to errno. C/C++ only -- gfortran already defaults to -fno-math-errno.",
+      "topdown_signals": ["compute-bound"]
+    },
+    {
+      "flag": "-fno-ipa-cp-clone",
+      "languages": ["c", "cxx", "fortran"],
+      "category": "ipa",
+      "risk": "safe",
+      "requires": [],
+      "conflicts": [],
+      "notes": "Turns off one of -O3's additions over -O2: cloning functions specialized on constant arguments. Cloning grows the code; on an icache-limited workload that can cost more than the specialization saves.",
+      "topdown_signals": ["frontend-bound"]
+    },
+    {
+      "flag": "-fno-unswitch-loops",
+      "languages": ["c", "cxx", "fortran"],
+      "category": "loop-transform",
+      "risk": "safe",
+      "requires": [],
+      "conflicts": [],
+      "notes": "Turns off one of -O3's additions over -O2: duplicating a loop body to hoist a loop-invariant branch out of it. Same code-growth trade-off as -fno-ipa-cp-clone.",
+      "topdown_signals": ["frontend-bound"]
     },
     {
       "flag": "-finline-limit=N",
@@ -202,16 +232,13 @@
       "conflicts": [],
       "notes": "Forces local variables to be stack-allocated (thread/recursion-safe) -- mostly a correctness flag, rarely a perf win by itself, included so the catalog covers it rather than the LLM re-proposing it every run.",
       "topdown_signals": []
-    },
-    {
-      "flag": "-ffrontend-optimize",
-      "languages": ["fortran"],
-      "category": "gfortran-specific",
-      "risk": "safe",
-      "requires": [],
-      "conflicts": [],
-      "notes": "gfortran front-end-level simplifications (constant folding, redundant call elimination) ahead of the shared middle end.",
-      "topdown_signals": ["frontend-bound"]
     }
+  ],
+  "excluded_flags": [
+    {"flag": "-freorder-blocks-and-partition", "reason": "Already on at -O2 (GCC 15.2); identical -O3 assembly on sqlite3.c and lbm.c."},
+    {"flag": "-freorder-functions", "reason": "Already on at -O2 (GCC 15.2); identical -O3 assembly on sqlite3.c and lbm.c."},
+    {"flag": "-fno-semantic-interposition", "reason": "Only affects -fPIC code. SPEC builds executables, which Ubuntu's GCC compiles as -fPIE, where interposition already can't happen; identical assembly."},
+    {"flag": "-mprefer-vector-width=512", "reason": "The default once -march=znver5/native is set, and the vector-width multiplier only runs on a winning set that has an -march=; identical lbm.c assembly. Worth re-adding for a host whose -march tuning prefers 256 (e.g. many Intel AVX-512 parts)."},
+    {"flag": "-ffrontend-optimize", "reason": "gfortran enables it at every -O level except -Og."}
   ]
 }

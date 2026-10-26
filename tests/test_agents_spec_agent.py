@@ -94,6 +94,20 @@ def test_summarize_compiled_flags_audit_reports_found_missing_and_skipped():
     assert "no -O optimization level" not in summary  # -O3 is right there in the dump
 
 
+def test_summarize_compiled_flags_audit_checks_each_token_of_a_multi_token_flag():
+    # Real GCC 15.2 dump for "-fno-pie -no-pie": -no-pie is link-only and never
+    # recorded, so only -fno-pie is checked.
+    dump = "GNU C23 15.2.0 -mtune=generic -march=x86-64 -O3 -fno-pie -fasynchronous-unwind-tables\n"
+    assert "confirmed compiled in: ['-fno-pie -no-pie']" in _summarize_compiled_flags_audit(["-fno-pie -no-pie"], dump)
+    assert "NOT FOUND" in _summarize_compiled_flags_audit(["-fno-pie -no-pie"], "GNU C23 15.2.0 -O3\n")
+
+
+def test_summarize_compiled_flags_audit_matches_gccs_spaced_dash_u_spelling():
+    # Real GCC 15.2 dump: -U_FORTIFY_SOURCE is recorded as "-U _FORTIFY_SOURCE".
+    dump = "GNU C23 15.2.0 -U _FORTIFY_SOURCE -mtune=generic -march=x86-64 -O3\n"
+    assert "confirmed compiled in: ['-U_FORTIFY_SOURCE']" in _summarize_compiled_flags_audit(["-U_FORTIFY_SOURCE"], dump)
+
+
 def test_summarize_compiled_flags_audit_skips_flto_as_unverifiable():
     # Real 2026-08-22 finding: on an LTO build, -frecord-gcc-switches's own
     # recorded .GCC.command.line section reflects GCC's internal LTRANS

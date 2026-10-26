@@ -57,7 +57,13 @@ def new_run_id() -> str:
 # command in that same log -- just not in the final linked binary's own
 # recorded-switches section). Caught by this exact audit output on a real,
 # otherwise-correct accepted trial -- see CLAUDE.md's Non-obvious traps log.
-_AUDIT_UNVERIFIABLE_LITERAL_FLAGS = frozenset({"-march=native", "-mtune=native", "-flto"})
+_AUDIT_UNVERIFIABLE_LITERAL_FLAGS = frozenset({"-march=native", "-mtune=native", "-flto", "-no-pie"})
+
+
+def _audit_token_recorded(token: str, audit_dump: str) -> bool:
+    # GCC records a preprocessor -D/-U with a space ("-U _FORTIFY_SOURCE").
+    spaced = re.sub(r"^-([DU])(?=\S)", r"-\1 ", token)
+    return token in audit_dump or spaced in audit_dump
 
 
 # Confirmed live, 2026-08-22 (CLAUDE.md's Non-obvious traps log): a real GCC
@@ -79,7 +85,7 @@ def _summarize_compiled_flags_audit(flags: list[str], audit_dump: str) -> str:
     report (CLAUDE.md's Non-obvious traps log, 2026-08-21 basepeak entry, on
     why that report alone isn't sufficient). Not a hard pass/fail signal: every
     catalog flag *other* than the three in _AUDIT_UNVERIFIABLE_LITERAL_FLAGS
-    (-fprofile-use/-generate, -freorder-*, -fno-semantic-interposition,
+    (-fprofile-use/-generate, -fno-stack-protector, -fcf-protection=none,
     -mprefer-vector-width=N, ...) is recorded by GCC verbatim, so a real
     substring match is meaningful for them.
 
@@ -94,9 +100,12 @@ def _summarize_compiled_flags_audit(flags: list[str], audit_dump: str) -> str:
     """
     found, missing, skipped = [], [], []
     for flag in flags:
-        if flag in _AUDIT_UNVERIFIABLE_LITERAL_FLAGS:
+        # A catalog entry can be several tokens ("-fno-pie -no-pie"); it counts
+        # as compiled in when every checkable token is.
+        checkable = [t for t in flag.split() if t not in _AUDIT_UNVERIFIABLE_LITERAL_FLAGS]
+        if not checkable:
             skipped.append(flag)
-        elif flag in audit_dump:
+        elif all(_audit_token_recorded(t, audit_dump) for t in checkable):
             found.append(flag)
         else:
             missing.append(flag)
