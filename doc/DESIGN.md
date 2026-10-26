@@ -934,6 +934,11 @@ compiler-flag-miner/
        LTO/PGO that later measured +3% to +16%, while the one at 64% excluded them correctly
        (`doc/opportunities_niwot.md` #8). A weak-majority shape isn't confident enough to rule out a
        whole flag family; below the margin every candidate gets a screening trial instead.
+       **Changed 2026-10-25: `-flto` is never excluded on shape** (`SHAPE_EXEMPT_FLAGS`,
+       `doc/opportunities_niwot.md` #28). `829.abc_s`'s confident 72.9% memory-bound shape excluded it,
+       and a direct check measured +2.32%. That made five of six memory-bound benchmarks on `niwot`
+       where a shape exclusion hid an LTO or PGO gain. Even a confident shape doesn't predict LTO,
+       and screening it costs one LTO build per mine, so it is always screened, as PGO is always tried.
      - Phase 4/5 confirmation uses a small, fixed number of `quick`-profile reps (not `deep-cpu`'s 3)
        and an **asymmetric accept bar**: require a clearly large, unambiguous improvement to accept
        (statistical *and* practical significance — non-overlapping CI is necessary but not sufficient;

@@ -538,8 +538,32 @@ def test_filter_excludes_resource_dominance_signal_only_on_confident_mismatch(
 ])
 def test_filter_resource_dominance_exclusion_needs_a_confident_margin(pct, expect_excluded):
     baseline = _baseline(resource_dominance="memory-bound", resource_dominance_pct=pct)
-    survivors = _filter_implausible_candidates([_signaled_candidate("-flto", ["frontend-bound"])], baseline)
+    survivors = _filter_implausible_candidates(
+        [_signaled_candidate("-freorder-functions", ["frontend-bound"])], baseline,
+    )
     assert (survivors == []) is expect_excluded
+
+
+@pytest.mark.parametrize("pct", [72.9, 55.0, 45.4, None])
+def test_filter_never_excludes_lto_on_shape(pct):
+    # 829.abc_s: memory-bound 72.9% excluded -flto, which then measured +2.32% (#28).
+    baseline = _baseline(resource_dominance="memory-bound", resource_dominance_pct=pct)
+    survivors = _filter_implausible_candidates(
+        [_signaled_candidate("-flto", ["frontend-bound"]),
+         _signaled_candidate("-freorder-functions", ["frontend-bound"])],
+        baseline,
+    )
+    kept = [c.flag for c in survivors]
+    assert "-flto" in kept
+    assert ("-freorder-functions" in kept) is (pct is None or pct < 55.0)
+
+
+def test_shape_exempt_flags_are_real_catalog_entries():
+    from cfm.compilers.gcc import GccCompiler
+    from cfm.orchestrator import SHAPE_EXEMPT_FLAGS
+
+    catalog = {entry["flag"] for entry in GccCompiler()._flags()}
+    assert SHAPE_EXEMPT_FLAGS <= catalog
 
 
 def test_filter_memory_bound_corroborated_exclusion_needs_a_confident_margin():
