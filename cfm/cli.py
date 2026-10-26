@@ -30,9 +30,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     measure = sub.add_parser(
         "measure",
-        help="build+run+measure one SPEC CPU2026 benchmark with one fixed flag set",
+        help="build+run+measure one benchmark (SPEC CPU2026, or a pts/ Phoronix test) "
+             "with one fixed flag set",
     )
-    measure.add_argument("benchmark", help="e.g. 706.stockfish_r")
+    measure.add_argument("benchmark", help="e.g. 706.stockfish_r, or pts/coremark-1.0.1")
     measure.add_argument(
         "--flags", required=True,
         help="space-separated OPTIMIZE flags, e.g. '-O3 -march=native -flto'",
@@ -45,6 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     measure.add_argument("--spec-dir", default=None)
     measure.add_argument("--spec-config", default=None)
     measure.add_argument("--wspy-dir", default=None)
+    measure.add_argument("--pts-home", default=None, help="Phoronix Test Suite user directory")
     measure.add_argument("--output-root", default=None)
     measure.add_argument("--db", dest="db_path", default=None)
     measure.add_argument("--wspy-profile", default=None)
@@ -60,7 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="rule-based flag search (doc/DESIGN.md sec. 6 Phases 1-6): baseline, "
              "screen, confirm, greedy-combine, PGO + microarch multipliers",
     )
-    mine.add_argument("benchmark", help="e.g. 706.stockfish_r")
+    mine.add_argument("benchmark", help="e.g. 706.stockfish_r, or pts/coremark-1.0.1")
     mine.add_argument(
         "--base-flags", default="-O3",
         help="starting/baseline OPTIMIZE flags (default: '-O3')",
@@ -94,6 +96,7 @@ def build_parser() -> argparse.ArgumentParser:
     mine.add_argument("--spec-dir", default=None)
     mine.add_argument("--spec-config", default=None)
     mine.add_argument("--wspy-dir", default=None)
+    mine.add_argument("--pts-home", default=None, help="Phoronix Test Suite user directory")
     mine.add_argument("--output-root", default=None)
     mine.add_argument("--db", dest="db_path", default=None)
     mine.add_argument("--lock-file", default=None)
@@ -121,6 +124,7 @@ def main(argv=None) -> int:
     if args.command == "measure":
         cfg = CfmConfig.from_env(
             spec_dir=args.spec_dir, spec_config=args.spec_config, wspy_dir=args.wspy_dir,
+            pts_home=args.pts_home,
             output_root=args.output_root, db_path=args.db_path, wspy_profile=args.wspy_profile,
             lock_file=args.lock_file, bandwidth_gate=not args.no_bandwidth_gate,
         )
@@ -153,6 +157,7 @@ def main(argv=None) -> int:
     if args.command == "mine":
         cfg = CfmConfig.from_env(
             spec_dir=args.spec_dir, spec_config=args.spec_config, wspy_dir=args.wspy_dir,
+            pts_home=args.pts_home,
             output_root=args.output_root, db_path=args.db_path, lock_file=args.lock_file,
             bandwidth_gate=not args.no_bandwidth_gate,
         )

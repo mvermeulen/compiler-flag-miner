@@ -21,11 +21,12 @@ from . import reference_matrix
 from .agents.knowledge_agent import KnownFlag
 from .agents.spec_agent import run_one_trial
 from .compilers.base import FlagCandidate, RESOURCE_DOMINANCE_SIGNALS
-from .compilers.gcc import GccCompiler, benchmark_languages
+from .compilers.gcc import GccCompiler
 from .config import CfmConfig
 from .hostinfo import detect_microarch_flags
 from .instrumentation.base import InstrumentationBackend
 from .stats import ConfidenceInterval, confidence_interval, non_overlapping
+from .workloads import workload_for
 from .workloads.base import WorkloadBackend
 
 # Repeated-measurement count, doc/DESIGN.md sec. 6: Phase 1 (baseline) and Phase 4
@@ -597,7 +598,7 @@ def generate_candidates(
     not replaced by it: ranking only reorders what filtering leaves standing.
     """
     compiler = compiler or GccCompiler()
-    languages = benchmark_languages(cfg.spec_dir, benchmark)
+    languages = workload_for(cfg, benchmark).benchmark_languages(benchmark)
     candidates = compiler.candidate_flags_for_signature(baseline, languages)
     return _filter_implausible_candidates(candidates, baseline)
 

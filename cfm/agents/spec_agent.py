@@ -27,7 +27,7 @@ from ..hostinfo import read_package_power_watts
 from ..instrumentation.base import InstrumentationBackend
 from ..instrumentation.wspy import WspyInstrumentation
 from ..workloads.base import WorkloadBackend
-from ..workloads.spec_cpu2026 import SpecCpu2026Workload
+from ..workloads import workload_for
 
 
 def new_run_id() -> str:
@@ -206,7 +206,8 @@ def run_one_trial(
     skip_if_same_code_as: Optional[list[str]] = None,
 ) -> dict:
     """``workload``/``instrumentation`` are injectable (defaulting to the real
-    ``SpecCpu2026Workload``/``WspyInstrumentation`` backends built from ``cfg``) so
+    backend ``workload_for()`` picks for ``benchmark`` -- SPEC CPU2026, or Phoronix
+    for a ``pts/`` name -- and ``WspyInstrumentation``, both built from ``cfg``) so
     ``cfm/orchestrator.py``'s tests can pass in fakes conforming to
     ``workloads.base.WorkloadBackend``/``instrumentation.base.InstrumentationBackend``
     and exercise the orchestrator's phase logic with no real SPEC/wspy calls --
@@ -238,7 +239,7 @@ def run_one_trial(
     run is skipped; the result dict carries ``unchanged_from_trial_id``. It never
     skips when either fingerprint is unknown.
     """
-    workload = workload or SpecCpu2026Workload(cfg.spec_dir, cfg.spec_config)
+    workload = workload or workload_for(cfg, benchmark)
     run_index_path = cfg.output_root / "cpu2026" / "run-index.jsonl"
     instrumentation = instrumentation or WspyInstrumentation(
         cfg.wspy_dir,
@@ -305,7 +306,10 @@ def run_one_trial(
             run_id = new_run_id()
             command = workload.run_command(benchmark, tune, config_path, iterations=iterations)
             signature = instrumentation.characterize(
-                command=command, suite="cpu2026", benchmark=benchmark, run_id=run_id,
+                # A pts/ name's slash would nest wspy's run directory, so wspy
+                # gets the bare test name under the backend's own suite.
+                command=command, suite=getattr(workload, "suite", "cpu2026"),
+                benchmark=benchmark.rsplit("/", 1)[-1], run_id=run_id,
                 profile=profile, output_root=cfg.output_root,
             )
             run_result = workload.parse_result(benchmark, tune, signature.raw_output)
