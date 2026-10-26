@@ -32,13 +32,29 @@ def connect(db_path) -> sqlite3.Connection:
 def init_schema(conn: sqlite3.Connection) -> None:
     """Idempotent: schema/cfm_schema.sql uses ``CREATE TABLE IF NOT EXISTS``/
     ``CREATE INDEX IF NOT EXISTS``/``INSERT OR IGNORE`` throughout, so re-running
-    this against an already-initialized db is always safe. No migration-step
-    dispatch yet (wspy's ``store.c`` STORE_SCHEMA_VERSION pattern is the model to
-    follow once cfm.db's schema actually needs to change under existing data --
-    see CLAUDE.md's versioning-discipline section).
+    this against an already-initialized db is always safe. ``CREATE TABLE IF NOT
+    EXISTS`` never adds a column to an existing table, so additive columns are
+    also applied by ``_migrate()`` for a db created before them.
     """
     conn.executescript(_SCHEMA_PATH.read_text())
+    _migrate(conn)
     conn.commit()
+
+
+# (table, column, DDL type, schema_version that added it), oldest first. Only
+# additive (MINOR) changes belong here; ALTER TABLE ADD COLUMN can't change a
+# CHECK constraint or remove anything.
+_ADDED_COLUMNS = [
+    ("trials", "code_fingerprint", "TEXT", "1.1"),
+]
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    for table, column, ddl_type, version in _ADDED_COLUMNS:
+        existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}")
+            conn.execute("UPDATE schema_meta SET value=? WHERE key='schema_version'", (version,))
 
 
 def create_experiment(
@@ -107,20 +123,37 @@ def record_trial(
     ci_overlap: Optional[bool] = None,
     wallclock_s: Optional[float] = None,
     parent_trial_id: Optional[int] = None,
+    code_fingerprint: Optional[str] = None,
 ) -> int:
     cur = conn.execute(
         "INSERT INTO trials "
         "(experiment_id, phase, parent_trial_id, flags_json, optimize_string, "
         " build_status, wspy_run_ref, ratio, delta_vs_baseline_pct, verdict, "
-        " ci_overlap, wallclock_s, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        " ci_overlap, wallclock_s, created_at, code_fingerprint) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             experiment_id, phase, parent_trial_id, json.dumps(flags), optimize_string,
             build_status, wspy_run_ref, ratio, delta_vs_baseline_pct, verdict,
             None if ci_overlap is None else int(ci_overlap), wallclock_s, utcnow_iso(),
+            code_fingerprint,
         ),
     )
     conn.commit()
     return cur.lastrowid
+
+
+def latest_code_fingerprint(
+    conn: sqlite3.Connection, experiment_id: int, flags: list[str],
+) -> Optional[tuple[int, str]]:
+    """``(trial_id, code_fingerprint)`` of the most recent trial in this
+    experiment that built exactly ``flags`` (same order) and recorded a
+    fingerprint, or ``None`` if there isn't one."""
+    row = conn.execute(
+        "SELECT id, code_fingerprint FROM trials WHERE experiment_id=? AND flags_json=? "
+        "AND code_fingerprint IS NOT NULL ORDER BY id DESC LIMIT 1",
+        (experiment_id, json.dumps(flags)),
+    ).fetchone()
+    return (row["id"], row["code_fingerprint"]) if row else None
 
 
 def update_trial_verdict(

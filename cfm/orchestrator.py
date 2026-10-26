@@ -206,6 +206,9 @@ class ScreeningOutcome:
     delta_vs_baseline_pct: Optional[float]
     survived: bool
     reason: str
+    # The flag left the built code identical to the baseline's, so the timed
+    # run was skipped (run_one_trial()'s skip_if_same_code_as).
+    unchanged: bool = False
 
 
 # A confirmation (or baseline calibration) rep more than this far below the
@@ -634,10 +637,20 @@ def screen_candidates(
                 cfg, benchmark=benchmark, flags=baseline.flags + [candidate.flag], phase="screening",
                 profile=SCREENING_PROFILE, iterations=SCREENING_ITERATIONS,
                 experiment_id=experiment_id, workload=workload, instrumentation=instrumentation,
+                skip_if_same_code_as=baseline.flags,
             )
             ratio = result.get("ratio")
 
-            if ratio is None:
+            if result.get("unchanged_from_trial_id") is not None:
+                outcome = ScreeningOutcome(
+                    candidate=candidate, trial_id=result["trial_id"], ratio=None,
+                    delta_vs_baseline_pct=None, survived=False, unchanged=True,
+                    reason=(
+                        f"no code change: {candidate.flag} builds the same executables as the baseline "
+                        f"(trial {result['unchanged_from_trial_id']}), so it can't change the ratio"
+                    ),
+                )
+            elif ratio is None:
                 outcome = ScreeningOutcome(
                     candidate=candidate, trial_id=result["trial_id"], ratio=None,
                     delta_vs_baseline_pct=None, survived=False,
@@ -682,6 +695,9 @@ class ConfirmationOutcome:
     delta_vs_baseline_pct: Optional[float]
     accepted: bool
     reason: str
+    # The flagset's built code was identical to ``compare_flags``'s, so nothing
+    # was measured and it's rejected without touching the knowledge table.
+    unchanged: bool = False
 
 
 def _summarize_regression(rows: list[dict]) -> str:
@@ -707,6 +723,7 @@ def _confirm_flagset(
     workload: Optional[WorkloadBackend] = None,
     instrumentation: Optional[InstrumentationBackend] = None,
     record_knowledge: bool = True,
+    compare_flags: Optional[list[str]] = None,
 ) -> ConfirmationOutcome:
     """Shared confirmation-grade measurement + accept/reject machinery for both
     Phase 4 (doc/DESIGN.md sec. 6, one candidate flag re-run against the
@@ -715,16 +732,37 @@ def _confirm_flagset(
     letting Phase 5 re-use this unchanged rather than duplicating it).
     ``record_knowledge=False`` skips the knowledge-table upsert, for a trial
     whose ``flags[-1]`` isn't the only thing it adds (the near-miss PGO variant).
+    ``compare_flags`` is the flagset ``compare_ci`` was measured from. When given,
+    the first rep checks whether ``flags`` builds the same code as it did; if so
+    the flagset is rejected after that one build, with no timed run and no
+    knowledge-table row (the "flag" never did anything to measure).
     """
-    def confirmation_rep():
+    def confirmation_rep(skip_if_same_code_as=None):
         return run_one_trial(
             cfg, benchmark=benchmark, flags=flags, phase=phase,
             profile=CALIBRATION_PROFILE, iterations=CALIBRATION_ITERATIONS,
             experiment_id=experiment_id,
             parent_trial_id=parent_trial_id, workload=workload, instrumentation=instrumentation,
+            skip_if_same_code_as=skip_if_same_code_as,
         )
 
-    trial_results = [confirmation_rep() for _ in range(CONFIRMATION_REPETITIONS)]
+    first = confirmation_rep(skip_if_same_code_as=compare_flags)
+    if first.get("unchanged_from_trial_id") is not None:
+        reason = (
+            f"no code change: {flags} builds the same executables as {compare_flags} "
+            f"(trial {first['unchanged_from_trial_id']}) -- reject without measuring"
+        )
+        conn = db.connect(cfg.db_path)
+        try:
+            db.update_trial_verdict(conn, first["trial_id"], verdict="reject")
+            db.record_hypothesis(conn, trial_id=first["trial_id"], proposed_by="rule", rationale=reason)
+        finally:
+            conn.close()
+        return ConfirmationOutcome(
+            flags=flags, trial_ids=[first["trial_id"]], ratios=[], ci=None,
+            delta_vs_baseline_pct=None, accepted=False, reason=reason, unchanged=True,
+        )
+    trial_results = [first] + [confirmation_rep() for _ in range(CONFIRMATION_REPETITIONS - 1)]
     measured, replacements = _rerun_slow_reps(
         cfg, [r for r in trial_results if r.get("ratio") is not None], confirmation_rep,
     )
@@ -844,7 +882,8 @@ def confirm_candidates(
         _confirm_flagset(
             cfg, experiment_id=experiment_id, benchmark=benchmark, baseline=baseline,
             flags=baseline.flags + [outcome.candidate.flag], phase="confirmation",
-            compare_ci=baseline.ci, workload=workload, instrumentation=instrumentation,
+            compare_ci=baseline.ci, compare_flags=baseline.flags,
+            workload=workload, instrumentation=instrumentation,
         )
         for outcome in screened
         if outcome.survived
@@ -908,7 +947,8 @@ def confirm_known_candidates(
         _confirm_flagset(
             cfg, experiment_id=experiment_id, benchmark=benchmark, baseline=baseline,
             flags=baseline.flags + [candidate.flag], phase="confirmation",
-            compare_ci=baseline.ci, workload=workload, instrumentation=instrumentation,
+            compare_ci=baseline.ci, compare_flags=baseline.flags,
+            workload=workload, instrumentation=instrumentation,
         )
         for candidate in candidates
     ]
@@ -971,7 +1011,7 @@ def greedy_combine(
         trial_flags = current_flags + [flag]
         step = _confirm_flagset(
             cfg, experiment_id=experiment_id, benchmark=benchmark, baseline=baseline,
-            flags=trial_flags, phase="combination", compare_ci=current_ci,
+            flags=trial_flags, phase="combination", compare_ci=current_ci, compare_flags=current_flags,
             parent_trial_id=parent_trial_id, workload=workload, instrumentation=instrumentation,
         )
         steps.append(step)
@@ -995,7 +1035,7 @@ def greedy_combine(
         pair_trials.append(_confirm_flagset(
             cfg, experiment_id=experiment_id, benchmark=benchmark, baseline=baseline,
             flags=baseline.flags + sorted({a, b}), phase="combination", compare_ci=baseline.ci,
-            workload=workload, instrumentation=instrumentation,
+            compare_flags=baseline.flags, workload=workload, instrumentation=instrumentation,
         ))
 
     # A pair trial replaces the greedy winner only if it clears the *same* bar
@@ -1196,7 +1236,8 @@ def run_pgo_multiplier(
     outcome = _confirm_flagset(
         cfg, experiment_id=experiment_id, benchmark=benchmark, baseline=baseline,
         flags=combination.winning_flags + [PGO_FLAG], phase="multiplier",
-        compare_ci=combination.winning_ci, workload=workload, instrumentation=instrumentation,
+        compare_ci=combination.winning_ci, compare_flags=combination.winning_flags,
+        workload=workload, instrumentation=instrumentation,
     )
     outcomes = [outcome]
     best = outcome if outcome.accepted else None
@@ -1210,7 +1251,8 @@ def run_pgo_multiplier(
         variant = _confirm_flagset(
             cfg, experiment_id=experiment_id, benchmark=benchmark, baseline=baseline,
             flags=combination.winning_flags + [near_miss, PGO_FLAG], phase="multiplier",
-            compare_ci=combination.winning_ci, workload=workload, instrumentation=instrumentation,
+            compare_ci=combination.winning_ci, compare_flags=combination.winning_flags,
+            workload=workload, instrumentation=instrumentation,
             record_knowledge=False,
         )
         outcomes.append(variant)
@@ -1292,7 +1334,8 @@ def run_microarch_multiplier(
         outcome = _confirm_flagset(
             cfg, experiment_id=experiment_id, benchmark=benchmark, baseline=baseline,
             flags=combination.winning_flags + [flag], phase="multiplier",
-            compare_ci=combination.winning_ci, workload=workload, instrumentation=instrumentation,
+            compare_ci=combination.winning_ci, compare_flags=combination.winning_flags,
+            workload=workload, instrumentation=instrumentation,
         )
         outcomes.append(outcome)
         if outcome.accepted and outcome.ci.mean > current_ci.mean:
@@ -1353,7 +1396,8 @@ def run_vector_width_multiplier(
         outcome = _confirm_flagset(
             cfg, experiment_id=experiment_id, benchmark=benchmark, baseline=baseline,
             flags=combination.winning_flags + [candidate.flag], phase="multiplier",
-            compare_ci=combination.winning_ci, workload=workload, instrumentation=instrumentation,
+            compare_ci=combination.winning_ci, compare_flags=combination.winning_flags,
+            workload=workload, instrumentation=instrumentation,
         )
         outcomes.append(outcome)
         if outcome.accepted and outcome.ci.mean > current_ci.mean:

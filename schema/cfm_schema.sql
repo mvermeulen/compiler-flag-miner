@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS schema_meta (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
-INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '1');
+INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '1.1');
 
 -- One mining run against one benchmark, one compiler, one host.
 CREATE TABLE IF NOT EXISTS experiments (
@@ -50,7 +50,10 @@ CREATE TABLE IF NOT EXISTS trials (
                          CHECK (verdict IS NULL OR verdict IN ('accept','reject','inconclusive')),
   ci_overlap             INTEGER,             -- 0/1, from wspy-summary's CI comparison
   wallclock_s            REAL,
-  created_at             TEXT NOT NULL
+  created_at             TEXT NOT NULL,
+  code_fingerprint       TEXT                 -- sha256 of the stripped built executables
+                                              -- (schema 1.1); equal fingerprints mean
+                                              -- identical code, see run_one_trial()
 );
 CREATE INDEX IF NOT EXISTS idx_trials_experiment ON trials(experiment_id);
 CREATE INDEX IF NOT EXISTS idx_trials_verdict ON trials(verdict);

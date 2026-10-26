@@ -10,6 +10,7 @@ import hashlib
 import re
 import statistics
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -298,6 +299,51 @@ class SpecCpu2026Workload(WorkloadBackend):
             if proc.returncode == 0:
                 dumps.append(f"# {exe_path.name}\n{proc.stdout}")
         return "\n".join(dumps) if dumps else None
+
+    def code_fingerprint(self, bench: str, tune: str) -> Optional[str]:
+        """sha256 over this benchmark's built ``exe/*_<tune>.*`` executables with
+        everything that varies without changing the code removed: symbols and
+        debug info (``-g``'s DW_AT_producer records the flags),
+        ``.GCC.command.line`` (``-frecord-gcc-switches``) and the build ID. Two
+        builds with equal fingerprints run identical code, so a flag that leaves
+        it unchanged can't change the measured ratio. Reads ``exe/`` rather than
+        the build directory because ``exe/`` holds the binary SPEC actually runs,
+        including after an "Up to date" build that reuses an older build
+        directory. Every matching executable is hashed (e.g. ``vpr`` and its
+        ``vpr_out_compare`` companion), so a change in any of them counts as a
+        change. ``None`` when there's nothing to hash or ``objcopy`` fails, which
+        callers treat as "unknown, never skip".
+        """
+        exe_dir = self.spec_dir / "benchspec" / "CPU" / bench / "exe"
+        exes = []
+        for path in sorted(exe_dir.glob(f"*_{tune}.*")):
+            try:
+                with path.open("rb") as fh:
+                    if path.is_file() and fh.read(4) == b"\x7fELF":
+                        exes.append(path)
+            except OSError:
+                continue
+        if not exes:
+            return None
+        digest = hashlib.sha256()
+        with tempfile.TemporaryDirectory(prefix="cfm-fingerprint-") as tmp:
+            for exe in exes:
+                stripped = Path(tmp) / exe.name
+                try:
+                    proc = subprocess.run(
+                        ["objcopy", "--strip-all", "--remove-section=.GCC.command.line",
+                         "--remove-section=.note.gnu.build-id", str(exe), str(stripped)],
+                        capture_output=True, text=True,
+                    )
+                except OSError:
+                    return None
+                if proc.returncode != 0:
+                    return None
+                digest.update(exe.name.encode() + b"\0")
+                with stripped.open("rb") as fh:
+                    for chunk in iter(lambda: fh.read(1 << 20), b""):
+                        digest.update(chunk)
+        return digest.hexdigest()
 
     def build(self, bench: str, tune: str, config_path: Path) -> BuildResult:
         cmd = self._shrc_command(
