@@ -399,3 +399,20 @@ def test_run_one_trial_records_no_placement_without_the_method(tmp_path):
         power_reader=lambda: None,
     )
     assert _placement_rows(cfg, result["trial_id"]) == []
+
+
+def test_power_sampler_takes_the_median_of_readings_during_the_run():
+    from cfm.agents.spec_agent import _PowerSampler
+    import time
+    readings = iter([20.0, 30.0, 31.0, 29.0, 5.0] + [None] * 1000)
+    sampler = _PowerSampler(lambda: next(readings), interval=0.01).start()
+    time.sleep(0.2)
+    median, n = sampler.stop()
+    assert n == 5
+    assert median == pytest.approx(29.0)
+
+
+def test_power_sampler_reports_nothing_for_a_run_shorter_than_one_interval():
+    from cfm.agents.spec_agent import _PowerSampler
+    median, n = _PowerSampler(lambda: 30.0, interval=60.0).start().stop()
+    assert (median, n) == (None, 0)

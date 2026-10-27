@@ -10,13 +10,14 @@ import hashlib
 import re
 import statistics
 import subprocess
-import tempfile
 from pathlib import Path
 from typing import Callable, Optional
 
+from ..compilers.gcc import benchmark_languages
 from ..hostinfo import fastest_cpus
 from ..util import parse_kv_lines
 from .base import BuildResult, RunResult, WorkloadBackend
+from .elf import code_digest, command_line_dump, is_elf
 
 # .rsf field name for the per-*iteration* SPECrate score, confirmed against a real
 # --action=validate --iterations 3 run of 706.stockfish_r on this host (CLAUDE.md's
@@ -290,29 +291,7 @@ class SpecCpu2026Workload(WorkloadBackend):
         )
         if not candidates:
             return None
-        exe_paths = []
-        for entry in sorted(candidates[0].iterdir()):
-            if not entry.is_file():
-                continue
-            try:
-                if entry.read_bytes()[:4] == b"\x7fELF":
-                    exe_paths.append(entry)
-            except OSError:
-                continue
-        if not exe_paths:
-            return None
-        dumps = []
-        for exe_path in exe_paths:
-            try:
-                proc = subprocess.run(
-                    ["readelf", "-p", ".GCC.command.line", str(exe_path)],
-                    capture_output=True, text=True,
-                )
-            except OSError:
-                continue
-            if proc.returncode == 0:
-                dumps.append(f"# {exe_path.name}\n{proc.stdout}")
-        return "\n".join(dumps) if dumps else None
+        return command_line_dump(p for p in sorted(candidates[0].iterdir()) if is_elf(p))
 
     def code_fingerprint(self, bench: str, tune: str) -> Optional[str]:
         """sha256 over this benchmark's built ``exe/*_<tune>.*`` executables with
@@ -329,35 +308,10 @@ class SpecCpu2026Workload(WorkloadBackend):
         callers treat as "unknown, never skip".
         """
         exe_dir = self.spec_dir / "benchspec" / "CPU" / bench / "exe"
-        exes = []
-        for path in sorted(exe_dir.glob(f"*_{tune}.*")):
-            try:
-                with path.open("rb") as fh:
-                    if path.is_file() and fh.read(4) == b"\x7fELF":
-                        exes.append(path)
-            except OSError:
-                continue
-        if not exes:
-            return None
-        digest = hashlib.sha256()
-        with tempfile.TemporaryDirectory(prefix="cfm-fingerprint-") as tmp:
-            for exe in exes:
-                stripped = Path(tmp) / exe.name
-                try:
-                    proc = subprocess.run(
-                        ["objcopy", "--strip-all", "--remove-section=.GCC.command.line",
-                         "--remove-section=.note.gnu.build-id", str(exe), str(stripped)],
-                        capture_output=True, text=True,
-                    )
-                except OSError:
-                    return None
-                if proc.returncode != 0:
-                    return None
-                digest.update(exe.name.encode() + b"\0")
-                with stripped.open("rb") as fh:
-                    for chunk in iter(lambda: fh.read(1 << 20), b""):
-                        digest.update(chunk)
-        return digest.hexdigest()
+        return code_digest([p for p in sorted(exe_dir.glob(f"*_{tune}.*")) if is_elf(p)])
+
+    def benchmark_languages(self, bench: str) -> list[str]:
+        return benchmark_languages(self.spec_dir, bench)
 
     def build(self, bench: str, tune: str, config_path: Path) -> BuildResult:
         cmd = self._shrc_command(

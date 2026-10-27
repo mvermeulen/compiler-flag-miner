@@ -138,8 +138,8 @@ of an existing one — see below) for a candidate flag set, running `--action=bu
   from earlier drafts: `run_command` returns the argv for the measured run rather than executing it
   (originally sketched as `run(...) -> RunResult` directly) — this class never launches the measured
   run itself, since wrapping it in `wspy-run` is the whole reason it happens under the Instrumentation
-  agent's control (§4.2) instead. This is the seam a future `workloads/spec_cpu2017.py` or
-  `workloads/phoronix.py` implements identically.
+  agent's control (§4.2) instead. This is the seam `workloads/phoronix.py` (2026-10-26) and a
+  future `workloads/spec_cpu2017.py` implement identically.
 
 ### 4.2 Instrumentation agent (wspy)
 
@@ -655,7 +655,7 @@ prior knowledge-base entries were reused vs. newly discovered here.
 | Axis | Interface | v1 implementation | Future implementations |
 |---|---|---|---|
 | Compiler | `compilers/base.py` | `compilers/gcc.py` (GCC + GFortran, shared flag catalog with a per-language applicability tag) | `compilers/llvm.py`, `compilers/aocc.py` |
-| Workload/suite | `workloads/base.py` | `workloads/spec_cpu2026.py` | `workloads/spec_cpu2017.py` (fork of the already-working `workload/cpu2017/run_test.sh` pattern), `workloads/phoronix.py` (wspy already materializes Phoronix test points — see `wspy-phoronix-import`) |
+| Workload/suite | `workloads/base.py` | `workloads/spec_cpu2026.py`; `workloads/phoronix.py` (2026-10-26: `pts/<test>-<version>` benchmarks, replaying the PTS profile's own `install.sh` with the trial's `CFLAGS` and running its test script directly under wspy; coremark only so far, since each test needs its own output validator) | `workloads/spec_cpu2017.py` (fork of the already-working `workload/cpu2017/run_test.sh` pattern), more Phoronix tests (a `_VALIDATORS` entry each, plus test-option and lower-is-better support) |
 | Instrumentation | `instrumentation/base.py` | `instrumentation/wspy.py` | a `perf stat`-only fallback for hosts without a wspy build, same `RunSignature` output shape |
 | LLM | `llm/driver.py` | one OpenAI-chat-compatible client, pointed at Ollama or `llama-server` | vLLM, LM Studio, or a hosted API — `base_url`/`model` change only |
 
@@ -682,6 +682,9 @@ compiler-flag-miner/
     config.py                     [M0] CfmConfig, env-var-driven
     db.py                         [M0] cfm.db schema application + typed accessors
     workloads/{base,spec_cpu2026}.py     [M0] SPEC Runner agent (§4.1)
+    workloads/{phoronix,elf}.py    Phoronix Test Suite backend (pts/ names, picked by
+                                   workloads/__init__.py's workload_for()); elf.py holds
+                                   the ELF audit/fingerprint helpers both backends share
     instrumentation/{base,wspy}.py       [M0] Instrumentation agent (§4.2)
     agents/spec_agent.py          [M0] run_one_trial(): the M0 pipeline glue --
                                    workload/instrumentation backends and the wspy
