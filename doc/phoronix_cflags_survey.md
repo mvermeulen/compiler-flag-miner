@@ -79,7 +79,7 @@ answer. Each of these still needs confirming against the real output.
 | `crafty` | C | HIB | **none in practice**: install.sh reads `CFLAGS_OVERRIDE`, but `make unix-gcc` then sets `CFLAGS` on make's command line, overriding it | serial node count 191,258,593, confirmed | **done** (2026-10-27) via a build override |
 | `ebizzy` | C | HIB | `CFLAGS_OVERRIDE` | none known | `CFLAGS_OVERRIDE`, validator |
 | `n-queens` | C, OpenMP | LIB | `CFLAGS_OVERRIDE` | solution count (to confirm) | `CFLAGS_OVERRIDE`, LIB |
-| `himeno` | C | HIB | `cc ... -O3 $CFLAGS` | none known | validator |
+| `himeno` | C | HIB | `cc ... -O3 $CFLAGS -mavx2` | rehearsal residual 3.288628e-03, confirmed | **done** (2026-10-27); PTS's own build fails under GCC 14+, so a build override |
 | `clomp` | C, OpenMP | HIB | `cc -fopenmp -O3 $CFLAGS` | none known | validator |
 | `aircrack-ng` | C | HIB | `CFLAGS="-O3 -fcommon $CFLAGS"` (its `CXXFLAGS` line has a `$CXFLAGS` typo, so C++ flags are dropped) | none known | validator |
 | `aobench` | C | LIB, no parser | `cc ao.c -O3 $CFLAGS` | output image hash (to confirm it's deterministic) | LIB, wall-clock timing |
