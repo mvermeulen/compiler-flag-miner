@@ -13,7 +13,7 @@ priors don't carry over here: this host's `cfm.db` is its own, started empty on 
 | Memory | 30 GB |
 | Chassis | laptop: HP OmniBook 5 16-ag1xxx (DMI chassis type 10); mined on AC power |
 | OS / compiler | Ubuntu 26.04.1 LTS, Linux 7.0.0-38-generic, GCC 15.2.0 (Ubuntu 15.2.0-16ubuntu1) |
-| Phoronix Test Suite | 10.8.6, user directory `~/.phoronix-test-suite`; installed tests: `pts/coremark-1.0.1` only |
+| Phoronix Test Suite | 10.8.6, user directory `~/.phoronix-test-suite`; installed tests: `pts/coremark-1.0.1`, `pts/tscp-1.2.2` |
 | SPEC | CPU2026 1.0.1 at `/home/mev/cpu2026`, `gcc_O3.cfg` (label `gcc_O3`, `copies = 16`, `threads = 16`); not mined here yet |
 | Power | **profile `performance` since 2026-10-26** (`powerprofilesctl set performance`; ACPI platform profile, EPP and governor all follow to `performance`). amd-pstate `active`. The first coremark mine ran under `balanced` (governor `powersave`, EPP `balance_performance`); the re-mine under `performance` |
 | Microarch detection | `-march=znver5` / `-mtune=znver5` (hybrid Zen5/Zen5c, PR #46's fix) |
@@ -40,12 +40,15 @@ sources the backend builds from. Only tests with an output validator in `cfm/wor
 |---|---|---|---|---|---|
 | 2026-10-26 | `pts/coremark-1.0.1` | compute-bound 42.3% (local) | `-O3 -fprofile-use` | **+6.65%** | [link](mining_results.pts_coremark-1.0.1.2026-10-26.md) (`balanced`; superseded) |
 | 2026-10-27 | `pts/coremark-1.0.1` | compute-bound 42.6% (local) | `-O3 -funroll-loops -fprofile-use` | **+8.86%** | [link](mining_results.pts_coremark-1.0.1.2026-10-26b.md) (`performance`) |
+| 2026-10-27 | `pts/tscp-1.2.2` | frontend-bound 54.7% (local) | `-O3 -flto -funroll-loops` | **+6.07%** | [link](mining_results.pts_tscp-1.2.2.2026-10-27.md) |
 
-Base and best are coremark Iterations/Sec (16 forked processes), not SPEC ratios:
+Base and best are each test's own score (coremark Iterations/Sec over 16 processes, TSCP nodes/sec on one
+pinned core), not SPEC ratios:
 
 | Benchmark | Base (`-O3`) | Best | Winning flags | Gain |
 |---|---|---|---|---|
 | `pts/coremark-1.0.1` | 382,163 | 416,025 | `-O3 -funroll-loops -fprofile-use` | **+8.86%** |
+| `pts/tscp-1.2.2` | 2,576,439 | 2,732,788 | `-O3 -flto -funroll-loops` | **+6.07%** |
 
 The first mine (`balanced`, 361,329 → 385,356 with `-O3 -fprofile-use`) is kept for history. Its power sag
 made every verdict except PGO's unreliable.
@@ -71,6 +74,10 @@ made every verdict except PGO's unreliable.
   rerun, but it widens a 3-rep CI to about ±1.7%.
 - **Coremark sized its own runs** (9.6M or 17.6M iterations, 27 or 47 seconds) until the backend pinned
   `COREMARK_ITERATIONS` (600,000 per process, 9.6M total) on 2026-10-26.
+- **A single-threaded PTS test runs pinned to CPU 2** (a Zen5 core; its SMT sibling is CPU 10). Pinned and
+  repeated 40 times per measurement, TSCP's 3-rep CIs were ±0.1-0.25%. One rep in the tscp mine still ran 5.5%
+  slow for its whole duration with no visible cause, and the PGO reps, which keep the core busy several
+  minutes with no idle, reached 92-95°C against the usual 75-79°C.
 - **Coremark builds its flags into the binary** (`FLAGS_STR`), so `cfm`'s no-code-change guard never skips a
   coremark trial (CLAUDE.md's 2026-10-26 trap entry).
 
@@ -82,6 +89,8 @@ made every verdict except PGO's unreliable.
 | 2 | ~~H~~ | ~~**Does the `performance` profile remove the power sag?**~~ | `powerprofilesctl set performance`, then 25 back-to-back coremark runs with power sampled. | **Done 2026-10-26:** power steady at ~29.5 W for 10 minutes, steady-state runs ±0.36%; the host now stays in `performance`. A 2-minute thermal transient remains (item 3). |
 | 3 | ~~H~~ | ~~**Warm up long enough, and catch a power drop.**~~ The fixed two warm-up reps were sized for SPEC's multi-minute trials; a 25-second coremark rep needs ~2 minutes of load before it settles here. And the baseline recheck caught `balanced`'s sag but by design changes no verdict. | Pipeline changes: warm up by time or until two consecutive reps agree within ~1%, not a fixed count; flag (and rerun) a trial whose package power reads well below the baseline reps' mean, the way slow reps are rerun now; or re-run Phase 4 against a fresh baseline when the recheck flags. | **Done 2026-10-26** (commit `1853b3d`): settle-based warm-up (two reps within 1% and at least `--warmup-min-seconds`, default 180, at most 8 reps), package power sampled every 2 s during each run, and a rep more than 8% below the baseline's power rerun after 30 s idle (`--no-power-check`). In the re-mine neither guard had to act. |
 | 4 | ~~M~~ | ~~**Fixed-work coremark runs.**~~ | Pass an explicit iteration count to `coremark.exe`. | **Done 2026-10-26:** `_RUN_OVERRIDES` runs `coremark.exe 0x0 0x0 0x66 600000` (same seeds as the no-argument run, so the CRC check still applies). Verified in the power check: 9.6M iterations every run. |
-| 5 | M | **More Phoronix tests.** Only coremark is installed and validated. | Install CFLAGS-honoring PTS tests and add a `_VALIDATORS` entry for each; candidates are surveyed in [`phoronix_cflags_survey.md`](phoronix_cflags_survey.md). | Broader coverage outside SPEC. |
+| 5 | M | **More Phoronix tests.** coremark and tscp are installed and validated; `CFLAGS_OVERRIDE` support is in (2026-10-27). `crafty` is next. | Install CFLAGS-honoring PTS tests and add a `_VALIDATORS` entry for each; candidates are surveyed in [`phoronix_cflags_survey.md`](phoronix_cflags_survey.md). | Broader coverage outside SPEC. |
 | 6 | L | **SPEC CPU2026 on `erie`.** SPEC is installed but unmined here. | Mine a few `intrate` benchmarks already done on `niwot`. | A same-CPU, different-chassis comparison: laptop power limits vs. the mini PC. |
 | 7 | L | **Five calibration reps for short benchmarks.** The occasional 1%-low rep widens a 3-rep baseline CI to ±1.7%. | More reps when a rep is under a minute, or a tighter rerun threshold. | Tighter accept/reject on ~1-2% effects. |
+| 8 | **H** | **Catch a moderate slow rep in a tight set.** tscp's trial 215 was 5.5% low against siblings agreeing to 0.1%, under the 10% rerun threshold; it made the greedy walk reject `-funroll-loops`, and only the pair tournament recovered the +6% winner. | A rerun rule relative to the flagset's own spread, not a fixed 10%. | Short, precise PTS tests stop depending on the random pair draw. |
+| 9 | M | **Trustworthy PGO on single-threaded tests.** tscp's PGO reps ran 13-16°C hotter than any other trial. | Idle after the training run, or a temperature check per rep. | A clean PGO verdict for tscp (probably still a reject, about -1.4%). |
