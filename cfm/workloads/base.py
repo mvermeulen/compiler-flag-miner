@@ -1,9 +1,9 @@
 """Workload-backend interface -- doc/DESIGN.md sec. 4.1 / sec. 12.
 
-One implementation per benchmark suite. ``spec_cpu2026.py`` is the only one that
-exists; ``spec_cpu2017.py`` (forking wspy's own already-working
-``workload/cpu2017/run_test.sh`` pattern) and ``phoronix.py`` are the modularity
-seam this interface defines, not yet implemented.
+One implementation per benchmark suite: ``spec_cpu2026.py`` and ``phoronix.py``
+(``workload_for()`` in ``__init__.py`` picks by benchmark name).
+``spec_cpu2017.py`` (forking wspy's own already-working
+``workload/cpu2017/run_test.sh`` pattern) is not yet implemented.
 """
 
 from __future__ import annotations
@@ -23,8 +23,8 @@ class BuildResult:
 @dataclass
 class RunResult:
     """Result of parsing one measured run's output. ``ok``/``validated`` both refer
-    to SPEC's own ``--action=validate`` correctness check (doc/DESIGN.md sec. 11's
-    gate) -- distinct from wspy-validate's counter-collection sanity check, which
+    to the workload's own correctness check (doc/DESIGN.md sec. 11's gate: SPEC's
+    ``--action=validate``, or the Phoronix backend's per-test output validator) -- distinct from wspy-validate's counter-collection sanity check, which
     lives on ``RunSignature`` (``cfm/instrumentation/base.py``) instead.
     """
 

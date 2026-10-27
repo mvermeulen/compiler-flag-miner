@@ -621,6 +621,46 @@ def test_mine_prints_known_priors_including_a_rejected_one(tmp_path, monkeypatch
     assert summary["candidates_fast_tracked_from_prior_knowledge"] == []
 
 
+
+def test_mine_says_a_pgo_prior_goes_to_phase_6_not_fast_tracked(tmp_path, monkeypatch, capsys):
+    # -fprofile-use is never a Phase 2-5 candidate, so an accepted prior for it
+    # must not read "fast-tracked" (it did on erie's 2026-10-27 coremark re-mine).
+    baseline = _fake_baseline()
+    db_path = tmp_path / "cfm.db"
+    conn = cli.db.connect(str(db_path))
+    cli.db.upsert_knowledge(
+        conn, cluster_key="memory-bound", compiler="gcc", compiler_version=None,
+        target_arch=None, flag="-fprofile-use", accepted=True, delta_pct=6.65,
+        last_benchmark="pts/coremark-1.0.1",
+    )
+    conn.close()
+
+    candidates = [FlagCandidate(flag="-funroll-loops", category="loop", risk="safe")]
+    combination = CombinationResult(winning_flags=["-O3"], winning_ci=baseline.ci)
+
+    monkeypatch.setattr(cli.orchestrator, "run_baseline", lambda *a, **k: baseline)
+    monkeypatch.setattr(cli.orchestrator, "generate_candidates", lambda *a, **k: candidates)
+    monkeypatch.setattr(cli.orchestrator, "screen_candidates", lambda *a, **k: [])
+    monkeypatch.setattr(cli.orchestrator, "confirm_candidates", lambda *a, **k: [])
+    monkeypatch.setattr(cli.orchestrator, "confirm_known_candidates", lambda *a, **k: [])
+    monkeypatch.setattr(cli.orchestrator, "greedy_combine", lambda *a, **k: combination)
+    monkeypatch.setattr(
+        cli.orchestrator, "run_pgo_multiplier",
+        lambda *a, combination, **k: _fake_pgo_not_attempted(combination),
+    )
+    monkeypatch.setattr(
+        cli.orchestrator, "run_microarch_multiplier",
+        lambda *a, combination, **k: _fake_microarch_not_attempted(combination),
+    )
+
+    cli.main(["mine", "706.stockfish_r", "--db", str(db_path), "--lock-file", str(tmp_path / "test.lock")])
+
+    out = capsys.readouterr().out
+    assert "known prior for '-fprofile-use'" in out
+    assert "tried in Phase 6" in out
+    assert "fast-tracked" not in out.split("{")[0]
+
+
 # -- vector-width deferral wiring -------------------------------------------------
 
 def test_mine_defers_vector_width_candidates_to_phase_6(tmp_path, monkeypatch, capsys):

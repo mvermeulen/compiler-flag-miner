@@ -1812,3 +1812,130 @@ def test_run_vector_width_multiplier_layers_on_march_and_keeps_the_best(tmp_path
     assert result.winning_flags == ["-O3", "-march=native", "-mprefer-vector-width=512"]
     assert len(result.outcomes) == 2
 
+
+
+# -- settle-based warm-up and low-power reruns (2026-10-26) ---------------------
+
+def _power_sequence(monkeypatch, values):
+    """Each run_one_trial() call takes the next reading: fake runs finish before the
+    sampler's first tick, so run_one_trial() falls back to one reading after the run."""
+    import cfm.agents.spec_agent as spec_agent
+    queue = deque(values)
+    monkeypatch.setattr(spec_agent, "read_package_power_watts", lambda: queue.popleft() if queue else None)
+
+
+def test_run_baseline_warms_up_until_two_reps_agree(tmp_path):
+    cfg = _cfg(tmp_path)
+    # Warm-ups 120 -> 110 (8% apart) -> 101 (8%) -> 100 (1%, settled), then calibration.
+    backends = ScriptedBackends(
+        ratio_sequences={("-O3",): [999.0, 120.0, 110.0, 101.0, 100.0, 100.0, 101.0, 99.0]},
+    )
+    result = run_baseline(
+        cfg, benchmark="fake_r", base_flags=["-O3"],
+        workload=backends, instrumentation=backends, reference_matrix_fetch=_no_reference_matrix,
+    )
+    assert result.ratios == [100.0, 101.0, 99.0]
+    assert len(result.trial_ids) == 8  # 1 characterization + 4 warm-up + 3 calibration
+
+
+def test_run_baseline_warms_up_for_at_least_the_minimum_time(tmp_path, monkeypatch):
+    import cfm.orchestrator as orchestrator
+    cfg = CfmConfig.from_env(
+        spec_dir=str(tmp_path / "spec"), wspy_dir=str(tmp_path / "wspy-unused"),
+        output_root=str(tmp_path / "results"), db_path=str(tmp_path / "cfm.db"),
+        warmup_min_seconds=100.0,
+    )
+    clock = iter(range(0, 10_000, 30))  # every clock read is 30 s after the last
+    monkeypatch.setattr(orchestrator, "_clock", lambda: next(clock))
+    # Every warm-up agrees, so only the minimum time keeps it going. The start
+    # reads 0 s; after warm-ups 2, 3 and 4 the clock reads 30, 60, 90 s (short),
+    # and after the 5th it reads 120 s, which ends it.
+    backends = ScriptedBackends(
+        ratio_sequences={("-O3",): [999.0] + [100.0] * 5 + [100.0, 101.0, 99.0]},
+    )
+    result = run_baseline(
+        cfg, benchmark="fake_r", base_flags=["-O3"],
+        workload=backends, instrumentation=backends, reference_matrix_fetch=_no_reference_matrix,
+    )
+    assert result.ratios == [100.0, 101.0, 99.0]
+    assert len(result.trial_ids) == 9  # 1 characterization + 5 warm-up + 3 calibration
+
+
+def test_run_baseline_stops_warming_up_at_the_cap(tmp_path):
+    from cfm.orchestrator import BASELINE_WARMUP_MAX_REPETITIONS
+    cfg = _cfg(tmp_path)
+    never_settles = [100.0 + 10.0 * (i % 2) for i in range(BASELINE_WARMUP_MAX_REPETITIONS)]
+    backends = ScriptedBackends(
+        ratio_sequences={("-O3",): [999.0] + never_settles + [100.0, 101.0, 99.0]},
+    )
+    result = run_baseline(
+        cfg, benchmark="fake_r", base_flags=["-O3"],
+        workload=backends, instrumentation=backends, reference_matrix_fetch=_no_reference_matrix,
+    )
+    assert result.ratios == [100.0, 101.0, 99.0]
+    assert len(result.trial_ids) == 1 + BASELINE_WARMUP_MAX_REPETITIONS + 3
+    conn = db.connect(cfg.db_path)
+    try:
+        notes = [r["rationale"] for r in conn.execute(
+            "SELECT rationale FROM hypotheses WHERE rationale LIKE 'baseline warm-up NOT settled%'")]
+    finally:
+        conn.close()
+    assert len(notes) == 1
+
+
+def test_confirm_reruns_a_low_power_rep_when_the_power_check_is_on(tmp_path, monkeypatch):
+    import cfm.orchestrator as orchestrator
+    cfg = CfmConfig.from_env(
+        spec_dir=str(tmp_path / "spec"), wspy_dir=str(tmp_path / "wspy-unused"),
+        output_root=str(tmp_path / "results"), db_path=str(tmp_path / "cfm.db"),
+        power_check=True,
+    )
+    conn = db.connect(cfg.db_path)
+    exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
+    conn.close()
+    baseline = _baseline(mean_ratio=100.0)
+    baseline.power_w = 30.0
+    slept = []
+    monkeypatch.setattr(orchestrator, "_sleep", slept.append)
+    # The second rep ran at 24 W (20% low) and read a little slow, but not 10% slow.
+    _power_sequence(monkeypatch, [30.0, 24.0, 30.0, 29.5])
+    backends = ScriptedBackends(ratio_sequences={("-O3", "-x"): [100.0, 95.0, 100.5, 100.2]})
+
+    [outcome] = confirm_candidates(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline,
+        screened=[_screened("-x")], workload=backends, instrumentation=backends,
+    )
+
+    assert outcome.ratios == [100.0, 100.2, 100.5]
+    assert len(outcome.trial_ids) == 4
+    assert slept == [orchestrator.LOW_POWER_RERUN_IDLE_S]
+
+
+def test_confirm_ignores_low_power_when_the_power_check_is_off(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    conn = db.connect(cfg.db_path)
+    exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
+    conn.close()
+    baseline = _baseline(mean_ratio=100.0)
+    baseline.power_w = 30.0
+    _power_sequence(monkeypatch, [30.0, 24.0, 30.0])
+    backends = ScriptedBackends(ratio_sequences={("-O3", "-x"): [100.0, 95.0, 100.5]})
+
+    [outcome] = confirm_candidates(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline,
+        screened=[_screened("-x")], workload=backends, instrumentation=backends,
+    )
+
+    assert outcome.ratios == [100.0, 95.0, 100.5]
+    assert len(outcome.trial_ids) == 3
+
+
+def test_run_baseline_records_the_calibration_reps_median_power(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    _power_sequence(monkeypatch, [20.0, 25.0, 26.0, 29.0, 30.0, 31.0])
+    backends = ScriptedBackends(ratio_sequences={("-O3",): [999.0, 777.0, 777.0, 100.0, 101.0, 99.0]})
+    result = run_baseline(
+        cfg, benchmark="fake_r", base_flags=["-O3"],
+        workload=backends, instrumentation=backends, reference_matrix_fetch=_no_reference_matrix,
+    )
+    assert result.power_w == pytest.approx(30.0)

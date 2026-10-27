@@ -16,9 +16,11 @@ to operate against.
 from __future__ import annotations
 
 import re
+import statistics
+import threading
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Callable, Optional
 
 from .. import db
 from ..bandwidth import BandwidthGate
@@ -27,7 +29,45 @@ from ..hostinfo import read_package_power_watts
 from ..instrumentation.base import InstrumentationBackend
 from ..instrumentation.wspy import WspyInstrumentation
 from ..workloads.base import WorkloadBackend
-from ..workloads.spec_cpu2026 import SpecCpu2026Workload
+from ..workloads import workload_for
+
+
+# Package power is sampled this often while the timed run is going (2026-10-26).
+# The single post-run reading it replaced came after wspy's own post-processing,
+# when the load had already ended.
+POWER_SAMPLE_INTERVAL_S = 2.0
+
+
+class _PowerSampler:
+    """Reads ``power_reader`` every ``POWER_SAMPLE_INTERVAL_S`` on a background
+    thread between ``start()`` and ``stop()``. ``stop()`` returns the median of
+    the readings and how many there were. The median, because the window also
+    covers wspy's few seconds of post-processing after the benchmark exits."""
+
+    def __init__(self, power_reader: Callable[[], Optional[float]], interval: float = POWER_SAMPLE_INTERVAL_S):
+        self.power_reader = power_reader
+        self.interval = interval
+        self.samples: list[float] = []
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def _run(self) -> None:
+        while not self._stop.wait(self.interval):
+            try:
+                value = self.power_reader()
+            except Exception:
+                value = None
+            if value is not None:
+                self.samples.append(value)
+
+    def start(self) -> "_PowerSampler":
+        self._thread.start()
+        return self
+
+    def stop(self) -> tuple[Optional[float], int]:
+        self._stop.set()
+        self._thread.join()
+        return (statistics.median(self.samples) if self.samples else None), len(self.samples)
 
 
 def new_run_id() -> str:
@@ -201,12 +241,13 @@ def run_one_trial(
     parent_trial_id: Optional[int] = None,
     workload: Optional[WorkloadBackend] = None,
     instrumentation: Optional[InstrumentationBackend] = None,
-    power_reader=read_package_power_watts,
+    power_reader: Optional[Callable[[], Optional[float]]] = None,
     bandwidth_gate: Optional[BandwidthGate] = None,
     skip_if_same_code_as: Optional[list[str]] = None,
 ) -> dict:
     """``workload``/``instrumentation`` are injectable (defaulting to the real
-    ``SpecCpu2026Workload``/``WspyInstrumentation`` backends built from ``cfg``) so
+    backend ``workload_for()`` picks for ``benchmark`` -- SPEC CPU2026, or Phoronix
+    for a ``pts/`` name -- and ``WspyInstrumentation``, both built from ``cfg``) so
     ``cfm/orchestrator.py``'s tests can pass in fakes conforming to
     ``workloads.base.WorkloadBackend``/``instrumentation.base.InstrumentationBackend``
     and exercise the orchestrator's phase logic with no real SPEC/wspy calls --
@@ -238,7 +279,9 @@ def run_one_trial(
     run is skipped; the result dict carries ``unchanged_from_trial_id``. It never
     skips when either fingerprint is unknown.
     """
-    workload = workload or SpecCpu2026Workload(cfg.spec_dir, cfg.spec_config)
+    workload = workload or workload_for(cfg, benchmark)
+    # Looked up per call (not bound as the default) so tests can monkeypatch it.
+    power_reader = power_reader or read_package_power_watts
     run_index_path = cfg.output_root / "cpu2026" / "run-index.jsonl"
     instrumentation = instrumentation or WspyInstrumentation(
         cfg.wspy_dir,
@@ -304,10 +347,17 @@ def run_one_trial(
 
             run_id = new_run_id()
             command = workload.run_command(benchmark, tune, config_path, iterations=iterations)
-            signature = instrumentation.characterize(
-                command=command, suite="cpu2026", benchmark=benchmark, run_id=run_id,
-                profile=profile, output_root=cfg.output_root,
-            )
+            sampler = _PowerSampler(power_reader).start()
+            try:
+                signature = instrumentation.characterize(
+                    # A pts/ name's slash would nest wspy's run directory, so wspy
+                    # gets the bare test name under the backend's own suite.
+                    command=command, suite=getattr(workload, "suite", "cpu2026"),
+                    benchmark=benchmark.rsplit("/", 1)[-1], run_id=run_id,
+                    profile=profile, output_root=cfg.output_root,
+                )
+            finally:
+                power_median_w, power_samples = sampler.stop()
             run_result = workload.parse_result(benchmark, tune, signature.raw_output)
 
             build_status = "ok" if run_result.ok else "validate-failed"
@@ -351,11 +401,17 @@ def run_one_trial(
                     conn, trial_id=trial_id, proposed_by="rule", rationale=placement_note,
                 )
 
-            package_power_w = power_reader()
+            # Median of the readings taken during the run; a run shorter than one
+            # sampling interval falls back to a single reading after it.
+            package_power_w = power_median_w
+            power_note = f" (median of {power_samples} samples during the run)"
+            if package_power_w is None:
+                package_power_w = power_reader()
+                power_note = " (one reading after the run)"
             if package_power_w is not None:
                 db.record_hypothesis(
                     conn, trial_id=trial_id, proposed_by="rule",
-                    rationale=f"host package_power at measurement: {package_power_w:.2f} W",
+                    rationale=f"host package_power at measurement: {package_power_w:.2f} W{power_note}",
                 )
 
             return {

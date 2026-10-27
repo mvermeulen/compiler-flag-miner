@@ -30,9 +30,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     measure = sub.add_parser(
         "measure",
-        help="build+run+measure one SPEC CPU2026 benchmark with one fixed flag set",
+        help="build+run+measure one benchmark (SPEC CPU2026, or a pts/ Phoronix test) "
+             "with one fixed flag set",
     )
-    measure.add_argument("benchmark", help="e.g. 706.stockfish_r")
+    measure.add_argument("benchmark", help="e.g. 706.stockfish_r, or pts/coremark-1.0.1")
     measure.add_argument(
         "--flags", required=True,
         help="space-separated OPTIMIZE flags, e.g. '-O3 -march=native -flto'",
@@ -45,6 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     measure.add_argument("--spec-dir", default=None)
     measure.add_argument("--spec-config", default=None)
     measure.add_argument("--wspy-dir", default=None)
+    measure.add_argument("--pts-home", default=None, help="Phoronix Test Suite user directory")
     measure.add_argument("--output-root", default=None)
     measure.add_argument("--db", dest="db_path", default=None)
     measure.add_argument("--wspy-profile", default=None)
@@ -60,7 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="rule-based flag search (doc/DESIGN.md sec. 6 Phases 1-6): baseline, "
              "screen, confirm, greedy-combine, PGO + microarch multipliers",
     )
-    mine.add_argument("benchmark", help="e.g. 706.stockfish_r")
+    mine.add_argument("benchmark", help="e.g. 706.stockfish_r, or pts/coremark-1.0.1")
     mine.add_argument(
         "--base-flags", default="-O3",
         help="starting/baseline OPTIMIZE flags (default: '-O3')",
@@ -94,6 +96,7 @@ def build_parser() -> argparse.ArgumentParser:
     mine.add_argument("--spec-dir", default=None)
     mine.add_argument("--spec-config", default=None)
     mine.add_argument("--wspy-dir", default=None)
+    mine.add_argument("--pts-home", default=None, help="Phoronix Test Suite user directory")
     mine.add_argument("--output-root", default=None)
     mine.add_argument("--db", dest="db_path", default=None)
     mine.add_argument("--lock-file", default=None)
@@ -101,6 +104,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-bandwidth-gate", action="store_true",
         help="don't probe memory bandwidth and wait out a throttled state before each "
              "trial (cfm/bandwidth.py)",
+    )
+    mine.add_argument(
+        "--warmup-min-seconds", type=float, default=180.0,
+        help="keep the baseline warm-up going until at least this many seconds have passed, "
+             "as well as until two warm-up reps agree within 1%% (default 180; 0 for count-only)",
+    )
+    mine.add_argument(
+        "--no-power-check", action="store_true",
+        help="don't re-run confirmation/calibration reps whose package power during the run "
+             "reads well below the baseline's",
     )
 
     init_db = sub.add_parser("init-db", help="create/upgrade cfm.db at the configured path")
@@ -121,6 +134,7 @@ def main(argv=None) -> int:
     if args.command == "measure":
         cfg = CfmConfig.from_env(
             spec_dir=args.spec_dir, spec_config=args.spec_config, wspy_dir=args.wspy_dir,
+            pts_home=args.pts_home,
             output_root=args.output_root, db_path=args.db_path, wspy_profile=args.wspy_profile,
             lock_file=args.lock_file, bandwidth_gate=not args.no_bandwidth_gate,
         )
@@ -153,8 +167,10 @@ def main(argv=None) -> int:
     if args.command == "mine":
         cfg = CfmConfig.from_env(
             spec_dir=args.spec_dir, spec_config=args.spec_config, wspy_dir=args.wspy_dir,
+            pts_home=args.pts_home,
             output_root=args.output_root, db_path=args.db_path, lock_file=args.lock_file,
             bandwidth_gate=not args.no_bandwidth_gate,
+            warmup_min_seconds=args.warmup_min_seconds, power_check=not args.no_power_check,
         )
         compiler = GccCompiler(catalog_path=args.catalog) if args.catalog else GccCompiler()
         base_flags = args.base_flags.split()
@@ -188,12 +204,23 @@ def main(argv=None) -> int:
                     known_flags = {
                         k.flag: k for k in known_flags_for_cluster(cfg, cluster_key=cluster_key)
                     }
+                    candidate_flags = {c.flag for c in candidates}
                     for k in known_flags.values():
+                        # A prior can name a flag that isn't a Phase 2-5 candidate
+                        # here: -fprofile-use (always Phase 6) or a flag Phase 2
+                        # excluded. Saying "fast-tracked" for those misleads.
+                        if k.flag not in candidate_flags:
+                            action = ("tried in Phase 6" if k.flag == orchestrator.PGO_FLAG
+                                      else "not a candidate here")
+                        elif k.qualifies_for_fast_track:
+                            action = "fast-tracked"
+                        else:
+                            action = "screened normally"
                         print(
                             f"info: known prior for {k.flag!r} in cluster {cluster_key!r} -- "
                             f"accepted {k.n_accepted} of {k.n_trials} before "
                             f"(mean {k.mean_delta_pct:+.2f}%, last seen on {k.last_benchmark!r}) -- "
-                            f"{'fast-tracked' if k.qualifies_for_fast_track else 'screened normally'}"
+                            f"{action}"
                         )
                 # -mprefer-vector-width= is a no-op without an -march=, so it
                 # waits for Phase 6 (run_vector_width_multiplier()) instead.
@@ -347,6 +374,7 @@ def main(argv=None) -> int:
             "baseline_vectorization_density": baseline.vectorization_density,
             "baseline_allocation_pressure": baseline.allocation_pressure,
             "baseline_characterization_source": baseline.characterization_source,
+            "baseline_power_w": baseline.power_w,
             "baseline_recheck_ratio": baseline_recheck.ratio,
             "baseline_recheck_delta_pct": baseline_recheck.delta_pct,
             "baseline_recheck_flagged": baseline_recheck.flagged,

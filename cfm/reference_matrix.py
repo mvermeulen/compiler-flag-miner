@@ -56,6 +56,7 @@ from typing import Optional
 
 from .config import CfmConfig
 from .util import parse_kv_lines, to_float
+from .workloads.phoronix import is_phoronix_benchmark
 
 # wspy-archetype --run-guest's own key=value output is all strings (parse_kv_lines()'s
 # return type) -- these two keys are numeric percentages, coerced before the scorecard
@@ -251,6 +252,8 @@ def fetch_shape(cfg: CfmConfig, benchmark: str) -> Optional[dict]:
     for the local fallback; a future version could compare across machines the way
     render_archetype_section() does, but that's real added scope, not needed to start.
     """
+    if is_phoronix_benchmark(benchmark):
+        return None  # the corpus only covers SPEC CPU2026
     site_url = cfg.reference_matrix_url
     cpu2026 = _find_page(site_url, "cpu2026", 0)
     if cpu2026 is None:
