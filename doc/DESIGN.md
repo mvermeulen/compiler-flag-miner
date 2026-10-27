@@ -986,7 +986,9 @@ compiler-flag-miner/
        threading model from `object.pm`'s `@benchsets`: single-threaded runs get `taskset -c` onto one of
        `hostinfo.fastest_cpus()` (not CPU 0 when there's a choice); OpenMP runs get
        `OMP_PLACES=threads OMP_PROC_BIND=close`; pthread/C++-threads runs are left unpinned, since
-       nothing outside the program can place individual threads. Each trial records its placement as a
+       nothing outside the program can place individual threads. Since 2026-10-27, so are runs whose `object.pm` sets
+       `$multiprocess = 'yes'` with no thread benchset (`821.gcc_s`): specinvoke runs many
+       single-threaded commands at once, and one `taskset` CPU would be shared by all of them. Each trial records its placement as a
        hypothesis. SPECrate runs are unchanged. Confirmed with `runcpu --fake` that SPEC really wraps the
        benchmark commands.
      The reference matrix's own historical spread (`stddev`/`cv_percent` across its many prior
