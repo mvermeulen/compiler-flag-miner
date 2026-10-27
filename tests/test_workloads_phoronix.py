@@ -13,7 +13,9 @@ import pytest
 from cfm import reference_matrix
 from cfm.config import CfmConfig
 from cfm.workloads import workload_for
-from cfm.workloads.phoronix import COREMARK_ITERATIONS, PhoronixWorkload, _template_regex
+from cfm.workloads.phoronix import (
+    COREMARK_ITERATIONS, TSCP_NODES, TSCP_PV, TSCP_RUNS, PhoronixWorkload, _template_regex, _tscp_valid,
+)
 from cfm.workloads.spec_cpu2026 import SpecCpu2026Workload
 
 BENCH = "pts/coremark-9.9.9"
@@ -84,20 +86,21 @@ DOWNLOADS = """<?xml version="1.0"?>
 
 
 def make_pts_home(root: Path, bench: str = BENCH, proportion: str = "HIB", settings: str = "",
-                  installed: bool = True) -> Path:
+                  installed: bool = True, install_sh: str = INSTALL_SH, toy_c: str = TOY_C,
+                  results_definition: str = RESULTS_DEFINITION) -> Path:
     pts_home = root / "pts-home"
     profile = pts_home / "test-profiles" / bench
     profile.mkdir(parents=True)
-    (profile / "install.sh").write_text(INSTALL_SH)
+    (profile / "install.sh").write_text(install_sh)
     (profile / "test-definition.xml").write_text(
         TEST_DEFINITION.format(proportion=proportion, settings=settings)
     )
-    (profile / "results-definition.xml").write_text(RESULTS_DEFINITION)
+    (profile / "results-definition.xml").write_text(results_definition)
     (profile / "downloads.xml").write_text(DOWNLOADS)
     if installed:
         install = pts_home / "installed-tests" / bench
         install.mkdir(parents=True)
-        (install / "toy.c").write_text(TOY_C)
+        (install / "toy.c").write_text(toy_c)
     return pts_home
 
 
@@ -241,3 +244,108 @@ def test_reference_matrix_skips_phoronix_benchmarks_without_a_network_call(tmp_p
     monkeypatch.setattr(reference_matrix, "_find_page", no_network)
     cfg = CfmConfig.from_env(spec_dir=str(tmp_path))
     assert reference_matrix.fetch_shape(cfg, "pts/coremark-1.0.1") is None
+
+
+def test_template_regex_ignores_tokens_after_the_result():
+    # TSCP's template carries a sample "(Score: ...)" that differs on every run.
+    pattern = _template_regex("Nodes per second: #_RESULT_# (Score: 1.034)")
+    assert pattern.search("Nodes per second: 2514968 (Score: 10.342)").group(1) == "2514968"
+
+
+# Shaped like PTS's tscp profile: CFLAGS_OVERRIDE, else "$CFLAGS -O3 -march=native".
+TSCP_BENCH = "pts/tscp-9.9.9"
+TSCP_INSTALL_SH = """#!/bin/sh
+mkdir -p tscp181
+if [ "X$CFLAGS_OVERRIDE" = "X" ]
+then
+          CFLAGS="$CFLAGS -O3 -march=native"
+else
+          CFLAGS="$CFLAGS_OVERRIDE"
+fi
+gcc $CFLAGS -o tscp181/tscp toy.c
+echo $? > ~/install-exit-status
+cd ~
+echo "#!/bin/sh
+cd tscp181/
+./tscp \\$@ > \\$LOG_FILE 2>&1
+echo \\$? > ~/test-exit-status" > tscp
+chmod +x tscp
+"""
+
+# Prints TSCP's benchmark tail; the score climbs by 10 per run (a counter file),
+# so a log of TSCP_RUNS runs averages to a known value.
+TSCP_TOY_C = r"""
+#include <stdio.h>
+int main(void) {
+    int n = 0, i;
+    FILE *f = fopen("count", "r");
+    if (f) { if (fscanf(f, "%d", &n) != 1) n = 0; fclose(f); }
+    f = fopen("count", "w"); fprintf(f, "%d\n", n + 1); fclose(f);
+    for (i = 0; i < 3; ++i)
+        printf("  5     NODES     26  PV\nTime: 219 ms\n");
+    printf("\nNodes: NODES\nBest time: 219 ms\n");
+    printf("Nodes per second: %d (Score: 10.342)\n", 1000 + 10 * n);
+    return 0;
+}
+""".replace("NODES", str(TSCP_NODES)).replace("PV", TSCP_PV)
+
+TSCP_RESULTS_DEFINITION = RESULTS_DEFINITION.replace(
+    "Iterations/Sec   : #_RESULT_#", "Nodes per second: #_RESULT_# (Score: 1.034)",
+)
+
+
+@pytest.fixture
+def tscp_workload(tmp_path):
+    pts_home = make_pts_home(
+        tmp_path, bench=TSCP_BENCH, install_sh=TSCP_INSTALL_SH, toy_c=TSCP_TOY_C,
+        results_definition=TSCP_RESULTS_DEFINITION,
+    )
+    return PhoronixWorkload(pts_home, tmp_path / "results", cpu_count=lambda: 4, cpu_lister=lambda: [0])
+
+
+def test_cflags_override_replaces_the_profiles_own_flags(tscp_workload):
+    config = tscp_workload.generate_config(TSCP_BENCH, "peak", ["-O1"])
+    assert tscp_workload.build(TSCP_BENCH, "peak", config).ok
+    dump = tscp_workload.audit_compiled_flags(TSCP_BENCH, "peak")
+    assert "-O1" in dump
+    assert "-march=native" not in dump and "-O3" not in dump
+
+
+@pytest.mark.skipif(shutil.which("taskset") is None, reason="needs taskset")
+def test_tscp_runs_pinned_and_averages_the_runs_in_a_log(tscp_workload):
+    config = tscp_workload.generate_config(TSCP_BENCH, "peak", ["-O2"])
+    assert tscp_workload.build(TSCP_BENCH, "peak", config).ok
+    argv = tscp_workload.run_command(TSCP_BENCH, "peak", config, iterations=1)
+    assert "taskset -c 0 ./tscp" in argv[-1]  # only CPU 0 listed, so CPU 0
+    subprocess.run(argv, check=True)
+    run = tscp_workload.parse_result(TSCP_BENCH, "peak", "")
+    assert run.ok and run.validated
+    # Scores 1000, 1010, ..., 1000 + 10 * (TSCP_RUNS - 1).
+    assert run.ratio == pytest.approx(1000 + 5 * (TSCP_RUNS - 1))
+
+
+def test_pinned_cpu_avoids_cpu_0_when_there_is_a_choice(tmp_path):
+    workload = PhoronixWorkload(tmp_path, tmp_path / "results", cpu_lister=lambda: [0, 2, 4])
+    assert workload._pinned_cpu() == 2
+
+
+def test_tscp_validator():
+    run = f"  5     {TSCP_NODES}     26  {TSCP_PV}\n" * 3 + (
+        f"\nNodes: {TSCP_NODES}\nBest time: 219 ms\nNodes per second: 2514968 (Score: 10.342)\n"
+    )
+    assert _tscp_valid(run * 2)
+    assert not _tscp_valid(run.replace(f"Nodes: {TSCP_NODES}", "Nodes: 550777"))
+    assert not _tscp_valid(run.replace(TSCP_PV, "c2a4 d6c7 g2d5 e6d5 a1b1"))
+    assert not _tscp_valid(run.replace("Nodes per second: 2514968 (Score: 10.342)", "(invalid)"))
+    assert not _tscp_valid("")
+
+
+def test_downloads_for_other_platforms_are_not_required(tmp_path):
+    pts_home = make_pts_home(tmp_path)
+    (pts_home / "test-profiles" / BENCH / "downloads.xml").write_text(DOWNLOADS.replace(
+        "<Package><FileName>toy.c</FileName></Package>",
+        "<Package><FileName>toy.c</FileName><PlatformSpecific>Linux, BSD</PlatformSpecific></Package>"
+        "<Package><FileName>toy.exe.zip</FileName><PlatformSpecific>Windows</PlatformSpecific></Package>",
+    ))
+    workload = PhoronixWorkload(pts_home, tmp_path / "results")
+    assert workload.profile(BENCH).downloads == ("toy.c",)

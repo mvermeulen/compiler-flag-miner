@@ -20,7 +20,7 @@ decides what to do with it. Four patterns show up:
    `n-queens`, `netperf`, `npb`, `polybench-c`, `stream`, `tscp`. Without it they build with
    `CFLAGS="$CFLAGS -O3 -march=native"`, so our flags come *first* and lose. With `CFLAGS_OVERRIDE` set, they
    use exactly that string. **The backend must set `CFLAGS_OVERRIDE` to the trial's flags** for these, or every
-   trial is silently `-O3 -march=native`.
+   trial is silently `-O3 -march=native`. It does since 2026-10-27, for every test.
 3. **Implicit, through the build system** (149 tests): autotools `./configure`, CMake and Meson read
    `CFLAGS`/`CXXFLAGS` from the environment on a fresh configure, which the backend always does. One catch:
    with `-DCMAKE_BUILD_TYPE=Release`, CMake appends `-O3 -DNDEBUG` *after* the environment flags, so the `-O`
@@ -52,7 +52,7 @@ per-test output validator. Most of the good candidates need one or more of these
 
 | Extension | Tests it unlocks | Effort |
 |---|---|---|
-| Set `CFLAGS_OVERRIDE` alongside `CFLAGS` | the 12 in pattern 2 | trivial; harmless for every other test |
+| Set `CFLAGS_OVERRIDE` alongside `CFLAGS` | the 12 in pattern 2 | **done** 2026-10-27 |
 | Lower-is-better scores (`Proportion` LIB): ratio = 1 / time | ~half the candidates (n-queens, c-ray, povray, compression, ...) | small |
 | No `ResultsParser` at all: PTS times the whole run script itself | aobench, polybench-c, m-queens, smallpt, encode-*, hmmer, mafft, ... | small: time the run in the backend |
 | One fixed choice from an options menu (a `cfm` setting per test) | most media/crypto/HPC tests (scimark2, npb, x264, openssl, ...) | moderate |
@@ -73,7 +73,7 @@ answer. Each of these still needs confirming against the real output.
 | Test | Lang | Score | How flags get in | Self-check | Backend needs |
 |---|---|---|---|---|---|
 | `coremark` | C | HIB | `XCFLAGS="$CFLAGS"` after its `-O2` | CRC | **done** |
-| `tscp` | C | HIB | `CFLAGS_OVERRIDE` | node count (to confirm) | `CFLAGS_OVERRIDE` |
+| `tscp` | C | HIB | `CFLAGS_OVERRIDE` | node count 550,778 and the PV, confirmed | **done** (2026-10-27) |
 | `crafty` | C | HIB | `CFLAGS_OVERRIDE`, plus `CXXFLAGS`/`LDFLAGS` | node count (to confirm) | `CFLAGS_OVERRIDE` |
 | `ebizzy` | C | HIB | `CFLAGS_OVERRIDE` | none known | `CFLAGS_OVERRIDE`, validator |
 | `n-queens` | C, OpenMP | LIB | `CFLAGS_OVERRIDE` | solution count (to confirm) | `CFLAGS_OVERRIDE`, LIB |
@@ -117,8 +117,10 @@ benchmark; it hard-codes `-march=native` *before* ours), `john-the-ripper`, `c-r
 4. **`npb`** with a fixed kernel: the one self-verifying test that also exercises Fortran.
 
 Before mining any test, install it (`phoronix-test-suite install pts/<test>`) and build it once through the
-backend with a marker flag (e.g. `-DCFM_MARKER`). The compiled-flags audit then shows whether the flags reached
-the binary that is actually timed. This settles pattern 4's "probably" for that test.
+backend with a marker flag that GCC records, such as `-O1` or `-fno-plt`. The compiled-flags audit then shows
+whether the flags reached the binary that is actually timed. This settles pattern 4's "probably" for that
+test. Don't use a `-D` macro as the marker: GCC 15 on erie doesn't record a user `-D` in `.GCC.command.line`
+(it does record `-U`).
 
 PTS also ships a `pgo` module (`pts-core/modules/pgo.php`) that builds, trains and rebuilds with
 `-fprofile-generate`/`-fprofile-use` through these same flag variables. `cfm`'s backend does its own two-pass

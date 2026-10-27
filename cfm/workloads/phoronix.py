@@ -28,6 +28,11 @@ Two things PTS doesn't provide that this project needs are handled here:
 Only the simplest profile shape is supported: one ``OutputTemplate``, no test
 options menu, no ``pre.sh``/``post.sh``/``interim.sh``, higher-is-better scores
 (the trial ratio is the score itself). Anything else is refused with a reason.
+
+The trial's flags also go in as ``CFLAGS_OVERRIDE``. About a dozen profiles
+(tscp, crafty, n-queens, ...) build with ``CFLAGS="$CFLAGS -O3 -march=native"``
+unless that variable is set, which would put their flags after ours and win
+(doc/phoronix_cflags_survey.md). Profiles that don't read it ignore it.
 """
 
 from __future__ import annotations
@@ -47,6 +52,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
+from ..hostinfo import fastest_cpus
 from .base import BuildResult, RunResult, WorkloadBackend
 from .elf import code_digest, command_line_dump, is_linked_elf
 
@@ -82,9 +88,29 @@ def _coremark_valid(log: str) -> bool:
     return "Correct operation validated" in log and "ERROR" not in log and "Errors detected" not in log
 
 
+# TSCP's built-in benchmark searches one fixed position to depth 5, three times,
+# with no time limit, so a correct build always visits exactly this many nodes
+# and finds this principal variation (confirmed on erie, 2026-10-27, with PTS's
+# own -O3 -march=native build).
+TSCP_NODES = 550778
+TSCP_PV = "c2a4 d6c7 g2d5 e6d5 c1e3"
+
+
+def _tscp_valid(log: str) -> bool:
+    nodes = re.findall(r"^Nodes: (\d+)$", log, re.M)
+    scores = re.findall(r"^Nodes per second: ", log, re.M)
+    return (
+        bool(nodes)
+        and all(int(n) == TSCP_NODES for n in nodes)
+        and len(scores) == len(nodes)
+        and log.count(TSCP_PV) == 3 * len(nodes)
+    )
+
+
 # Test name (identifier without "pts/" and version) -> output check.
 _VALIDATORS: dict[str, Callable[[str], bool]] = {
     "coremark": _coremark_valid,
+    "tscp": _tscp_valid,
 }
 
 # Coremark's per-process iteration count. With no arguments (how PTS's wrapper
@@ -96,13 +122,26 @@ _VALIDATORS: dict[str, Callable[[str], bool]] = {
 # process is the 9.6M case, the one most of that mine's baseline used.
 COREMARK_ITERATIONS = 600_000
 
+# TSCP runs for 0.66 s and reports the best of three ~220 ms searches, timed to
+# the millisecond, so one run's score moves in 0.45% steps and varies by about
+# 3%. The override runs it this many times (~26 s) and parse_result() averages
+# the scores in the log.
+TSCP_RUNS = 40
+
 # Test name -> shell command run from the build directory in place of the
 # profile's wrapper script, writing to $LOG_FILE. Used when the wrapper can't
-# express a setting the mine needs. Coremark's linux64 port reads seeds and
-# iterations from argv; 0x0 0x0 0x66 are the seeds it defaults to (its
-# "performance run"), so its CRC validation still applies.
+# express a setting the mine needs. ``{cpu}`` becomes one of the host's fastest
+# CPUs, for pinning a single-threaded test (on erie, a Zen5 core rather than a
+# 3.5 GHz Zen5c one, which the scheduler would otherwise pick at random).
+# Coremark's linux64 port reads seeds and iterations from argv; 0x0 0x0 0x66 are
+# the seeds it defaults to (its "performance run"), so its CRC validation still
+# applies.
 _RUN_OVERRIDES: dict[str, str] = {
     "coremark": f'cd coremark-master && ./coremark.exe 0x0 0x0 0x66 {COREMARK_ITERATIONS} > "$LOG_FILE" 2>&1',
+    "tscp": (
+        f'cd tscp181 && for i in $(seq {TSCP_RUNS}); do taskset -c {{cpu}} ./tscp || exit $?; done '
+        '> "$LOG_FILE" 2>&1'
+    ),
 }
 
 
@@ -123,15 +162,24 @@ def _text(root: ET.Element, path: str) -> str:
     return (node.text or "").strip() if node is not None else ""
 
 
+def _for_linux(platform_specific: str) -> bool:
+    platforms = [p.strip().lower() for p in platform_specific.split(",") if p.strip()]
+    return not platforms or "linux" in platforms
+
+
 def _template_regex(template: str) -> re.Pattern:
     """PTS ``OutputTemplate`` line -> regex. ``#_RESULT_#`` captures a number,
     any other ``#_..._#`` placeholder matches one non-space token, and runs of
-    whitespace match any whitespace."""
+    whitespace match any whitespace. Tokens after the result's are dropped: PTS
+    picks the result by its position on the line, and templates often carry a
+    sample of the rest (TSCP's ends in "(Score: 1.034)", which varies per run)."""
     lines = [line for line in template.splitlines() if _RESULT_PLACEHOLDER in line]
     if len(lines) != 1:
         raise ValueError(f"OutputTemplate must have exactly one {_RESULT_PLACEHOLDER} line: {template!r}")
+    tokens = lines[0].split()
+    last = next(i for i, token in enumerate(tokens) if _RESULT_PLACEHOLDER in token)
     parts = []
-    for token in lines[0].split():
+    for token in tokens[:last + 1]:
         pieces = re.split(r"(#_[A-Z0-9_]+_#)", token)
         parts.append("".join(
             _NUMBER_RE if piece == _RESULT_PLACEHOLDER
@@ -145,12 +193,17 @@ def _template_regex(template: str) -> re.Pattern:
 class PhoronixWorkload(WorkloadBackend):
     suite = "phoronix"
 
-    def __init__(self, pts_home, output_root, cpu_count: Callable[[], Optional[int]] = os.cpu_count):
+    def __init__(
+        self, pts_home, output_root, cpu_count: Callable[[], Optional[int]] = os.cpu_count,
+        cpu_lister: Callable[[], list[int]] = fastest_cpus,
+    ):
         self.pts_home = Path(pts_home)
         # Absolute, because HOME and LOG_FILE point into it and install.sh/the test
         # script cd around (cfg.output_root defaults to a relative "results").
         self.output_root = Path(output_root).resolve()
         self.cpu_count = cpu_count
+        # Injectable so unit tests don't read this host's sysfs, as in the SPEC backend.
+        self.cpu_lister = cpu_lister
         self._profiles: dict[str, _Profile] = {}
         # run_command() picks a fresh log directory per measured run; parse_result()
         # reads it back. wspy-run never echoes the benchmark's own output, so the
@@ -216,9 +269,12 @@ class PhoronixWorkload(WorkloadBackend):
         downloads = ()
         downloads_path = profile_dir / "downloads.xml"
         if downloads_path.exists():
+            # A package marked PlatformSpecific for other platforms only (TSCP's
+            # Windows .exe.zip) is one PTS never downloads on Linux.
             downloads = tuple(
                 (pkg.findtext("FileName") or "").strip()
                 for pkg in ET.parse(downloads_path).getroot().iter("Package")
+                if _for_linux(pkg.findtext("PlatformSpecific") or "")
             )
         missing = [f for f in downloads if not (install_dir / f).exists()]
         if missing:
@@ -303,7 +359,10 @@ class PhoronixWorkload(WorkloadBackend):
         for filename in prof.downloads:
             shutil.copy2(prof.install_dir / filename, build_dir / filename)
         flag_string = " ".join(cflags)
-        env = self._env(prof.identifier, CFLAGS=flag_string, CXXFLAGS=flag_string, FFLAGS=flag_string)
+        env = self._env(
+            prof.identifier, CFLAGS=flag_string, CXXFLAGS=flag_string, FFLAGS=flag_string,
+            CFLAGS_OVERRIDE=flag_string,
+        )
         proc = subprocess.run(
             ["sh", str(prof.profile_dir / "install.sh")],
             cwd=build_dir, env=env, capture_output=True, text=True,
@@ -331,13 +390,23 @@ class PhoronixWorkload(WorkloadBackend):
         # the script writes its output to $LOG_FILE and its exit status to
         # ~/test-exit-status. Fail on either.
         build_dir = shlex.quote(str(self.build_dir(prof.identifier)))
-        command = _RUN_OVERRIDES.get(prof.name) or f"./{shlex.quote(prof.executable)} {prof.arguments}"
+        command = _RUN_OVERRIDES.get(prof.name)
+        if command is None:
+            command = f"./{shlex.quote(prof.executable)} {prof.arguments}"
+        elif "{cpu}" in command:
+            command = command.replace("{cpu}", str(self._pinned_cpu()))
         return (
             f"cd {build_dir} && rm -f test-exit-status && "
             f"export LOG_FILE={shlex.quote(str(log))} && ( {command} ); "
             f"rc=$?; [ $rc -eq 0 ] || exit $rc; "
             f"[ ! -f test-exit-status ] || [ \"$(cat test-exit-status)\" = 0 ]"
         )
+
+    def _pinned_cpu(self) -> int:
+        # Same choice as the SPEC backend's thread_placement(): a fastest CPU, not
+        # CPU 0 (which takes most interrupts) when there's a choice.
+        fast = self.cpu_lister() or [0]
+        return next((c for c in fast if c != 0), fast[0])
 
     def run_command(self, bench: str, tune: str, config_path: Path, iterations: int = 3) -> list[str]:
         prof = self.profile(bench)
@@ -378,7 +447,9 @@ class PhoronixWorkload(WorkloadBackend):
             matches = pattern.findall(text)
             if not matches:
                 return failed
-            scores.append(float(matches[-1]))
+            # A log with several scores (TSCP's repeated runs) contributes their
+            # mean: the scores are quantized, and a median would stay on a step.
+            scores.append(statistics.fmean(float(m) for m in matches))
         # Median across iterations, the same outlier-robust aggregate the SPEC
         # backend uses for its per-iteration ratios.
         return RunResult(
