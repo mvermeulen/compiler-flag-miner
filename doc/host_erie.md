@@ -42,6 +42,7 @@ sources the backend builds from. Only tests with an output validator in `cfm/wor
 | 2026-10-27 | `pts/coremark-1.0.1` | compute-bound 42.6% (local) | `-O3 -funroll-loops -fprofile-use` | **+8.86%** | [link](mining_results.pts_coremark-1.0.1.2026-10-26b.md) (`performance`) |
 | 2026-10-27 | `pts/tscp-1.2.2` | frontend-bound 54.7% (local) | `-O3 -flto -funroll-loops` | **+6.07%** | [link](mining_results.pts_tscp-1.2.2.2026-10-27.md) |
 | 2026-10-27 | `pts/crafty-1.4.5` | frontend-bound 42.6% (local) | `-O3 -fno-pie -no-pie -mtune=znver5` | **+7.23%** | [link](mining_results.pts_crafty-1.4.5.2026-10-27.md) |
+| 2026-10-27 | `pts/crafty-1.4.5` (PGO re-mines, exp. 10-11) | frontend-bound 42.4% (local) | `-O3 -fno-pie -no-pie -fprofile-use` | **+7.05%** | [link](mining_results.pts_crafty-1.4.5.2026-10-27b.md) (deterministic PGO) |
 
 Base and best are each test's own score (coremark Iterations/Sec over 16 processes, TSCP and crafty nodes/sec on one
 pinned core), not SPEC ratios:
@@ -50,7 +51,7 @@ pinned core), not SPEC ratios:
 |---|---|---|---|---|
 | `pts/coremark-1.0.1` | 382,163 | 416,025 | `-O3 -funroll-loops -fprofile-use` | **+8.86%** |
 | `pts/tscp-1.2.2` | 2,576,439 | 2,732,788 | `-O3 -flto -funroll-loops` | **+6.07%** |
-| `pts/crafty-1.4.5` | 13,440,532 | 14,412,893 | `-O3 -fno-pie -no-pie -mtune=znver5` | **+7.23%** |
+| `pts/crafty-1.4.5` | 13,456,441 | 14,405,707 | `-O3 -fno-pie -no-pie -fprofile-use` | **+7.05%** (three mines: +7.05% to +8.93%, winners all 14.4-14.5M) |
 
 The first mine (`balanced`, 361,329 → 385,356 with `-O3 -fprofile-use`) is kept for history. Its power sag
 made every verdict except PGO's unreliable.
@@ -96,4 +97,5 @@ made every verdict except PGO's unreliable.
 | 7 | L | **Five calibration reps for short benchmarks.** The occasional 1%-low rep widens a 3-rep baseline CI to ±1.7%. | More reps when a rep is under a minute, or a tighter rerun threshold. | Tighter accept/reject on ~1-2% effects. |
 | 8 | ~~H~~ | ~~**Catch a moderate slow rep in a tight set.**~~ tscp's trial 215 was 5.5% low against siblings agreeing to 0.1%, under the 10% rerun threshold. | A rerun rule relative to the flagset's own spread. | **Done 2026-10-27:** with 3+ reps, a rep more than 4x its siblings' spread (and at least 2%) below the slowest sibling is rerun (`SPREAD_RERUN_FACTOR`/`SPREAD_RERUN_MIN_PCT`). On erie's history it flags only trial 215. |
 | 9 | M | **Trustworthy PGO on single-threaded tests.** tscp's PGO reps ran 13-16°C hotter than any other trial. | Idle after the training run, or a temperature check per rep. | A clean PGO verdict for tscp (probably still a reject, about -1.4%). |
-| 10 | M | **Deterministic PGO training for crafty.** Its training run includes a nondeterministic 2-thread pass, so every PGO build differs; PGO read +1.8% but its CI overlapped. | Train on the serial pass only, then re-try PGO on the winning set. | Possibly +9% overall instead of +7.2%. |
+| 10 | ~~M~~ | ~~**Deterministic PGO training for crafty.**~~ | Serial-only training isn't possible without patching crafty; instead one profile per flagset per mine. | **Done 2026-10-27:** experiment 11's PGO reps share one code fingerprint; PGO accepted at +2.54%. |
+| 11 | M | **Quiet host for single-threaded mines.** crafty's experiment 11 had several 2-3%-low reps at flat power and temperature, with other Claude Code sessions running (load ~1.7). | Keep CPU 2's sibling (10) and one more core free of other work during a pinned mine, or check load before each rep. | Tighter CIs on tscp/crafty-style tests; `-mtune`/`-march` on top of PGO resolved. |

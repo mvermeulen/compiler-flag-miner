@@ -23,7 +23,12 @@ Two things PTS doesn't provide that this project needs are handled here:
 - **PGO.** With ``-fprofile-use`` in the flags, ``build()`` does an instrumented
   build, one training run of the test itself, then the optimized rebuild. PTS
   tests have no separate training input, so unlike SPEC's train workload, the
-  profile comes from the same workload that's then measured.
+  profile comes from the same workload that's then measured. The profile is
+  trained once per flagset per backend instance (one ``cfm mine``) and reused by
+  every later build of the same flags, so a PGO flagset's reps all measure the
+  same binary. Crafty's training run includes a nondeterministic 2-thread search,
+  and retraining per rep gave each rep different code, widening PGO's CI enough
+  to reject a +1.8% reading (doc/mining_results.pts_crafty-1.4.5.2026-10-27.md).
 
 Only the simplest profile shape is supported: one ``OutputTemplate``, no test
 options menu, no ``pre.sh``/``post.sh``/``interim.sh``, higher-is-better scores
@@ -257,6 +262,9 @@ class PhoronixWorkload(WorkloadBackend):
         # reads it back. wspy-run never echoes the benchmark's own output, so the
         # logs on disk are the only place the score exists.
         self._last_run_dir: dict[str, Path] = {}
+        # (benchmark, flags digest) pairs whose PGO profile was trained by this
+        # instance; see build().
+        self._trained_profiles: set[tuple[str, str]] = set()
 
     # -- profile ------------------------------------------------------------
 
@@ -385,12 +393,20 @@ class PhoronixWorkload(WorkloadBackend):
         if _PGO_USE_FLAG not in flags:
             ok, raw = self._install(prof, plain)
         else:
-            profile_data = self._work_dir(bench) / "pgo-profile"
-            shutil.rmtree(profile_data, ignore_errors=True)
-            ok, raw = self._install(prof, plain + [f"{_PGO_TRAIN_FLAG}={profile_data}", _PGO_PASS1_EXTRA])
-            if ok:
-                ok, train_raw = self._train(prof)
-                raw += train_raw
+            # One profile per flagset, trained on first use in this instance and
+            # reused after that (module docstring's PGO note).
+            digest = hashlib.sha1(" ".join(plain).encode()).hexdigest()[:10]
+            profile_data = self._work_dir(bench) / "pgo-profile" / digest
+            if (bench, digest) in self._trained_profiles:
+                ok, raw = True, f"## PGO: reusing the profile trained earlier for these flags ({profile_data})\n"
+            else:
+                shutil.rmtree(profile_data, ignore_errors=True)
+                ok, raw = self._install(prof, plain + [f"{_PGO_TRAIN_FLAG}={profile_data}", _PGO_PASS1_EXTRA])
+                if ok:
+                    ok, train_raw = self._train(prof)
+                    raw += train_raw
+                if ok:
+                    self._trained_profiles.add((bench, digest))
             if ok:
                 ok, use_raw = self._install(
                     prof, plain + [f"{_PGO_USE_FLAG}={profile_data}", _PGO_PASS2_EXTRA],

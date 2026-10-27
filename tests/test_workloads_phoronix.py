@@ -186,7 +186,7 @@ def test_pgo_builds_instrumented_trains_then_rebuilds_with_the_profile(workload,
     config, result = build(workload, ["-O2", "-fprofile-use"])
     assert result.ok, result.raw_output
     assert "PGO training run (ok)" in result.raw_output
-    profile_dir = tmp_path / "results" / "phoronix" / "coremark-9.9.9" / "pgo-profile"
+    [profile_dir] = (tmp_path / "results" / "phoronix" / "coremark-9.9.9" / "pgo-profile").iterdir()
     assert list(profile_dir.glob("*.gcda"))
     dump = workload.audit_compiled_flags(BENCH, "peak")
     assert f"-fprofile-use={profile_dir}" in dump
@@ -383,3 +383,34 @@ def test_first_score_only_ignores_later_scores(workload, monkeypatch):
     assert measure(workload, config, iterations=1).ratio == 1005.5  # mean of 1000.5 and 1010.5
     monkeypatch.setattr(phoronix, "_FIRST_SCORE_ONLY", frozenset({"coremark"}))
     assert measure(workload, config, iterations=1).ratio == 1020.5  # third run's, not the fourth's
+
+
+def test_pgo_trains_once_per_flagset_and_reuses_the_profile(workload):
+    _, first = build(workload, ["-O2", "-fprofile-use"])
+    assert first.ok and "PGO training run (ok)" in first.raw_output
+    fingerprint = workload.code_fingerprint(BENCH, "peak")
+
+    _, again = build(workload, ["-O2", "-fprofile-use"])
+    assert again.ok
+    assert "PGO training run" not in again.raw_output
+    assert "reusing the profile" in again.raw_output
+    assert workload.code_fingerprint(BENCH, "peak") == fingerprint
+
+    # Different flags get their own profile.
+    _, other = build(workload, ["-O1", "-fprofile-use"])
+    assert other.ok and "PGO training run (ok)" in other.raw_output
+
+
+def test_workload_for_keeps_one_phoronix_backend_so_pgo_profiles_are_reused(tmp_path):
+    # run_one_trial() calls workload_for() on every trial; PGO profile reuse only
+    # works if those calls share one backend.
+    cfg = CfmConfig.from_env(
+        spec_dir=str(tmp_path / "spec"), pts_home=str(make_pts_home(tmp_path)),
+        output_root=str(tmp_path / "results"),
+    )
+    first = workload_for(cfg, BENCH)
+    assert workload_for(cfg, BENCH) is first
+    _, built = build(first, ["-O2", "-fprofile-use"])
+    assert "PGO training run (ok)" in built.raw_output
+    _, rebuilt = build(workload_for(cfg, BENCH), ["-O2", "-fprofile-use"])
+    assert "reusing the profile" in rebuilt.raw_output
