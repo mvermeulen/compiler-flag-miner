@@ -13,7 +13,7 @@ import pytest
 from cfm import reference_matrix
 from cfm.config import CfmConfig
 from cfm.workloads import workload_for
-from cfm.workloads.phoronix import PhoronixWorkload, _template_regex
+from cfm.workloads.phoronix import COREMARK_ITERATIONS, PhoronixWorkload, _template_regex
 from cfm.workloads.spec_cpu2026 import SpecCpu2026Workload
 
 BENCH = "pts/coremark-9.9.9"
@@ -24,12 +24,13 @@ pytestmark = pytest.mark.skipif(shutil.which("gcc") is None, reason="needs gcc")
 # CoreMark-style failure when built with -DBROKEN.
 TOY_C = r"""
 #include <stdio.h>
-int main(void) {
+int main(int argc, char **argv) {
     int n = 0;
     FILE *f = fopen("count", "r");
     if (f) { if (fscanf(f, "%d", &n) != 1) n = 0; fclose(f); }
     f = fopen("count", "w"); fprintf(f, "%d\n", n + 1); fclose(f);
     printf("CoreMark Size    : 666\n");
+    printf("Iterations       : %s\n", argc > 4 ? argv[4] : "auto");
     printf("Iterations/Sec   : %d.5\n", 1000 + 10 * n);
 #ifdef BROKEN
     printf("ERROR! list crc 0x0000 - should be 0xe714\nErrors detected\n");
@@ -40,12 +41,16 @@ int main(void) {
 }
 """
 
+# Laid out like the real profile: the binary in coremark-master/, run by a
+# wrapper script that passes no arguments.
 INSTALL_SH = """#!/bin/sh
-gcc $CFLAGS -o toy.bin toy.c
+mkdir -p coremark-master
+gcc $CFLAGS -o coremark-master/coremark.exe toy.c
 echo $? > ~/install-exit-status
 cd ~
 echo "#!/bin/sh
-./toy.bin > \\$LOG_FILE 2>&1
+cd coremark-master
+./coremark.exe > \\$LOG_FILE 2>&1
 echo \\$? > ~/test-exit-status" > coremark
 chmod +x coremark
 """
@@ -131,6 +136,15 @@ def test_relative_output_root_works(tmp_path, monkeypatch):
     assert result.ok, result.raw_output
     monkeypatch.chdir("/")
     assert measure(workload, config, iterations=1).ok
+
+
+def test_coremark_runs_a_fixed_iteration_count(workload):
+    # The wrapper script would let coremark size its own run; the override
+    # passes an explicit count instead (COREMARK_ITERATIONS).
+    config, _ = build(workload, ["-O2"])
+    run = measure(workload, config, iterations=1)
+    assert run.ok
+    assert f"Iterations       : {COREMARK_ITERATIONS}" in run.result_files[0].read_text()
 
 
 def test_flags_reach_the_compiled_binary(workload):

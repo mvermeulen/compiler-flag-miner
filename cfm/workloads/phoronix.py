@@ -87,6 +87,24 @@ _VALIDATORS: dict[str, Callable[[str], bool]] = {
     "coremark": _coremark_valid,
 }
 
+# Coremark's per-process iteration count. With no arguments (how PTS's wrapper
+# runs it) coremark sizes its own run: it times 10x more iterations until a run
+# takes 1 s, then scales by 1 + 10/int(seconds). On erie that timing run sits
+# near 2 s, so builds landed on either 9.6M or 17.6M total iterations (27 s or
+# 47 s), faster code tending to the longer one -- a confound under a power
+# limit (doc/mining_results.pts_coremark-1.0.1.2026-10-26.md). 600,000 per
+# process is the 9.6M case, the one most of that mine's baseline used.
+COREMARK_ITERATIONS = 600_000
+
+# Test name -> shell command run from the build directory in place of the
+# profile's wrapper script, writing to $LOG_FILE. Used when the wrapper can't
+# express a setting the mine needs. Coremark's linux64 port reads seeds and
+# iterations from argv; 0x0 0x0 0x66 are the seeds it defaults to (its
+# "performance run"), so its CRC validation still applies.
+_RUN_OVERRIDES: dict[str, str] = {
+    "coremark": f'cd coremark-master && ./coremark.exe 0x0 0x0 0x66 {COREMARK_ITERATIONS} > "$LOG_FILE" 2>&1',
+}
+
 
 @dataclass(frozen=True)
 class _Profile:
@@ -313,9 +331,10 @@ class PhoronixWorkload(WorkloadBackend):
         # the script writes its output to $LOG_FILE and its exit status to
         # ~/test-exit-status. Fail on either.
         build_dir = shlex.quote(str(self.build_dir(prof.identifier)))
+        command = _RUN_OVERRIDES.get(prof.name) or f"./{shlex.quote(prof.executable)} {prof.arguments}"
         return (
             f"cd {build_dir} && rm -f test-exit-status && "
-            f"LOG_FILE={shlex.quote(str(log))} ./{shlex.quote(prof.executable)} {prof.arguments}; "
+            f"export LOG_FILE={shlex.quote(str(log))} && ( {command} ); "
             f"rc=$?; [ $rc -eq 0 ] || exit $rc; "
             f"[ ! -f test-exit-status ] || [ \"$(cat test-exit-status)\" = 0 ]"
         )
