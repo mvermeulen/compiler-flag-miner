@@ -105,6 +105,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="don't probe memory bandwidth and wait out a throttled state before each "
              "trial (cfm/bandwidth.py)",
     )
+    mine.add_argument(
+        "--warmup-min-seconds", type=float, default=180.0,
+        help="keep the baseline warm-up going until at least this many seconds have passed, "
+             "as well as until two warm-up reps agree within 1%% (default 180; 0 for count-only)",
+    )
+    mine.add_argument(
+        "--no-power-check", action="store_true",
+        help="don't re-run confirmation/calibration reps whose package power during the run "
+             "reads well below the baseline's",
+    )
 
     init_db = sub.add_parser("init-db", help="create/upgrade cfm.db at the configured path")
     init_db.add_argument("--db", dest="db_path", default=None)
@@ -160,6 +170,7 @@ def main(argv=None) -> int:
             pts_home=args.pts_home,
             output_root=args.output_root, db_path=args.db_path, lock_file=args.lock_file,
             bandwidth_gate=not args.no_bandwidth_gate,
+            warmup_min_seconds=args.warmup_min_seconds, power_check=not args.no_power_check,
         )
         compiler = GccCompiler(catalog_path=args.catalog) if args.catalog else GccCompiler()
         base_flags = args.base_flags.split()
@@ -352,6 +363,7 @@ def main(argv=None) -> int:
             "baseline_vectorization_density": baseline.vectorization_density,
             "baseline_allocation_pressure": baseline.allocation_pressure,
             "baseline_characterization_source": baseline.characterization_source,
+            "baseline_power_w": baseline.power_w,
             "baseline_recheck_ratio": baseline_recheck.ratio,
             "baseline_recheck_delta_pct": baseline_recheck.delta_pct,
             "baseline_recheck_flagged": baseline_recheck.flagged,

@@ -13,6 +13,7 @@ from __future__ import annotations
 import itertools
 import random
 import statistics
+import time
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -72,6 +73,15 @@ CONFIRMATION_REPETITIONS = 3
 # moving throughout the whole run's own duration; that's still a real, open,
 # bigger design question.
 BASELINE_WARMUP_REPETITIONS = 2
+# Since 2026-10-26 BASELINE_WARMUP_REPETITIONS is a minimum. Warm-up continues
+# until the last two warm-up ratios agree within WARMUP_SETTLE_PCT and at least
+# cfg.warmup_min_seconds of warm-up time has passed, up to
+# BASELINE_WARMUP_MAX_REPETITIONS reps. Two fixed reps were sized for SPEC's
+# multi-minute trials; erie needs about 2 minutes of all-core load before the CPU
+# temperature settles, which two 25-second coremark reps don't cover
+# (doc/host_erie.md).
+BASELINE_WARMUP_MAX_REPETITIONS = 8
+WARMUP_SETTLE_PCT = 1.0
 SCREENING_ITERATIONS = 1
 CHARACTERIZATION_PROFILE = "deep-cpu"  # needs PR 1's multi-pass identity fix
 CHARACTERIZATION_ITERATIONS = 1  # shape needs one measurement, not a 3-rep CI --
@@ -167,6 +177,9 @@ class BaselineResult:
     # _characterize_baseline()'s own provenance tag. Surfaced through to cli.py's summary JSON so a
     # mining run's output visibly says which shape source it actually used, not just the values.
     characterization_source: Optional[str] = None
+    # Median package power of the calibration reps (W), the reference
+    # _low_power_rep_indices() checks confirmation reps against. None without a sensor.
+    power_w: Optional[float] = None
 
     @property
     def most_recent_ratio(self) -> float:
@@ -232,6 +245,22 @@ MAX_SLOW_REP_RERUNS = 3
 # hand re-measure (doc/opportunities_niwot.md #7).
 BASELINE_RECHECK_WARN_PCT = 0.5
 
+# With cfg.power_check on, a rep whose package power during the run
+# (run_one_trial()'s median of samples) reads more than this far below the
+# reference is re-run like a slow rep, after LOW_POWER_RERUN_IDLE_S of idle. The
+# reference is the baseline calibration reps' median power for confirmation reps,
+# and the highest-power sibling for calibration reps. On erie under the `balanced`
+# profile, power fell from about 24 W to 20 W partway through a coremark mine and
+# the score fell with it (r = 0.90), biasing every later delta by about -3%
+# (doc/mining_results.pts_coremark-1.0.1.2026-10-26.md). Under `performance` it
+# held within about 2%.
+LOW_POWER_RERUN_PCT = 8.0
+LOW_POWER_RERUN_IDLE_S = 30.0
+
+# Indirection so tests can replace the clock and the idle wait.
+_clock = time.monotonic
+_sleep = time.sleep
+
 
 def _slow_rep_indices(ratios: list[float]) -> list[int]:
     """Indices of the ratios more than ``SLOW_REP_RERUN_PCT`` below the fastest of
@@ -245,22 +274,58 @@ def _slow_rep_indices(ratios: list[float]) -> list[int]:
     return sorted(slow, key=lambda i: ratios[i])
 
 
-def _rerun_slow_reps(cfg: CfmConfig, measured: list[dict], rerun) -> tuple[list[dict], list[dict]]:
+def _low_power_rep_indices(
+    cfg: CfmConfig, measured: list[dict], power_reference: Optional[float],
+) -> tuple[list[int], Optional[float]]:
+    """Indices of the reps whose ``package_power_w`` is more than
+    ``LOW_POWER_RERUN_PCT`` below the reference, lowest power first, plus the
+    reference used. The reference is ``power_reference`` when given, else the
+    highest sibling reading. Empty unless ``cfg.power_check`` is on; reps with no
+    reading are never flagged."""
+    if not cfg.power_check:
+        return [], None
+    powers = [r.get("package_power_w") for r in measured]
+    known = [p for p in powers if p is not None]
+    reference = power_reference if power_reference is not None else (max(known) if known else None)
+    if reference is None or reference <= 0:
+        return [], reference
+    floor = reference * (1.0 - LOW_POWER_RERUN_PCT / 100.0)
+    low = [i for i, p in enumerate(powers) if p is not None and p < floor]
+    return sorted(low, key=lambda i: powers[i]), reference
+
+
+def _rerun_slow_reps(
+    cfg: CfmConfig, measured: list[dict], rerun, power_reference: Optional[float] = None,
+) -> tuple[list[dict], list[dict]]:
     """Re-runs the reps of ``measured`` (trial-result dicts with a usable ratio)
-    that ``_slow_rep_indices()`` flags, slowest first, one ``rerun()`` call each,
-    until none is left or ``MAX_SLOW_REP_RERUNS`` re-runs have been spent.
-    Returns ``(measured with each replaced rep swapped out, every re-run made)``.
-    A replaced rep's trial row stays in cfm.db with a hypothesis saying why it was
-    excluded. A re-run with no usable ratio keeps the slow rep and stops, rather
-    than spending more trials on a build or validate that's failing."""
+    that ``_slow_rep_indices()`` flags, slowest first, then those
+    ``_low_power_rep_indices()`` flags (only with ``cfg.power_check``), lowest
+    power first, one ``rerun()`` call each, until none is left or
+    ``MAX_SLOW_REP_RERUNS`` re-runs have been spent. A low-power re-run waits
+    ``LOW_POWER_RERUN_IDLE_S`` first. Returns ``(measured with each replaced rep
+    swapped out, every re-run made)``. A replaced rep's trial row stays in cfm.db
+    with a hypothesis saying why it was excluded. A re-run with no usable ratio
+    keeps the flagged rep and stops, rather than spending more trials on a build
+    or validate that's failing."""
     replacements: list[dict] = []
     while len(replacements) < MAX_SLOW_REP_RERUNS:
         slow = _slow_rep_indices([r["ratio"] for r in measured])
-        if not slow:
+        low_power, reference = ([], None) if slow else _low_power_rep_indices(cfg, measured, power_reference)
+        if not slow and not low_power:
             break
-        idx = slow[0]
+        idx = slow[0] if slow else low_power[0]
         rep = measured[idx]
         fastest = max(r["ratio"] for r in measured)
+        if slow:
+            why = f"ratio {rep['ratio']:.6g} vs fastest sibling {fastest:.6g} (more than {SLOW_REP_RERUN_PCT:g}% below)"
+            kind = "slow rep"
+        else:
+            why = (
+                f"package power {rep['package_power_w']:.2f} W vs reference {reference:.2f} W "
+                f"(more than {LOW_POWER_RERUN_PCT:g}% below)"
+            )
+            kind = "low-power rep"
+            _sleep(LOW_POWER_RERUN_IDLE_S)
         replacement = rerun()
         replacements.append(replacement)
         conn = db.connect(cfg.db_path)
@@ -269,31 +334,30 @@ def _rerun_slow_reps(cfg: CfmConfig, measured: list[dict], rerun) -> tuple[list[
                 db.record_hypothesis(
                     conn, trial_id=rep["trial_id"], proposed_by="rule",
                     rationale=(
-                        f"slow rep: ratio {rep['ratio']:.6g} vs fastest sibling {fastest:.6g}; re-run as "
-                        f"trial {replacement['trial_id']} produced no usable ratio, so the slow rep was kept"
+                        f"{kind}: {why}; re-run as trial {replacement['trial_id']} produced no "
+                        f"usable ratio, so the {kind} was kept"
                     ),
                 )
                 print(
-                    f"info: slow rep (trial {rep['trial_id']}, ratio {rep['ratio']:.6g}) re-run as "
-                    f"trial {replacement['trial_id']} produced no ratio -- kept the slow rep"
+                    f"info: {kind} (trial {rep['trial_id']}, ratio {rep['ratio']:.6g}) re-run as "
+                    f"trial {replacement['trial_id']} produced no ratio -- kept it"
                 )
                 break
             db.record_hypothesis(
                 conn, trial_id=rep["trial_id"], proposed_by="rule",
                 rationale=(
-                    f"slow rep excluded from the CI: ratio {rep['ratio']:.6g} vs fastest sibling "
-                    f"{fastest:.6g} (more than {SLOW_REP_RERUN_PCT:g}% below); replaced by re-run "
+                    f"{kind} excluded from the CI: {why}; replaced by re-run "
                     f"trial {replacement['trial_id']} (ratio {replacement['ratio']:.6g})"
                 ),
             )
             db.record_hypothesis(
                 conn, trial_id=replacement["trial_id"], proposed_by="rule",
-                rationale=f"re-run replacing slow trial {rep['trial_id']} (ratio {rep['ratio']:.6g})",
+                rationale=f"re-run replacing {kind} trial {rep['trial_id']} (ratio {rep['ratio']:.6g})",
             )
         finally:
             conn.close()
         print(
-            f"info: slow rep (trial {rep['trial_id']}, ratio {rep['ratio']:.6g}) replaced by "
+            f"info: {kind} (trial {rep['trial_id']}, ratio {rep['ratio']:.6g}; {why}) replaced by "
             f"re-run trial {replacement['trial_id']} (ratio {replacement['ratio']:.6g})"
         )
         measured = measured[:idx] + [replacement] + measured[idx + 1:]
@@ -358,6 +422,15 @@ def _characterize_baseline(
     return result
 
 
+def _warmup_settled(ratios: list[float]) -> bool:
+    """The last two warm-up ratios agree within ``WARMUP_SETTLE_PCT``."""
+    if len(ratios) < 2:
+        return False
+    a, b = ratios[-2], ratios[-1]
+    top = max(abs(a), abs(b))
+    return top == 0 or abs(a - b) / top * 100.0 <= WARMUP_SETTLE_PCT
+
+
 def run_baseline(
     cfg: CfmConfig,
     *,
@@ -402,7 +475,9 @@ def run_baseline(
     # ratios/CI below. See BASELINE_WARMUP_REPETITIONS's own comment.
     conn = db.connect(cfg.db_path)
     try:
-        for _ in range(BASELINE_WARMUP_REPETITIONS):
+        warmup_ratios: list[float] = []
+        warmup_started = _clock()
+        while True:
             warmup_result = run_one_trial(
                 cfg, benchmark=benchmark, flags=base_flags, phase="confirmation",
                 profile=CALIBRATION_PROFILE, iterations=CALIBRATION_ITERATIONS,
@@ -419,6 +494,23 @@ def run_baseline(
                     "screening noise)"
                 ),
             )
+            if warmup_result.get("ratio") is None:
+                break  # nothing to settle on; the calibration reps fail loudly if this persists
+            warmup_ratios.append(warmup_result["ratio"])
+            if len(warmup_ratios) < BASELINE_WARMUP_REPETITIONS:
+                continue
+            elapsed = _clock() - warmup_started
+            settled = _warmup_settled(warmup_ratios)
+            if (settled and elapsed >= cfg.warmup_min_seconds) or len(warmup_ratios) >= BASELINE_WARMUP_MAX_REPETITIONS:
+                note = (
+                    f"baseline warm-up {'settled' if settled else 'NOT settled'} after "
+                    f"{len(warmup_ratios)} reps, {elapsed:.0f} s (last two "
+                    f"{warmup_ratios[-2]:.6g}, {warmup_ratios[-1]:.6g}; settle bar {WARMUP_SETTLE_PCT:g}%, "
+                    f"minimum {cfg.warmup_min_seconds:g} s)"
+                )
+                db.record_hypothesis(conn, trial_id=warmup_result["trial_id"], proposed_by="rule", rationale=note)
+                print(f"info: {note}")
+                break
     finally:
         conn.close()
 
@@ -441,6 +533,8 @@ def run_baseline(
     measured, replacements = _rerun_slow_reps(cfg, measured, calibration_rep)
     trial_ids.extend(r["trial_id"] for r in replacements)
     ratios = [r["ratio"] for r in measured]
+    powers = [r["package_power_w"] for r in measured if r.get("package_power_w") is not None]
+    power_w = statistics.median(powers) if powers else None
 
     if not ratios:
         # Every individual run_one_trial() call above returned normally (no
@@ -479,6 +573,7 @@ def run_baseline(
         allocation_pressure=allocation_pressure,
         trial_ids=trial_ids,
         characterization_source=characterization_source,
+        power_w=power_w,
     )
 
 
@@ -766,6 +861,7 @@ def _confirm_flagset(
     trial_results = [first] + [confirmation_rep() for _ in range(CONFIRMATION_REPETITIONS - 1)]
     measured, replacements = _rerun_slow_reps(
         cfg, [r for r in trial_results if r.get("ratio") is not None], confirmation_rep,
+        power_reference=baseline.power_w,
     )
     trial_results.extend(replacements)
 

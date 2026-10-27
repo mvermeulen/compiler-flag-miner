@@ -51,6 +51,16 @@ class CfmConfig:
     # `cfm mine`/`cfm measure` turn it on (--no-bandwidth-gate turns it off), and
     # the unit tests, which build configs straight from from_env(), never probe.
     bandwidth_gate: bool = False
+    # Baseline warm-up and low-power guards (cfm/orchestrator.py, 2026-10-26).
+    # Off unless asked for, for the same reason as bandwidth_gate: `cfm mine` turns
+    # them on, and unit tests (whose trials take no time and whose power readings
+    # come from whatever host runs them) stay deterministic.
+    # warmup_min_seconds: baseline warm-up keeps going until at least this much
+    # warm-up time has passed (as well as until two reps agree).
+    warmup_min_seconds: float = 0.0
+    # power_check: re-run a confirmation or calibration rep whose package power
+    # during the run reads well below the baseline's.
+    power_check: bool = False
 
     @classmethod
     def from_env(
@@ -67,6 +77,8 @@ class CfmConfig:
         reference_matrix_url: Optional[str] = None,
         pts_home: Optional[str] = None,
         bandwidth_gate: Optional[bool] = None,
+        warmup_min_seconds: Optional[float] = None,
+        power_check: Optional[bool] = None,
     ) -> "CfmConfig":
         """Resolve config: explicit keyword argument (e.g. from argparse) wins over
         the environment; the environment wins over the built-in default. Read
@@ -109,5 +121,13 @@ class CfmConfig:
             bandwidth_gate=(
                 bandwidth_gate if bandwidth_gate is not None
                 else _env_str("CFM_BANDWIDTH_GATE", "0") not in ("", "0")
+            ),
+            warmup_min_seconds=(
+                warmup_min_seconds if warmup_min_seconds is not None
+                else float(_env_str("CFM_WARMUP_MIN_SECONDS", "0"))
+            ),
+            power_check=(
+                power_check if power_check is not None
+                else _env_str("CFM_POWER_CHECK", "0") not in ("", "0")
             ),
         )
