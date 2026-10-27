@@ -140,17 +140,20 @@ HIMENO_GOSA_REL_TOL = 1e-4
 
 
 def _himeno_valid(log: str) -> bool:
-    rehearsal = re.search(r"MFLOPS: \S+ time\(s\): \S+ (\S+)", log)
-    final = re.search(r"^ Gosa : (\S+)", log, re.M)
-    if rehearsal is None or final is None or "MFLOPS measured :" not in log:
+    # One log holds HIMENO_RUNS runs; every one has to check out.
+    rehearsals = re.findall(r"MFLOPS: \S+ time\(s\): \S+ (\S+)", log)
+    finals = re.findall(r"^ Gosa : (\S+)", log, re.M)
+    measured = log.count("MFLOPS measured :")
+    if not rehearsals or not (len(rehearsals) == len(finals) == measured):
         return False
     try:
-        gosa, final_gosa = float(rehearsal.group(1)), float(final.group(1))
+        pairs = [(float(r), float(f)) for r, f in zip(rehearsals, finals)]
     except ValueError:
         return False
-    return (
+    return all(
         abs(gosa - HIMENO_REHEARSAL_GOSA) <= HIMENO_GOSA_REL_TOL * HIMENO_REHEARSAL_GOSA
         and 0.0 <= final_gosa <= gosa  # rejects nan too
+        for gosa, final_gosa in pairs
     )
 
 
@@ -167,6 +170,12 @@ _FIRST_SCORE_ONLY = frozenset({"crafty"})
 
 # Himeno's timed loop runs for this many seconds (60 upstream); see _BUILD_OVERRIDES.
 HIMENO_TARGET_SECONDS = 20.0
+
+# One himeno run's score varied by about 4% between runs of the same binary in
+# its first mine (experiment 13, 2026-10-27), which made the baseline CI about
+# +-5% wide. The run override runs it this many times and parse_result()
+# averages the scores, as for TSCP.
+HIMENO_RUNS = 3
 
 # Test name -> shell script run in place of the profile's install.sh, with the
 # same environment, for a profile whose build never lets CFLAGS reach the
@@ -240,7 +249,10 @@ _RUN_OVERRIDES: dict[str, str] = {
     # One serial bench is about 15 s on erie, timed in centiseconds.
     "crafty": 'taskset -c {cpu} ./crafty bench quit > "$LOG_FILE" 2>&1',
     # Grid size S (64x64x128, about 29 MB of arrays: larger than erie's 16 MB L3).
-    "himeno": 'taskset -c {cpu} ./himenobmtxpa s > "$LOG_FILE" 2>&1',
+    "himeno": (
+        f'for i in $(seq {HIMENO_RUNS}); do taskset -c {{cpu}} ./himenobmtxpa s || exit $?; done '
+        '> "$LOG_FILE" 2>&1'
+    ),
 }
 
 
@@ -560,8 +572,9 @@ class PhoronixWorkload(WorkloadBackend):
                 return failed
             if prof.name in _FIRST_SCORE_ONLY:
                 matches = matches[:1]
-            # A log with several scores (TSCP's repeated runs) contributes their
-            # mean: the scores are quantized, and a median would stay on a step.
+            # A log with several scores (TSCP's and himeno's repeated runs)
+            # contributes their mean: TSCP's scores are quantized, and a median
+            # would stay on a step.
             scores.append(statistics.fmean(float(m) for m in matches))
         # Median across iterations, the same outlier-robust aggregate the SPEC
         # backend uses for its per-iteration ratios.

@@ -725,3 +725,27 @@ def test_mine_without_vector_width_candidates_never_calls_the_multiplier(tmp_pat
     assert summary["vector_width_attempted"] is False
     assert summary["vector_width_skip_reason"] == "no deferred -mprefer-vector-width= candidates"
 
+
+
+@pytest.mark.parametrize("argv, expected", [([], True), (["--no-shape-filter"], False)])
+def test_mine_passes_no_shape_filter_through(tmp_path, monkeypatch, argv, expected):
+    baseline = _fake_baseline()
+    combination = CombinationResult(winning_flags=["-O3"], winning_ci=baseline.ci)
+    _mine_common_mocks(monkeypatch, baseline, combination)
+    monkeypatch.setattr(
+        cli.orchestrator, "run_pgo_multiplier",
+        lambda *a, combination, **k: _fake_pgo_not_attempted(combination),
+    )
+    seen = {}
+
+    def fake_generate(*a, shape_filter=True, **k):
+        seen["shape_filter"] = shape_filter
+        return []
+
+    monkeypatch.setattr(cli.orchestrator, "generate_candidates", fake_generate)
+    exit_code = cli.main([
+        "mine", "fake_r", "--db", str(tmp_path / "cfm.db"), "--lock-file", str(tmp_path / "test.lock"),
+        *argv,
+    ])
+    assert exit_code == 0
+    assert seen["shape_filter"] is expected

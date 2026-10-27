@@ -436,6 +436,15 @@ def test_himeno_validator(rehearsal, final, ok):
     assert not _himeno_valid("")
 
 
+def test_himeno_validator_checks_every_run_in_the_log():
+    good = HIMENO_LOG.format(rehearsal="3.288628e-03", final="0.000000e+00")
+    bad = HIMENO_LOG.format(rehearsal="3.300000e-03", final="0.000000e+00")
+    assert _himeno_valid(good * 3)
+    assert not _himeno_valid(good + bad + good)
+    # A run cut off before its result line.
+    assert not _himeno_valid(good + good.split(" Loop")[0])
+
+
 def test_himeno_template_reads_the_measured_line():
     pattern = _template_regex(" MFLOPS measured : #_RESULT_#\tcpu : 59.868463")
     text = HIMENO_LOG.format(rehearsal="3.288628e-03", final="0.000000e+00")
