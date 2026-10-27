@@ -179,11 +179,14 @@ mine here.
 
 1. **Interleaved re-measure at stable power**: `cfm measure` alternating `-O3`, `-O3 -funroll-loops`,
    `-O3 -march=native` and `-O3 -fprofile-use -funroll-loops`, several rounds. This settles whether
-   `-funroll-loops` is really +3-5% and whether it stacks with PGO.
+   `-funroll-loops` is really +3-5% and whether it stacks with PGO. Answered by the re-mine instead
+   ([re-mine](mining_results.pts_coremark-1.0.1.2026-10-26b.md)): +5.86%, and PGO adds +3.10% on top.
 2. **Re-mine under the `performance` profile.** Done in part on 2026-10-26: `erie` is now in `performance`,
    and a 10.5-minute power check showed no sag (package power steady at ~29.5 W, steady-state `-O3` 384,079 ±
    0.36%, about +6% over this mine's `balanced` baseline). A ~2-minute thermal transient at the start remains
-   ([`host_erie.md`](host_erie.md)). The re-mine itself is still to do.
+   ([`host_erie.md`](host_erie.md)). Re-mined 2026-10-27:
+   [`mining_results.pts_coremark-1.0.1.2026-10-26b.md`](mining_results.pts_coremark-1.0.1.2026-10-26b.md),
+   `-O3 -funroll-loops -fprofile-use` at +8.86%.
 3. **Fix coremark's run length.** Done 2026-10-26: the backend now runs `coremark.exe 0x0 0x0 0x66 600000`
    (`COREMARK_ITERATIONS`), 9.6M iterations total. The bimodal length came from coremark's own sizing rule: it
    multiplies the count by `1 + 10/int(seconds)` after a timing run, and that run sat right at 2 seconds here,

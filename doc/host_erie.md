@@ -15,7 +15,7 @@ priors don't carry over here: this host's `cfm.db` is its own, started empty on 
 | OS / compiler | Ubuntu 26.04.1 LTS, Linux 7.0.0-38-generic, GCC 15.2.0 (Ubuntu 15.2.0-16ubuntu1) |
 | Phoronix Test Suite | 10.8.6, user directory `~/.phoronix-test-suite`; installed tests: `pts/coremark-1.0.1` only |
 | SPEC | CPU2026 1.0.1 at `/home/mev/cpu2026`, `gcc_O3.cfg` (label `gcc_O3`, `copies = 16`, `threads = 16`); not mined here yet |
-| Power | **profile `performance` since 2026-10-26** (`powerprofilesctl set performance`; ACPI platform profile, EPP and governor all follow to `performance`). amd-pstate `active`. The coremark mine ran under `balanced` (governor `powersave`, EPP `balance_performance`) |
+| Power | **profile `performance` since 2026-10-26** (`powerprofilesctl set performance`; ACPI platform profile, EPP and governor all follow to `performance`). amd-pstate `active`. The first coremark mine ran under `balanced` (governor `powersave`, EPP `balance_performance`); the re-mine under `performance` |
 | Microarch detection | `-march=znver5` / `-mtune=znver5` (hybrid Zen5/Zen5c, PR #46's fix) |
 | Sensors | `k10temp` (CPU temp), `amdgpu` `power1_average` (package power under all-core coremark: 19-24 W in `balanced`, a steady ~29.5 W in `performance`), `hp` and `acpi_fan` hwmons |
 | Memory bandwidth | 45-47 GB/s on `cfm/bandwidth.py`'s 16-thread triad; the gate never waited past its first probe |
@@ -38,13 +38,17 @@ sources the backend builds from. Only tests with an output validator in `cfm/wor
 
 | Date | Benchmark | Shape (source) | Winning flags | Gain vs `-O3` | Write-up |
 |---|---|---|---|---|---|
-| 2026-10-26 | `pts/coremark-1.0.1` | compute-bound 42.3% (local) | `-O3 -fprofile-use` | **+6.65%** | [link](mining_results.pts_coremark-1.0.1.2026-10-26.md) |
+| 2026-10-26 | `pts/coremark-1.0.1` | compute-bound 42.3% (local) | `-O3 -fprofile-use` | **+6.65%** | [link](mining_results.pts_coremark-1.0.1.2026-10-26.md) (`balanced`; superseded) |
+| 2026-10-27 | `pts/coremark-1.0.1` | compute-bound 42.6% (local) | `-O3 -funroll-loops -fprofile-use` | **+8.86%** | [link](mining_results.pts_coremark-1.0.1.2026-10-26b.md) (`performance`) |
 
 Base and best are coremark Iterations/Sec (16 forked processes), not SPEC ratios:
 
 | Benchmark | Base (`-O3`) | Best | Winning flags | Gain |
 |---|---|---|---|---|
-| `pts/coremark-1.0.1` | 361,329 | 385,356 | `-O3 -fprofile-use` | **+6.65%** |
+| `pts/coremark-1.0.1` | 382,163 | 416,025 | `-O3 -funroll-loops -fprofile-use` | **+8.86%** |
+
+The first mine (`balanced`, 361,329 → 385,356 with `-O3 -fprofile-use`) is kept for history. Its power sag
+made every verdict except PGO's unreliable.
 
 ## Standing facts about this host
 
@@ -58,7 +62,13 @@ Base and best are coremark Iterations/Sec (16 forked processes), not SPEC ratios
   one run dropped to 352k (cpu0 averaging 3.1 GHz) before the fan caught up. From then on it held 84-87°C. Runs
   12-24 averaged **384,079 ± 0.36%** (sd), against about 361k for `-O3` under `balanced` (+6%). Runs 8-11 were
   noisier (374-381k); the test suite and a profile scan ran during that window, so they aren't clean evidence
-  either way. **Two 25-second warm-up reps don't cover the transient**; see open item 3.
+  either way. Two 25-second warm-up reps wouldn't cover a cold start, which is why warm-up now has a 180 s
+  minimum (item 3). In the re-mine the transient never showed up, because the 4.5-minute `deep-cpu`
+  characterization run comes first.
+- **Under `performance`, package power sits pinned at the platform limit, about 29 W**, and the limit can move.
+  In the re-mine it dropped about 1 W (to ~28.0 W) 20 minutes in and stayed there. Scores moved about -0.5%.
+- **About one coremark rep in eight reads about 1% low** under `performance`. That is too small for the slow-rep
+  rerun, but it widens a 3-rep CI to about ±1.7%.
 - **Coremark sized its own runs** (9.6M or 17.6M iterations, 27 or 47 seconds) until the backend pinned
   `COREMARK_ITERATIONS` (600,000 per process, 9.6M total) on 2026-10-26.
 - **Coremark builds its flags into the binary** (`FLAGS_STR`), so `cfm`'s no-code-change guard never skips a
@@ -68,9 +78,10 @@ Base and best are coremark Iterations/Sec (16 forked processes), not SPEC ratios
 
 | # | Pri | Opportunity | How | What would change |
 |---|---|---|---|---|
-| 1 | **H** | **Is `-funroll-loops` a real coremark win?** It screened +5.07% at matched power, then confirmed flat against the higher-power baseline (+3.3% against the recheck). | Interleaved `cfm measure`: `-O3`, `-O3 -funroll-loops`, `-O3 -march=native`, `-O3 -fprofile-use -funroll-loops`, several rounds. | A real +3-5% would stack with PGO for roughly +10%. |
+| 1 | ~~H~~ | ~~**Is `-funroll-loops` a real coremark win?**~~ | Re-mine under `performance`. | **Done 2026-10-27:** yes, +5.86% (Phase 4), and PGO adds +3.10% on top, for +8.86% overall. `-march=native` is +2.58% alone but doesn't stack with unrolling. |
 | 2 | ~~H~~ | ~~**Does the `performance` profile remove the power sag?**~~ | `powerprofilesctl set performance`, then 25 back-to-back coremark runs with power sampled. | **Done 2026-10-26:** power steady at ~29.5 W for 10 minutes, steady-state runs ±0.36%; the host now stays in `performance`. A 2-minute thermal transient remains (item 3). |
-| 3 | **H** | **Warm up long enough, and catch a power drop.** The fixed two warm-up reps were sized for SPEC's multi-minute trials; a 25-second coremark rep needs ~2 minutes of load before it settles here. And the baseline recheck caught `balanced`'s sag but by design changes no verdict. | Pipeline changes: warm up by time or until two consecutive reps agree within ~1%, not a fixed count; flag (and rerun) a trial whose package power reads well below the baseline reps' mean, the way slow reps are rerun now; or re-run Phase 4 against a fresh baseline when the recheck flags. | Short PTS benchmarks get trustworthy Phase 3-4 verdicts on hosts like this one. |
+| 3 | ~~H~~ | ~~**Warm up long enough, and catch a power drop.**~~ The fixed two warm-up reps were sized for SPEC's multi-minute trials; a 25-second coremark rep needs ~2 minutes of load before it settles here. And the baseline recheck caught `balanced`'s sag but by design changes no verdict. | Pipeline changes: warm up by time or until two consecutive reps agree within ~1%, not a fixed count; flag (and rerun) a trial whose package power reads well below the baseline reps' mean, the way slow reps are rerun now; or re-run Phase 4 against a fresh baseline when the recheck flags. | **Done 2026-10-26** (commit `1853b3d`): settle-based warm-up (two reps within 1% and at least `--warmup-min-seconds`, default 180, at most 8 reps), package power sampled every 2 s during each run, and a rep more than 8% below the baseline's power rerun after 30 s idle (`--no-power-check`). In the re-mine neither guard had to act. |
 | 4 | ~~M~~ | ~~**Fixed-work coremark runs.**~~ | Pass an explicit iteration count to `coremark.exe`. | **Done 2026-10-26:** `_RUN_OVERRIDES` runs `coremark.exe 0x0 0x0 0x66 600000` (same seeds as the no-argument run, so the CRC check still applies). Verified in the power check: 9.6M iterations every run. |
 | 5 | M | **More Phoronix tests.** Only coremark is installed and validated. | Install CFLAGS-honoring PTS tests and add a `_VALIDATORS` entry for each; candidates are surveyed in [`phoronix_cflags_survey.md`](phoronix_cflags_survey.md). | Broader coverage outside SPEC. |
 | 6 | L | **SPEC CPU2026 on `erie`.** SPEC is installed but unmined here. | Mine a few `intrate` benchmarks already done on `niwot`. | A same-CPU, different-chassis comparison: laptop power limits vs. the mini PC. |
+| 7 | L | **Five calibration reps for short benchmarks.** The occasional 1%-low rep widens a 3-rep baseline CI to ±1.7%. | More reps when a rep is under a minute, or a tighter rerun threshold. | Tighter accept/reject on ~1-2% effects. |

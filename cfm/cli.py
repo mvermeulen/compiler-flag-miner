@@ -204,12 +204,23 @@ def main(argv=None) -> int:
                     known_flags = {
                         k.flag: k for k in known_flags_for_cluster(cfg, cluster_key=cluster_key)
                     }
+                    candidate_flags = {c.flag for c in candidates}
                     for k in known_flags.values():
+                        # A prior can name a flag that isn't a Phase 2-5 candidate
+                        # here: -fprofile-use (always Phase 6) or a flag Phase 2
+                        # excluded. Saying "fast-tracked" for those misleads.
+                        if k.flag not in candidate_flags:
+                            action = ("tried in Phase 6" if k.flag == orchestrator.PGO_FLAG
+                                      else "not a candidate here")
+                        elif k.qualifies_for_fast_track:
+                            action = "fast-tracked"
+                        else:
+                            action = "screened normally"
                         print(
                             f"info: known prior for {k.flag!r} in cluster {cluster_key!r} -- "
                             f"accepted {k.n_accepted} of {k.n_trials} before "
                             f"(mean {k.mean_delta_pct:+.2f}%, last seen on {k.last_benchmark!r}) -- "
-                            f"{'fast-tracked' if k.qualifies_for_fast_track else 'screened normally'}"
+                            f"{action}"
                         )
                 # -mprefer-vector-width= is a no-op without an -march=, so it
                 # waits for Phase 6 (run_vector_width_multiplier()) instead.
