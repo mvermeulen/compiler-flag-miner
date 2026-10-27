@@ -79,19 +79,26 @@ _PGO_PASS2_EXTRA = "-fprofile-correction"
 # SPECspeed thread placement (2026-10-23). A benchmark's threading model comes from SPEC's own
 # `@benchsets` line in Spec/object.pm: `openmp`, `pthread`/`cxxthreads`, or neither (single-threaded).
 _BENCHSETS_RE = re.compile(r"^@benchsets\s*=\s*qw\(([^)]*)\)", re.MULTILINE)
+_MULTIPROCESS_RE = re.compile(r"^\$multiprocess\s*=\s*['\"]yes['\"]", re.MULTILINE)
 
 
 def benchmark_threading(spec_dir, bench: str) -> str:
-    """'openmp', 'threads' (pthread/C++ threads) or 'serial', from the benchmark's own object.pm."""
+    """'openmp', 'threads' (pthread/C++ threads), 'multiprocess' or 'serial', from the benchmark's
+    own object.pm. 'multiprocess' is `$multiprocess = 'yes'` with no thread benchset: each command is
+    single-threaded, but specinvoke runs many of them at once (821.gcc_s runs ~2,800 compiles 16 at a
+    time), so pinning them all to one CPU would crowd every concurrent command onto it."""
     object_pm = Path(spec_dir) / "benchspec" / "CPU" / bench / "Spec" / "object.pm"
     if not object_pm.exists():
         raise RuntimeError(f"no Spec/object.pm for benchmark {bench!r} at {object_pm}")
-    match = _BENCHSETS_RE.search(object_pm.read_text())
+    text = object_pm.read_text()
+    match = _BENCHSETS_RE.search(text)
     benchsets = set(match.group(1).split()) if match else set()
     if "openmp" in benchsets:
         return "openmp"
     if benchsets & {"pthread", "cxxthreads"}:
         return "threads"
+    if _MULTIPROCESS_RE.search(text):
+        return "multiprocess"
     return "serial"
 
 
@@ -116,7 +123,9 @@ class SpecCpu2026Workload(WorkloadBackend):
           interrupts, when there's a choice) -- on niwot that's a Zen5 core, never a Zen5c one;
         - OpenMP: `OMP_PLACES=threads OMP_PROC_BIND=close`, so thread i always runs on CPU i;
         - pthread/C++ threads: nothing outside the program can pin individual threads, so they're
-          left to the scheduler across every CPU.
+          left to the scheduler across every CPU;
+        - multiprocess (specinvoke running many single-threaded commands at once): also left to the
+          scheduler, since one `taskset` CPU would be shared by every concurrent command.
 
         `use_submit_for_speed = yes` is what makes runcpu use `submit` for a speed run at all
         (Docs/config.txt; it defaults to no). Both lines are allowed in a `<bench>=peak:` section.
@@ -132,6 +141,11 @@ class SpecCpu2026Workload(WorkloadBackend):
             )
         if threading == "threads":
             return [], "thread placement: pthread, not pinned (left to the scheduler across all CPUs)"
+        if threading == "multiprocess":
+            return [], (
+                "thread placement: multiprocess (concurrent single-threaded commands), not pinned "
+                "(left to the scheduler across all CPUs)"
+            )
         fast = self.cpu_lister()
         if not fast:
             return [], "thread placement: single-threaded, not pinned (no CPU max-frequency info)"
