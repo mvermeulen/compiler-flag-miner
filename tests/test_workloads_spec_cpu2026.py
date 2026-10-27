@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from cfm.workloads.spec_cpu2026 import SpecCpu2026Workload
+from cfm.workloads.spec_cpu2026 import SpecCpu2026Workload, benchmark_threading
 
 _FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -244,13 +244,13 @@ def test_code_fingerprint_is_none_without_executables(tmp_path):
     assert _make_workload(tmp_path).code_fingerprint("782.lbm_r", "peak") is None
 
 
-def _speed_workload(tmp_path, benchsets, fast=(0, 2, 4, 6)):
+def _speed_workload(tmp_path, benchsets, fast=(0, 2, 4, 6), extra=""):
     spec_dir = tmp_path / "spec"
     (spec_dir / "config").mkdir(parents=True)
     spec = spec_dir / "benchspec" / "CPU" / "800.x_s" / "Spec"
     spec.mkdir(parents=True)
     line = f"@benchsets = qw({benchsets});\n" if benchsets is not None else ""
-    (spec / "object.pm").write_text(f"$benchlang = 'C';\n{line}")
+    (spec / "object.pm").write_text(f"$benchlang = 'C';\n{line}{extra}")
     return SpecCpu2026Workload(spec_dir, base_config="gcc_O3.cfg", cpu_lister=lambda: list(fast))
 
 
@@ -285,6 +285,30 @@ def test_generate_config_leaves_pthread_speed_benchmark_unpinned(tmp_path):
     text = workload.generate_config("800.x_s", "peak", ["-O3"]).read_text()
     assert "submit" not in text
     assert "not pinned" in workload.thread_placement("800.x_s")[1]
+
+
+def test_generate_config_leaves_multiprocess_speed_benchmark_unpinned(tmp_path):
+    # 821.gcc_s's shape: no thread benchset, but specinvoke runs its commands 16 at a time. Pinned,
+    # all 16 shared CPU 2 and each timed run took 3.4 hours (experiment 181).
+    workload = _speed_workload(
+        tmp_path, "intspeed specspeed",
+        extra="$multiprocess = 'yes';  # Use specinvoke multiprocess mode\n",
+    )
+    text = workload.generate_config("800.x_s", "peak", ["-O3"]).read_text()
+    assert "submit" not in text
+    assert "multiprocess" in workload.thread_placement("800.x_s")[1]
+    assert "not pinned" in workload.thread_placement("800.x_s")[1]
+
+
+def test_benchmark_threading_prefers_thread_benchsets_over_multiprocess(tmp_path):
+    # 823.llvm_s sets both; it stays 'threads'.
+    _speed_workload(tmp_path, "cxxthreads intspeed pthread specspeed", extra="$multiprocess = 'yes';\n")
+    assert benchmark_threading(tmp_path / "spec", "800.x_s") == "threads"
+
+
+def test_benchmark_threading_ignores_multiprocess_no(tmp_path):
+    _speed_workload(tmp_path, "intspeed specspeed", extra="$multiprocess = 'no';\n")
+    assert benchmark_threading(tmp_path / "spec", "800.x_s") == "serial"
 
 
 def test_generate_config_single_threaded_without_frequency_info_is_unpinned(tmp_path):
