@@ -399,3 +399,18 @@ def test_pgo_trains_once_per_flagset_and_reuses_the_profile(workload):
     # Different flags get their own profile.
     _, other = build(workload, ["-O1", "-fprofile-use"])
     assert other.ok and "PGO training run (ok)" in other.raw_output
+
+
+def test_workload_for_keeps_one_phoronix_backend_so_pgo_profiles_are_reused(tmp_path):
+    # run_one_trial() calls workload_for() on every trial; PGO profile reuse only
+    # works if those calls share one backend.
+    cfg = CfmConfig.from_env(
+        spec_dir=str(tmp_path / "spec"), pts_home=str(make_pts_home(tmp_path)),
+        output_root=str(tmp_path / "results"),
+    )
+    first = workload_for(cfg, BENCH)
+    assert workload_for(cfg, BENCH) is first
+    _, built = build(first, ["-O2", "-fprofile-use"])
+    assert "PGO training run (ok)" in built.raw_output
+    _, rebuilt = build(workload_for(cfg, BENCH), ["-O2", "-fprofile-use"])
+    assert "reusing the profile" in rebuilt.raw_output
