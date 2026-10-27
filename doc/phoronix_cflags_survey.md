@@ -20,7 +20,9 @@ decides what to do with it. Four patterns show up:
    `n-queens`, `netperf`, `npb`, `polybench-c`, `stream`, `tscp`. Without it they build with
    `CFLAGS="$CFLAGS -O3 -march=native"`, so our flags come *first* and lose. With `CFLAGS_OVERRIDE` set, they
    use exactly that string. **The backend must set `CFLAGS_OVERRIDE` to the trial's flags** for these, or every
-   trial is silently `-O3 -march=native`. It does since 2026-10-27, for every test.
+   trial is silently `-O3 -march=native`. It does since 2026-10-27, for every test. Setting it doesn't guarantee the
+   flags arrive: `crafty` reads it, then its Makefile target overrides `CFLAGS` on make's command line, so
+   the backend replaces its install.sh entirely (`_BUILD_OVERRIDES`).
 3. **Implicit, through the build system** (149 tests): autotools `./configure`, CMake and Meson read
    `CFLAGS`/`CXXFLAGS` from the environment on a fresh configure, which the backend always does. One catch:
    with `-DCMAKE_BUILD_TYPE=Release`, CMake appends `-O3 -DNDEBUG` *after* the environment flags, so the `-O`
@@ -74,7 +76,7 @@ answer. Each of these still needs confirming against the real output.
 |---|---|---|---|---|---|
 | `coremark` | C | HIB | `XCFLAGS="$CFLAGS"` after its `-O2` | CRC | **done** |
 | `tscp` | C | HIB | `CFLAGS_OVERRIDE` | node count 550,778 and the PV, confirmed | **done** (2026-10-27) |
-| `crafty` | C | HIB | `CFLAGS_OVERRIDE`, plus `CXXFLAGS`/`LDFLAGS` | node count (to confirm) | `CFLAGS_OVERRIDE` |
+| `crafty` | C | HIB | **none in practice**: install.sh reads `CFLAGS_OVERRIDE`, but `make unix-gcc` then sets `CFLAGS` on make's command line, overriding it | serial node count 191,258,593, confirmed | **done** (2026-10-27) via a build override |
 | `ebizzy` | C | HIB | `CFLAGS_OVERRIDE` | none known | `CFLAGS_OVERRIDE`, validator |
 | `n-queens` | C, OpenMP | LIB | `CFLAGS_OVERRIDE` | solution count (to confirm) | `CFLAGS_OVERRIDE`, LIB |
 | `himeno` | C | HIB | `cc ... -O3 $CFLAGS` | none known | validator |

@@ -107,10 +107,56 @@ def _tscp_valid(log: str) -> bool:
     )
 
 
+# Crafty's "bench" searches 64 positions to fixed depths on one thread, so a
+# correct build always reports this total (confirmed on erie, 2026-10-27, with
+# PTS's own build, run repeatedly). Its short 2-thread pass afterwards isn't
+# deterministic and its totals are cumulative, so only the first (serial)
+# "Total nodes:" line is checked, and _FIRST_SCORE_ONLY takes only the first score.
+CRAFTY_SERIAL_NODES = 191258593
+
+
+def _crafty_valid(log: str) -> bool:
+    nodes = re.search(r"^Total nodes: (\d+)$", log, re.M)
+    return (
+        "Running serial benchmark" in log
+        and nodes is not None
+        and int(nodes.group(1)) == CRAFTY_SERIAL_NODES
+    )
+
+
 # Test name (identifier without "pts/" and version) -> output check.
 _VALIDATORS: dict[str, Callable[[str], bool]] = {
     "coremark": _coremark_valid,
+    "crafty": _crafty_valid,
     "tscp": _tscp_valid,
+}
+
+# Tests whose log holds later scores that aren't the benchmark's own result.
+_FIRST_SCORE_ONLY = frozenset({"crafty"})
+
+# Test name -> shell script run in place of the profile's install.sh, with the
+# same environment, for a profile whose build never lets CFLAGS reach the
+# compiler. It must write ~/install-exit-status and the test's wrapper script as
+# install.sh would.
+#
+# Crafty: install.sh runs `make unix-gcc`, whose target sets CFLAGS on make's
+# command line ("-O3 -fprofile-use -mpopcnt ..."), overriding the environment, so
+# PTS's own crafty numbers never reflect user flags. The override calls the same
+# inner target with upstream's non-optimization flags (warnings, -mpopcnt,
+# -pthread, and its `opt` variable, which the .c.o rule never reads -- an
+# upstream quirk kept as is) followed by the trial's. Upstream's -fprofile-use
+# and -fprofile-correction are dropped: with no profile data they only switch on
+# the optimizations -fprofile-use implies, and PGO is Phase 6's job here.
+_BUILD_OVERRIDES: dict[str, str] = {
+    "crafty": """unzip -o crafty-25.2.zip
+make target=UNIX CC=gcc opt='-DSYZYGY -DTEST -DCPUS=4' \\
+    CFLAGS="-Wall -Wno-array-bounds -pipe -mpopcnt -pthread $CFLAGS" \\
+    LDFLAGS="$CFLAGS -pthread -lstdc++" crafty-make
+echo $? > ~/install-exit-status
+cd ~
+printf '#!/bin/sh\\n./crafty "$@" > "$LOG_FILE" 2>&1\\necho $? > ~/test-exit-status\\n' > crafty-benchmark
+chmod +x crafty-benchmark
+""",
 }
 
 # Coremark's per-process iteration count. With no arguments (how PTS's wrapper
@@ -142,6 +188,8 @@ _RUN_OVERRIDES: dict[str, str] = {
         f'cd tscp181 && for i in $(seq {TSCP_RUNS}); do taskset -c {{cpu}} ./tscp || exit $?; done '
         '> "$LOG_FILE" 2>&1'
     ),
+    # One serial bench is about 15 s on erie, timed in centiseconds.
+    "crafty": 'taskset -c {cpu} ./crafty bench quit > "$LOG_FILE" 2>&1',
 }
 
 
@@ -363,8 +411,9 @@ class PhoronixWorkload(WorkloadBackend):
             prof.identifier, CFLAGS=flag_string, CXXFLAGS=flag_string, FFLAGS=flag_string,
             CFLAGS_OVERRIDE=flag_string,
         )
+        override = _BUILD_OVERRIDES.get(prof.name)
         proc = subprocess.run(
-            ["sh", str(prof.profile_dir / "install.sh")],
+            ["sh", "-c", override] if override is not None else ["sh", str(prof.profile_dir / "install.sh")],
             cwd=build_dir, env=env, capture_output=True, text=True,
         )
         raw = f"## install.sh with CFLAGS={flag_string}\n{proc.stdout}{proc.stderr}"
@@ -447,6 +496,8 @@ class PhoronixWorkload(WorkloadBackend):
             matches = pattern.findall(text)
             if not matches:
                 return failed
+            if prof.name in _FIRST_SCORE_ONLY:
+                matches = matches[:1]
             # A log with several scores (TSCP's repeated runs) contributes their
             # mean: the scores are quantized, and a median would stay on a step.
             scores.append(statistics.fmean(float(m) for m in matches))

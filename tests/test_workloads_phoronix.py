@@ -14,8 +14,10 @@ from cfm import reference_matrix
 from cfm.config import CfmConfig
 from cfm.workloads import workload_for
 from cfm.workloads.phoronix import (
-    COREMARK_ITERATIONS, TSCP_NODES, TSCP_PV, TSCP_RUNS, PhoronixWorkload, _template_regex, _tscp_valid,
+    COREMARK_ITERATIONS, CRAFTY_SERIAL_NODES, TSCP_NODES, TSCP_PV, TSCP_RUNS, PhoronixWorkload,
+    _crafty_valid, _template_regex, _tscp_valid,
 )
+from cfm.workloads import phoronix
 from cfm.workloads.spec_cpu2026 import SpecCpu2026Workload
 
 BENCH = "pts/coremark-9.9.9"
@@ -349,3 +351,35 @@ def test_downloads_for_other_platforms_are_not_required(tmp_path):
     ))
     workload = PhoronixWorkload(pts_home, tmp_path / "results")
     assert workload.profile(BENCH).downloads == ("toy.c",)
+
+
+def test_crafty_validator_checks_only_the_serial_total():
+    serial = f"Running serial benchmark. . .\nTotal nodes: {CRAFTY_SERIAL_NODES}\nRaw nodes per second: 12949126\n"
+    smp = "Running SMP benchmark (2 threads)...\nTotal nodes: 193502643\nRaw nodes per second: 12840255\n"
+    assert _crafty_valid(serial + smp)
+    assert not _crafty_valid(serial.replace(str(CRAFTY_SERIAL_NODES), "191258592") + smp)
+    assert not _crafty_valid(smp)
+
+
+def test_build_override_replaces_install_sh(workload, monkeypatch):
+    # The profile's install.sh would compile with $CFLAGS; this override ignores
+    # it and adds a marker instead, so the audit shows which script ran.
+    monkeypatch.setitem(phoronix._BUILD_OVERRIDES, "coremark", INSTALL_SH.replace(
+        "gcc $CFLAGS", "gcc -O1 -fno-plt -frecord-gcc-switches",
+    ))
+    config, result = build(workload, ["-O2"])
+    assert result.ok, result.raw_output
+    dump = workload.audit_compiled_flags(BENCH, "peak")
+    assert "-fno-plt" in dump and "-O2" not in dump
+
+
+def test_first_score_only_ignores_later_scores(workload, monkeypatch):
+    # The toy prints a running score; run it twice into one log.
+    monkeypatch.setitem(
+        phoronix._RUN_OVERRIDES, "coremark",
+        'cd coremark-master && { ./coremark.exe; ./coremark.exe; } > "$LOG_FILE" 2>&1',
+    )
+    config, _ = build(workload, ["-O2"])
+    assert measure(workload, config, iterations=1).ratio == 1005.5  # mean of 1000.5 and 1010.5
+    monkeypatch.setattr(phoronix, "_FIRST_SCORE_ONLY", frozenset({"coremark"}))
+    assert measure(workload, config, iterations=1).ratio == 1020.5  # third run's, not the fourth's
