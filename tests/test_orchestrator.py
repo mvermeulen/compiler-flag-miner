@@ -1897,9 +1897,10 @@ def test_confirm_reruns_a_low_power_rep_when_the_power_check_is_on(tmp_path, mon
     baseline.power_w = 30.0
     slept = []
     monkeypatch.setattr(orchestrator, "_sleep", slept.append)
-    # The second rep ran at 24 W (20% low) and read a little slow, but not 10% slow.
+    # The second rep ran at 24 W (20% low) and read a little slow, but under both
+    # slow-rep rules (1.5% below the slowest sibling, under SPREAD_RERUN_MIN_PCT).
     _power_sequence(monkeypatch, [30.0, 24.0, 30.0, 29.5])
-    backends = ScriptedBackends(ratio_sequences={("-O3", "-x"): [100.0, 95.0, 100.5, 100.2]})
+    backends = ScriptedBackends(ratio_sequences={("-O3", "-x"): [100.0, 98.5, 100.5, 100.2]})
 
     [outcome] = confirm_candidates(
         cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline,
@@ -1919,14 +1920,14 @@ def test_confirm_ignores_low_power_when_the_power_check_is_off(tmp_path, monkeyp
     baseline = _baseline(mean_ratio=100.0)
     baseline.power_w = 30.0
     _power_sequence(monkeypatch, [30.0, 24.0, 30.0])
-    backends = ScriptedBackends(ratio_sequences={("-O3", "-x"): [100.0, 95.0, 100.5]})
+    backends = ScriptedBackends(ratio_sequences={("-O3", "-x"): [100.0, 98.5, 100.5]})
 
     [outcome] = confirm_candidates(
         cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline,
         screened=[_screened("-x")], workload=backends, instrumentation=backends,
     )
 
-    assert outcome.ratios == [100.0, 95.0, 100.5]
+    assert outcome.ratios == [100.0, 98.5, 100.5]
     assert len(outcome.trial_ids) == 3
 
 
@@ -1939,3 +1940,39 @@ def test_run_baseline_records_the_calibration_reps_median_power(tmp_path, monkey
         workload=backends, instrumentation=backends, reference_matrix_fetch=_no_reference_matrix,
     )
     assert result.power_w == pytest.approx(30.0)
+
+
+def test_slow_rep_spread_rule_catches_a_moderate_outlier_among_tight_siblings():
+    import cfm.orchestrator as orchestrator
+    # erie's tscp trials 214-216: 5.3% below siblings that agree within 0.21%.
+    assert orchestrator._slow_rep_indices([2634426.0, 2490616.0, 2628773.0]) == [1]
+    # Coremark's calibration reps: 1% low, under the 2% floor.
+    assert orchestrator._slow_rep_indices([383081.0, 379177.0, 384231.0]) == []
+    # 3% low, but the siblings themselves differ by 1%: under 4x their spread.
+    assert orchestrator._slow_rep_indices([100.0, 96.0, 99.0]) == []
+    # Two reps: only the 10% rule applies.
+    assert orchestrator._slow_rep_indices([100.0, 95.0]) == []
+    assert orchestrator._slow_rep_indices([100.0, 89.0]) == [1]
+
+
+def test_confirm_reruns_a_moderate_outlier_among_tight_siblings(tmp_path):
+    cfg = _cfg(tmp_path)
+    conn = db.connect(cfg.db_path)
+    exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
+    conn.close()
+    baseline = _baseline(mean_ratio=100.0)
+    backends = ScriptedBackends(ratio_sequences={("-O3", "-x"): [105.0, 99.5, 104.9, 105.1]})
+
+    [outcome] = confirm_candidates(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline,
+        screened=[_screened("-x")], workload=backends, instrumentation=backends,
+    )
+
+    assert outcome.ratios == [105.0, 105.1, 104.9]
+    assert len(outcome.trial_ids) == 4
+    conn = db.connect(cfg.db_path)
+    try:
+        notes = [r[0] for r in conn.execute("select rationale from hypotheses where trial_id = ?", (outcome.trial_ids[1],))]
+    finally:
+        conn.close()
+    assert any("below the slowest sibling" in n for n in notes)

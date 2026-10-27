@@ -238,6 +238,18 @@ class ScreeningOutcome:
 SLOW_REP_RERUN_PCT = 10.0
 MAX_SLOW_REP_RERUNS = 3
 
+# A second slow-rep rule for precise measurements, where 10% is far too coarse
+# (2026-10-27): with three or more reps, a rep is also re-run when it sits below
+# the slowest of its siblings by more than SPREAD_RERUN_FACTOR times the
+# siblings' own spread, and by at least SPREAD_RERUN_MIN_PCT. On erie's tscp
+# mine, trial 215 ran 5.5% slow while its two siblings agreed within 0.2%; it
+# widened the greedy step's CI to +-7.8% and got -funroll-loops rejected, a flag
+# Phase 4 had just accepted (doc/mining_results.pts_tscp-1.2.2.2026-10-27.md).
+# Across erie's experiments 3, 4 and 7 this rule flags only that rep; coremark's
+# ~1%-low reps stay under the 2% floor.
+SPREAD_RERUN_FACTOR = 4.0
+SPREAD_RERUN_MIN_PCT = 2.0
+
 # After Phase 4, one extra baseline-flags rep checks that the baseline hasn't
 # drifted. It's flagged (logged and reported, never used to change a verdict)
 # when it falls outside baseline.ci *and* differs from the mean by at least this
@@ -262,15 +274,36 @@ _clock = time.monotonic
 _sleep = time.sleep
 
 
-def _slow_rep_indices(ratios: list[float]) -> list[int]:
-    """Indices of the ratios more than ``SLOW_REP_RERUN_PCT`` below the fastest of
-    ``ratios``, slowest first. Empty with fewer than two ratios."""
-    if len(ratios) < 2:
-        return []
+def _slow_rep_reason(ratios: list[float], i: int) -> Optional[str]:
+    """Why ``ratios[i]`` counts as a slow rep, or None. Either rule is enough:
+    more than ``SLOW_REP_RERUN_PCT`` below the fastest rep, or (with at least two
+    siblings) more than ``SPREAD_RERUN_FACTOR`` times the siblings' spread, and at
+    least ``SPREAD_RERUN_MIN_PCT``, below the slowest sibling."""
     fastest = max(ratios)
     if fastest <= 0:
+        return None
+    r = ratios[i]
+    if (fastest - r) / fastest * 100.0 > SLOW_REP_RERUN_PCT:
+        return f"ratio {r:.6g} vs fastest sibling {fastest:.6g} (more than {SLOW_REP_RERUN_PCT:g}% below)"
+    siblings = ratios[:i] + ratios[i + 1:]
+    if len(siblings) >= 2 and min(siblings) > 0:
+        spread_pct = (max(siblings) - min(siblings)) / max(siblings) * 100.0
+        gap_pct = (min(siblings) - r) / min(siblings) * 100.0
+        if gap_pct > max(SPREAD_RERUN_MIN_PCT, SPREAD_RERUN_FACTOR * spread_pct):
+            return (
+                f"ratio {r:.6g} is {gap_pct:.2f}% below the slowest sibling {min(siblings):.6g}, "
+                f"whose siblings agree within {spread_pct:.2f}% (more than {SPREAD_RERUN_FACTOR:g}x "
+                f"that spread and at least {SPREAD_RERUN_MIN_PCT:g}%)"
+            )
+    return None
+
+
+def _slow_rep_indices(ratios: list[float]) -> list[int]:
+    """Indices of the ratios ``_slow_rep_reason()`` flags, slowest first. Empty
+    with fewer than two ratios."""
+    if len(ratios) < 2:
         return []
-    slow = [i for i, r in enumerate(ratios) if (fastest - r) / fastest * 100.0 > SLOW_REP_RERUN_PCT]
+    slow = [i for i in range(len(ratios)) if _slow_rep_reason(ratios, i) is not None]
     return sorted(slow, key=lambda i: ratios[i])
 
 
@@ -315,9 +348,8 @@ def _rerun_slow_reps(
             break
         idx = slow[0] if slow else low_power[0]
         rep = measured[idx]
-        fastest = max(r["ratio"] for r in measured)
         if slow:
-            why = f"ratio {rep['ratio']:.6g} vs fastest sibling {fastest:.6g} (more than {SLOW_REP_RERUN_PCT:g}% below)"
+            why = _slow_rep_reason([r["ratio"] for r in measured], idx)
             kind = "slow rep"
         else:
             why = (
