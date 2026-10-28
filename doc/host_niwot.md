@@ -55,6 +55,7 @@ CFM_SPEC_CONFIG=ryzen350_64gb.gcc_O3.cfg .venv/bin/cfm mine <benchmark>
 | 2026-10-26 | `807.ntest_s` | memory-bound 41.9% (corpus, under the 55% gate) | `-O3 -march=native -flto -fprofile-use` | **+19.21%** | [link](mining_results.807.ntest_s.2026-10-26.md) |
 | 2026-10-26 | `801.xz_s` | memory-bound 56.3% (corpus) | `-O3` (nothing accepted; `-flto` kept under #28, +0.08%; PGO +0.70%) | 0.0% | [link](mining_results.801.xz_s.2026-10-26.md) |
 | 2026-10-27 | `817.flac_s` | memory-bound 65.1% (corpus) | `-O3 -fprefetch-loop-arrays -march=native -mprefer-vector-width=256` (`-march=native` alone +128.6%) | **+148.16%** | [link](mining_results.817.flac_s.2026-10-27.md) |
+| 2026-10-28 | `823.llvm_s` | frontend-bound 58.5% (corpus) | `-O3 -flto -fprofile-use` (LTO +7.2%, PGO +11.9% on top) | **+19.96%** | [link](mining_results.823.llvm_s.2026-10-28.md) |
 
 ## Summary by suite
 
@@ -120,7 +121,7 @@ and ran PGO on plain `-O3` (26.79, +7.78%), so it never measured the two togethe
 | **Suite geomean gain (12, unmined = 1.00×)** | | | | +0.00% | |
 | Mined-only geomean (0 of 12) | — | — | | — | |
 
-### intspeed (8 of 13 mined)
+### intspeed (9 of 13 mined)
 
 | Benchmark | Base (`-O3`) | Best | Winning flags | Gain | Write-up |
 |---|---|---|---|---|---|
@@ -128,7 +129,7 @@ and ran PGO on plain `-O3` (26.79, +7.78%), so it never measured the two togethe
 | `807.ntest_s` | 0.9026 | 1.0760 | `-O3 -march=native -flto -fprofile-use` | **+19.21%** | [2026-10-26](mining_results.807.ntest_s.2026-10-26.md) |
 | `817.flac_s` | 2.387 | 5.923 | `-O3 -fprefetch-loop-arrays -march=native -mprefer-vector-width=256` | **+148.16%** | [2026-10-27](mining_results.817.flac_s.2026-10-27.md) |
 | `821.gcc_s` | — | — | not mined yet | — | |
-| `823.llvm_s` | — | — | not mined yet | — | |
+| `823.llvm_s` | 0.9252 | 1.1099 | `-O3 -flto -fprofile-use` | **+19.96%** | [2026-10-28](mining_results.823.llvm_s.2026-10-28.md) |
 | `827.cppcheck_s` | — | — | not mined yet | — | |
 | `829.abc_s` | 2.754 | 2.818 | `-O3 -flto` (follow-up) | **+2.32%** | [2026-10-25](mining_results.829.abc_s.2026-10-25.md#follow-up--o3-against--o3--flto-27-2026-10-25) |
 | `834.vpr_s` | 4.111 | 5.145 | `-O3 -flto -fprofile-use -march=znver5` | **+25.17%** | [2026-10-24](mining_results.834.vpr_s.2026-10-24.md) |
@@ -137,8 +138,8 @@ and ran PGO on plain `-O3` (26.79, +7.78%), so it never measured the two togethe
 | `846.minizinc_s` | 4.659 | 4.659 | `-O3` (nothing accepted) | 0.0% | [2026-10-24](mining_results.846.minizinc_s.2026-10-24.md) |
 | `853.ns3_s` | 6.527 | 7.602 | `-O3 -flto -fprofile-use` | **+16.46%** | [2026-10-24](mining_results.853.ns3_s.2026-10-24.md) |
 | `854.graph500_s` | — | — | not mined yet | — | |
-| **Suite geomean gain (13, unmined = 1.00×)** | | | | +12.55% | |
-| Mined-only geomean (8 of 13) | 2.792 | 3.383 | | +21.18% | |
+| **Suite geomean gain (13, unmined = 1.00×)** | | | | +14.13% | |
+| Mined-only geomean (9 of 13) | 2.469 | 2.989 | | +21.04% | |
 
 ### fpspeed (0 of 13 mined)
 
@@ -196,6 +197,7 @@ Suite geomean gain over every benchmark in the suite, unmined = 1.00×, recorded
 | `807.ntest_s` | +20.13% | +0.00% | +4.95% | +0.00% |
 | `801.xz_s` | +20.13% | +0.00% | +4.95% | +0.00% |
 | `817.flac_s` | +20.13% | +0.00% | +12.55% | +0.00% |
+| `823.llvm_s` | +20.13% | +0.00% | +14.13% | +0.00% |
 
 SPECspeed mining started on 2026-10-24 with `834.vpr_s`, the first `_s` benchmark cfm has mined on
 either host. Speed ratios come from one 16-thread process (`threads = 16`), not 16 copies. Since PR #55,
@@ -203,7 +205,7 @@ single-threaded speed benchmarks are pinned with `taskset` to a Zen5 CPU, and Op
 *i* to CPU *i*. pthread benchmarks (vpr_s among them) can't be pinned from outside and run unpinned.
 `853.ns3_s` was the first pinned mine (CPU 2); its baseline CI was ±0.23%, against ±0.6% for vpr_s and ±0.5% for ns3_r.
 `829.abc_s`, also pinned, was ±0.21%. `807.ntest_s`, the first OpenMP-placed mine, was ±0.33%. In speed, LTO paid about half its rate gain on ns3 (+10.3% vs +21.4%)
-and gem5 (+5.4% vs +11.0%), but more on vpr (+17.7% vs +11.4%) and ntest (+3.6% vs +2.3% on top of `-march=native`). PGO on ntest paid +3.7% in speed against +11.3% in rate.
+and gem5 (+5.4% vs +11.0%), but more on vpr (+17.7% vs +11.4%), ntest (+3.6% vs +2.3% on top of `-march=native`) and llvm (+7.2% vs +1.4%). PGO on top paid about a third to a half of its rate gain: ntest +3.7% vs +11.3%, llvm +11.9% vs +23.1%.
 fprate mining moved to another host after `782.lbm_r` hit this host's memory-bandwidth throttle
 ([note](lbm_swing_investigation.2026-10-23.md)).
 

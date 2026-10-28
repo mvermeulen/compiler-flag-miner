@@ -1201,6 +1201,8 @@ Full branch/PR discipline, same shape as wspy's:
   differ, none by more than 32. **Lesson:** calibrate a numeric-output tolerance against a build that is correct
   but rounds differently (x87, FMA, another compiler), not only against the flags that happen to agree.
 
+- **2026-10-28: on SPEC, every PGO rep is a different binary, so the slow-rep rerun can hide a bad PGO build.** SPEC retrains for each PGO build, and on `823.llvm_s` all 13 PGO builds had different code fingerprints (every non-PGO flagset reproduced its own exactly). One measured 28% slow with normal bandwidth and power, and the slow-rep rule replaced it with a rebuild. The rule assumes re-running measures the same code; for SPEC PGO it doesn't. Read a PGO flagset's reported mean as a typical build, and check fingerprints before blaming the environment for a slow PGO rep. `doc/opportunities_niwot.md` #32; the Phoronix backend reuses one profile per flagset since PR #63.
+
 ## Build & test
 
 ```
