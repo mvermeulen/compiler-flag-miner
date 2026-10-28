@@ -55,9 +55,9 @@ per-test output validator. Most of the good candidates need one or more of these
 | Extension | Tests it unlocks | Effort |
 |---|---|---|
 | Set `CFLAGS_OVERRIDE` alongside `CFLAGS` | the 12 in pattern 2 | **done** 2026-10-27 |
-| Lower-is-better scores (`Proportion` LIB): ratio = 1 / time | ~half the candidates (n-queens, c-ray, povray, compression, ...) | small |
+| Lower-is-better scores (`Proportion` LIB): ratio = 1 / time | ~half the candidates (n-queens, c-ray, povray, compression, ...) | **done** 2026-10-27 (with `DivideResultBy`/`MultiplyResultBy`) |
 | No `ResultsParser` at all: PTS times the whole run script itself | aobench, polybench-c, m-queens, smallpt, encode-*, hmmer, mafft, ... | small: time the run in the backend |
-| One fixed choice from an options menu (a `cfm` setting per test) | most media/crypto/HPC tests (scimark2, npb, x264, openssl, ...) | moderate |
+| One fixed choice from an options menu (a `cfm` setting per test) | most media/crypto/HPC tests (scimark2, npb, x264, openssl, ...) | **done** 2026-10-27 in its simplest form: a run override fixes the options (`_OPTIONS_FIXED_BY_RUN_OVERRIDE`; c-ray) |
 | `LineHint`/`LineBeforeHint`/`MultiplyResultBy`, several parsers | scimark2, cpuminer-opt, hpcc, john-the-ripper | moderate |
 | A validator per test | every test | per test: easy where the program checks itself, real work otherwise |
 
@@ -95,7 +95,7 @@ answer. Each of these still needs confirming against the real output.
 `scimark2` (C, a 6-result suite; pick one kernel or the composite), `npb` (C + Fortran, `CFLAGS_OVERRIDE`; the
 option picks the kernel; self-verifying), `stream` (Memory, `CFLAGS_OVERRIDE`; self-validating, but it measures
 bandwidth, which flags barely move and erie's bandwidth gate already watches), `compress-7zip` (its built-in
-benchmark; it hard-codes `-march=native` *before* ours), `john-the-ripper`, `c-ray` (Makefile; LIB),
+benchmark; it hard-codes `-march=native` *before* ours), `john-the-ripper`, `c-ray` (Makefile; LIB; **supported 2026-10-27**: its Makefile's own `CFLAGS` assignment overrides the environment, so PTS's c-ray is always `-O3 -ffast-math`; validated against a hash-pinned reference image),
 `compress-zstd`, `compress-lz4`, `lzbench`, `x264`, `x265`, `svt-vp9`, `dav1d`, `libgav1`, `kvazaar`,
 `vpxenc`, `webp`, `openssl`, `botan`, `nettle`, `cryptopp`, `simdjson`, `primesieve`, `povray` (LIB),
 `fftw`, `hpl`, `hpcg`, `minife`, `quicksilver`, `luajit`, `stockfish` (Makefile with its own `ARCH`; SPEC's
