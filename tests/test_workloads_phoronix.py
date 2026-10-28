@@ -15,7 +15,8 @@ from cfm.config import CfmConfig
 from cfm.workloads import workload_for
 from cfm.workloads.phoronix import (
     COREMARK_ITERATIONS, CRAFTY_SERIAL_NODES, TSCP_NODES, TSCP_PV, TSCP_RUNS, PhoronixWorkload,
-    _crafty_valid, _himeno_valid, _template_regex, _tscp_valid,
+    _c_ray_valid, _crafty_valid, _himeno_valid, _image_matches_reference, _ppm_pixels,
+    _template_regex, _tscp_valid,
 )
 from cfm.workloads import phoronix
 from cfm.workloads.spec_cpu2026 import SpecCpu2026Workload
@@ -215,7 +216,7 @@ def test_benchmark_languages_from_built_sources(workload):
 
 @pytest.mark.parametrize("kwargs, reason", [
     ({"bench": "pts/othertest-1.0.0"}, "no output validator"),
-    ({"proportion": "LIB"}, "only higher-is-better"),
+    ({"proportion": "XYZ"}, "only HIB or LIB"),
     ({"settings": "<TestSettings><Option><Identifier>x</Identifier></Option></TestSettings>"},
      "options menus"),
     ({"installed": False}, "phoronix-test-suite install"),
@@ -449,3 +450,121 @@ def test_himeno_template_reads_the_measured_line():
     pattern = _template_regex(" MFLOPS measured : #_RESULT_#\tcpu : 59.868463")
     text = HIMENO_LOG.format(rehearsal="3.288628e-03", final="0.000000e+00")
     assert pattern.findall(text) == ["7591.768531"]
+
+
+def test_template_regex_matches_any_number_where_the_template_has_one():
+    pattern = _template_regex("Rendering took: 86 seconds (#_RESULT_# milliseconds)")
+    assert pattern.findall("Rendering took: 77 seconds (77046 milliseconds)") == ["77046"]
+
+
+def test_lower_is_better_scores_are_scaled_then_inverted(tmp_path):
+    results = RESULTS_DEFINITION.replace(
+        "</OutputTemplate>", "</OutputTemplate>\n    <DivideResultBy>1000</DivideResultBy>",
+    )
+    workload = PhoronixWorkload(
+        make_pts_home(tmp_path, proportion="LIB", results_definition=results), tmp_path / "results",
+    )
+    config, result = build(workload, ["-O2"])
+    assert result.ok, result.raw_output
+    # Scores 1000.5, 1010.5, 1020.5 -> 1.0005 ... s -> 1/s; the median is the middle one.
+    assert measure(workload, config, iterations=3).ratio == pytest.approx(1 / 1.0105)
+
+
+def test_options_menu_is_accepted_when_the_run_override_fixes_it(tmp_path, monkeypatch):
+    menu = "<TestSettings><Option><Identifier>x</Identifier></Option></TestSettings>"
+    monkeypatch.setattr(phoronix, "_OPTIONS_FIXED_BY_RUN_OVERRIDE", frozenset({"coremark"}))
+    workload = PhoronixWorkload(make_pts_home(tmp_path, settings=menu), tmp_path / "results")
+    workload.generate_config(BENCH, "peak", ["-O2"])  # coremark has a run override
+
+
+def _ppm(pixels: bytes, width: int, height: int) -> bytes:
+    return b"P6\n# rendered with c-ray-fast v2.0\n%d %d\n255\n" % (width, height) + pixels
+
+
+def test_ppm_pixels_and_reference_comparison(monkeypatch):
+    reference = _ppm(bytes(range(60)) * 100, 50, 40)  # 6,000 channel values
+    assert _ppm_pixels(reference)[:2] == (50, 40)
+    assert _ppm_pixels(b"P5\n50 40\n255\n" + bytes(2000)) is None
+    assert _ppm_pixels(_ppm(bytes(10), 50, 40)) is None  # truncated
+    assert _image_matches_reference(reference, reference)
+    one_off = bytearray(reference)
+    one_off[-1] ^= 1
+    assert _image_matches_reference(bytes(one_off), reference)
+    many = bytearray(reference)
+    for i in range(61):  # 61 of 6,000 is over 1e-2
+        many[i * 97] ^= 1
+    assert not _image_matches_reference(bytes(many), reference)
+    far_off = bytearray(reference)
+    far_off[-1] = (far_off[-1] + 33) % 256  # one value, but by more than 32
+    assert not _image_matches_reference(bytes(far_off), reference)
+    far_off[-1] = (reference[-1] + 32) % 256
+    assert _image_matches_reference(bytes(far_off), reference)
+    monkeypatch.setattr(phoronix, "IMAGE_MAX_DIFFERING_FRACTION", 1e-4)
+    assert not _image_matches_reference(bytes(one_off), reference)
+    assert not _image_matches_reference(_ppm(bytes(range(60)) * 100, 40, 50), reference)
+
+
+def test_c_ray_validator():
+    assert _c_ray_valid("Using 16 threads\nRendering took: 77 seconds (77046 milliseconds)\n")
+    assert not _c_ray_valid("Using 16 threads\n")
+
+
+# The toy's run, plus an image written next to the log, as C-Ray's override does.
+# Octal escapes: dash's printf has no \x.
+_IMAGE_RUN = (
+    'cd coremark-master && ./coremark.exe > "$LOG_FILE" 2>&1 && '
+    "printf 'P6\\n2 1\\n255\\n\\001\\002\\003\\004\\005\\{last}' > \"$LOG_FILE.ppm\""
+)
+
+
+def _image_workload(tmp_path, monkeypatch, last="006", expected=None):
+    import hashlib
+    monkeypatch.setitem(phoronix._RUN_OVERRIDES, "coremark", _IMAGE_RUN.format(last=last))
+    reference = b"P6\n2 1\n255\n\x01\x02\x03\x04\x05\x06"
+    monkeypatch.setitem(phoronix._REFERENCE_IMAGES, "coremark", (
+        ("-O1",), expected or hashlib.sha256(reference).hexdigest(),
+    ))
+    return PhoronixWorkload(make_pts_home(tmp_path), tmp_path / "results")
+
+
+def test_reference_image_is_rendered_once_and_runs_are_checked_against_it(tmp_path, monkeypatch):
+    workload = _image_workload(tmp_path, monkeypatch)
+    config, result = build(workload, ["-O2"])
+    assert result.ok, result.raw_output
+    assert "reference image: rendered and verified" in result.raw_output
+    _, again = build(workload, ["-O2"])
+    assert "reference image" not in again.raw_output  # cached
+    run = measure(workload, config, iterations=1)
+    assert run.ok and run.validated
+    assert not list(Path(run.result_files[0]).parent.glob("*.ppm"))  # matching images are deleted
+
+
+def test_a_differing_image_fails_validation(tmp_path, monkeypatch):
+    workload = _image_workload(tmp_path, monkeypatch)
+    config, _ = build(workload, ["-O2"])
+    monkeypatch.setitem(phoronix._RUN_OVERRIDES, "coremark", _IMAGE_RUN.format(last="007"))
+    run = measure(workload, config, iterations=1)
+    assert not run.ok and run.status == "validate-failed"
+    assert list(Path(run.result_files[0]).parent.glob("*.ppm"))  # kept for inspection
+
+
+def test_an_unverified_reference_image_fails_the_build(tmp_path, monkeypatch):
+    workload = _image_workload(tmp_path, monkeypatch, expected="0" * 64)
+    _, result = build(workload, ["-O2"])
+    assert not result.ok
+    assert "not measuring against an unverified reference" in result.raw_output
+
+
+def test_training_override_replaces_the_training_run_and_its_counter_mode(tmp_path, monkeypatch):
+    workload = _image_workload(tmp_path, monkeypatch)
+    # The training run writes an image that doesn't match the reference; it isn't checked.
+    monkeypatch.setitem(phoronix._TRAIN_OVERRIDES, "coremark", (
+        _IMAGE_RUN.format(last="007") + " && echo trained-by-override >> \"$LOG_FILE\"",
+        "-fprofile-update=single",
+    ))
+    _, result = build(workload, ["-O2", "-fprofile-use"])
+    assert result.ok, result.raw_output
+    assert "trained-by-override" in result.raw_output
+    assert "-fprofile-update=single" in result.raw_output
+    assert "-fprofile-update=atomic" not in result.raw_output
+    assert not list((tmp_path / "results").rglob("pgo-train.log.ppm"))

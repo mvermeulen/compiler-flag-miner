@@ -30,9 +30,12 @@ Two things PTS doesn't provide that this project needs are handled here:
   and retraining per rep gave each rep different code, widening PGO's CI enough
   to reject a +1.8% reading (doc/mining_results.pts_crafty-1.4.5.2026-10-27.md).
 
-Only the simplest profile shape is supported: one ``OutputTemplate``, no test
-options menu, no ``pre.sh``/``post.sh``/``interim.sh``, higher-is-better scores
-(the trial ratio is the score itself). Anything else is refused with a reason.
+Only the simplest profile shapes are supported: one ``OutputTemplate`` (with
+``DivideResultBy``/``MultiplyResultBy`` allowed), no ``pre.sh``/``post.sh``/
+``interim.sh``, and no test options menu unless the test's run override fixes
+the options (``_OPTIONS_FIXED_BY_RUN_OVERRIDE``). The trial ratio is the score
+for a higher-is-better test and 1 / score for a lower-is-better one (C-Ray's
+render time becomes renders per second). Anything else is refused with a reason.
 
 The trial's flags also go in as ``CFLAGS_OVERRIDE``. About a dozen profiles
 (tscp, crafty, n-queens, ...) build with ``CFLAGS="$CFLAGS -O3 -march=native"``
@@ -71,9 +74,26 @@ _PGO_USE_FLAG = "-fprofile-use"
 _PGO_PASS1_EXTRA = "-fprofile-update=atomic"
 _PGO_PASS2_EXTRA = "-fprofile-correction"
 
+# Test name -> shell command for the PGO training run, in place of the measured
+# run's command, and the instrumented build's -fprofile-update to go with it.
+# C-Ray's instrumented build with atomic counters rendered 480x270 in 243 s on
+# 16 threads and 138 s on one, against 5 s uninstrumented (erie, 2026-10-27):
+# its per-ray code is dense with counters, and the 1080p training run hadn't
+# finished after 10 minutes. One thread can't race, so non-atomic counters are
+# safe there, and it renders 480x270 in 32 s. The image is a different size
+# from the reference, so a training run's image isn't checked.
+_TRAIN_OVERRIDES: dict[str, tuple[str, str]] = {
+    "c-ray": (
+        'cd c-ray-2.0 && ./c-ray-fast -t 1 -s 480x270 -r 16 -i sphfract.scn '
+        '-o "$LOG_FILE.ppm" > "$LOG_FILE" 2>&1',
+        "-fprofile-update=single",
+    ),
+}
+
 _RESULT_PLACEHOLDER = "#_RESULT_#"
 _PLACEHOLDER_RE = re.compile(r"#_[A-Z0-9_]+_#")
 _NUMBER_RE = r"([-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)"
+_LITERAL_NUMBER_RE = re.compile(r"[-+]?\d+(?:\.\d+)?")
 
 _SOURCE_LANGUAGES = {
     ".c": "c",
@@ -157,10 +177,72 @@ def _himeno_valid(log: str) -> bool:
     )
 
 
+def _c_ray_valid(log: str) -> bool:
+    # The rendered image itself is checked against a reference by
+    # _image_matches_reference(); the log only has to show a finished render.
+    return len(re.findall(r"^Rendering took: \d+ seconds \(\d+ milliseconds\)$", log, re.M)) == 1
+
+
+# C-Ray renders 1920x1080 (PTS's smallest resolution option, about 77 s on 16
+# threads on erie) at 16 rays per pixel, the profile's only rays option.
+C_RAY_RESOLUTION = "1920x1080"
+
+# Test name -> (flags, sha256) of a reference image: a build of the same source
+# with these flags renders it once per output root, and the hash pins it, so a
+# changed source or a broken reference build is caught rather than trusted. A
+# measured run's image must match it except for rounding differences: at most
+# IMAGE_MAX_DIFFERING_FRACTION of its channel values may differ, none by more
+# than IMAGE_MAX_CHANNEL_DIFFERENCE. C-Ray's 1080p image is byte-identical from
+# -O0 through -O3, and PTS's own -O3 -ffast-math build, but builds that round
+# differently drift where rays bounce many times (the fractal's centre): a
+# strict-IEEE -O2 -mfpmath=387 build changes 0.13% of values by up to 7, and
+# -O3 -ffast-math with -flto or -fprofile-use 0.2% by up to 8 (erie,
+# 2026-10-28). A miscompiled ray tracer changes far more, or by far more.
+_REFERENCE_IMAGES: dict[str, tuple[tuple[str, ...], str]] = {
+    "c-ray": (("-O2",), "ad97267474dc09f6a987c751942d6b1caf58e119b27763af63a3a3a00f2e3b4c"),
+}
+IMAGE_MAX_DIFFERING_FRACTION = 1e-2
+IMAGE_MAX_CHANNEL_DIFFERENCE = 32
+
+
+def _ppm_pixels(data: bytes) -> Optional[tuple[int, int, bytes]]:
+    """A binary PPM (P6, maxval 255) -> (width, height, pixel bytes), or None.
+    Header comment lines (C-Ray writes one) are skipped."""
+    fields: list[bytes] = []
+    pos = 0
+    while len(fields) < 4:
+        end = data.find(b"\n", pos)
+        if end < 0:
+            return None
+        line = data[pos:end].split(b"#", 1)[0]
+        fields.extend(line.split())
+        pos = end + 1
+    if fields[0] != b"P6" or fields[3] != b"255":
+        return None
+    try:
+        width, height = int(fields[1]), int(fields[2])
+    except ValueError:
+        return None
+    pixels = data[pos:]
+    return (width, height, pixels) if len(pixels) == width * height * 3 else None
+
+
+def _image_matches_reference(image: bytes, reference: bytes) -> bool:
+    got, want = _ppm_pixels(image), _ppm_pixels(reference)
+    if got is None or want is None or got[:2] != want[:2]:
+        return False
+    if got[2] == want[2]:
+        return True
+    differences = [abs(a - b) for a, b in zip(got[2], want[2]) if a != b]
+    return (len(differences) <= IMAGE_MAX_DIFFERING_FRACTION * len(want[2])
+            and max(differences) <= IMAGE_MAX_CHANNEL_DIFFERENCE)
+
+
 # Test name (identifier without "pts/" and version) -> output check.
 _VALIDATORS: dict[str, Callable[[str], bool]] = {
     "coremark": _coremark_valid,
     "crafty": _crafty_valid,
+    "c-ray": _c_ray_valid,
     "himeno": _himeno_valid,
     "tscp": _tscp_valid,
 }
@@ -215,7 +297,24 @@ echo $? > ~/install-exit-status
 printf '#!/bin/sh\\n./himenobmtxpa s > "$LOG_FILE" 2>&1\\necho $? > ~/test-exit-status\\n' > himeno
 chmod +x himeno
 """,
+    # C-Ray: install.sh runs a plain `make`, and the Makefile's own
+    # `CFLAGS = -pedantic -Wall -g -O3 -ffast-math` overrides the environment, so
+    # PTS's c-ray is always that build. The override passes upstream's
+    # non-optimization flags followed by the trial's, and the trial's flags on
+    # the link line too (the Makefile links with LDFLAGS only), which -flto and
+    # PGO's instrumented build need.
+    "c-ray": """tar -xf c-ray-2.0.tar.gz
+cd c-ray-2.0
+make CFLAGS="-pedantic -Wall -g $CFLAGS" LDFLAGS="$CFLAGS -lpthread -lm"
+echo $? > ~/install-exit-status
+cd ~
+printf '#!/bin/sh\\ncd c-ray-2.0\\n./c-ray-fast "$@" -i sphfract.scn -o output.ppm > "$LOG_FILE" 2>&1\\necho $? > ~/test-exit-status\\n' > c-ray
+chmod +x c-ray
+""",
 }
+
+# Tests whose options menu (resolution and so on) the run override fixes.
+_OPTIONS_FIXED_BY_RUN_OVERRIDE = frozenset({"c-ray"})
 
 # Coremark's per-process iteration count. With no arguments (how PTS's wrapper
 # runs it) coremark sizes its own run: it times 10x more iterations until a run
@@ -253,6 +352,12 @@ _RUN_OVERRIDES: dict[str, str] = {
         f'for i in $(seq {HIMENO_RUNS}); do taskset -c {{cpu}} ./himenobmtxpa s || exit $?; done '
         '> "$LOG_FILE" 2>&1'
     ),
+    # All threads (C-Ray's default, one per online CPU), unpinned. The image goes
+    # next to the log, for _image_matches_reference().
+    "c-ray": (
+        f'cd c-ray-2.0 && ./c-ray-fast -s {C_RAY_RESOLUTION} -r 16 -i sphfract.scn '
+        '-o "$LOG_FILE.ppm" > "$LOG_FILE" 2>&1'
+    ),
 }
 
 
@@ -266,6 +371,8 @@ class _Profile:
     executable: str
     arguments: str
     output_template: str
+    lower_is_better: bool = False
+    result_scale: float = 1.0   # DivideResultBy/MultiplyResultBy, applied to each match
 
 
 def _text(root: ET.Element, path: str) -> str:
@@ -283,7 +390,9 @@ def _template_regex(template: str) -> re.Pattern:
     any other ``#_..._#`` placeholder matches one non-space token, and runs of
     whitespace match any whitespace. Tokens after the result's are dropped: PTS
     picks the result by its position on the line, and templates often carry a
-    sample of the rest (TSCP's ends in "(Score: 1.034)", which varies per run)."""
+    sample of the rest (TSCP's ends in "(Score: 1.034)", which varies per run).
+    For the same reason a literal number before the result matches any number
+    (C-Ray's "Rendering took: 86 seconds (#_RESULT_# milliseconds)")."""
     lines = [line for line in template.splitlines() if _RESULT_PLACEHOLDER in line]
     if len(lines) != 1:
         raise ValueError(f"OutputTemplate must have exactly one {_RESULT_PLACEHOLDER} line: {template!r}")
@@ -295,6 +404,7 @@ def _template_regex(template: str) -> re.Pattern:
         parts.append("".join(
             _NUMBER_RE if piece == _RESULT_PLACEHOLDER
             else r"\S+" if _PLACEHOLDER_RE.fullmatch(piece)
+            else r"[-+]?\d+(?:\.\d+)?" if _LITERAL_NUMBER_RE.fullmatch(piece)
             else re.escape(piece)
             for piece in pieces
         ))
@@ -359,22 +469,37 @@ class PhoronixWorkload(WorkloadBackend):
             problems.append("no install.sh")
 
         definition = ET.parse(profile_dir / "test-definition.xml").getroot()
-        if definition.find("TestSettings/Option") is not None:
-            problems.append("test options menus aren't supported")
+        if definition.find("TestSettings/Option") is not None and not (
+            name in _OPTIONS_FIXED_BY_RUN_OVERRIDE and name in _RUN_OVERRIDES
+        ):
+            problems.append(
+                "test options menus aren't supported unless a run override fixes them "
+                "(_OPTIONS_FIXED_BY_RUN_OVERRIDE)"
+            )
         proportion = _text(definition, "TestInformation/Proportion") or "HIB"
-        if proportion != "HIB":
-            problems.append(f"Proportion {proportion} isn't supported (only higher-is-better)")
+        if proportion not in ("HIB", "LIB"):
+            problems.append(f"Proportion {proportion} isn't supported (only HIB or LIB)")
 
         template = ""
+        result_scale = 1.0
         results_path = profile_dir / "results-definition.xml"
         parsers = ET.parse(results_path).getroot().findall("ResultsParser") if results_path.exists() else []
         if len(parsers) != 1:
             problems.append(f"expected exactly one ResultsParser, found {len(parsers)}")
         else:
-            extra = sorted({child.tag for child in parsers[0]} - {"OutputTemplate"})
+            extra = sorted(
+                {child.tag for child in parsers[0]} - {"OutputTemplate", "DivideResultBy", "MultiplyResultBy"}
+            )
             if extra:
                 problems.append(f"ResultsParser settings {extra} aren't supported")
             template = _text(parsers[0], "OutputTemplate")
+            try:
+                result_scale = (
+                    float(_text(parsers[0], "MultiplyResultBy") or 1)
+                    / float(_text(parsers[0], "DivideResultBy") or 1)
+                )
+            except (ValueError, ZeroDivisionError):
+                problems.append("unreadable DivideResultBy/MultiplyResultBy")
             try:
                 _template_regex(template)
             except ValueError as exc:
@@ -402,6 +527,8 @@ class PhoronixWorkload(WorkloadBackend):
             executable=_text(definition, "TestInformation/Executable") or name,
             arguments=_text(definition, "TestSettings/Default/Arguments"),
             output_template=template,
+            lower_is_better=proportion == "LIB",
+            result_scale=result_scale,
         )
 
     # -- paths and environment ----------------------------------------------
@@ -448,6 +575,11 @@ class PhoronixWorkload(WorkloadBackend):
         # audit_compiled_flags() read back what was actually compiled.
         plain = [f for f in flags if f not in (_PGO_TRAIN_FLAG, _PGO_USE_FLAG)] + ["-frecord-gcc-switches"]
 
+        ok, reference_raw = self._ensure_reference_image(prof)
+        if not ok:
+            log_path.write_text(reference_raw)
+            return BuildResult(ok=False, log_path=log_path, raw_output=reference_raw)
+
         if _PGO_USE_FLAG not in flags:
             ok, raw = self._install(prof, plain)
         else:
@@ -459,7 +591,8 @@ class PhoronixWorkload(WorkloadBackend):
                 ok, raw = True, f"## PGO: reusing the profile trained earlier for these flags ({profile_data})\n"
             else:
                 shutil.rmtree(profile_data, ignore_errors=True)
-                ok, raw = self._install(prof, plain + [f"{_PGO_TRAIN_FLAG}={profile_data}", _PGO_PASS1_EXTRA])
+                update = _TRAIN_OVERRIDES[prof.name][1] if prof.name in _TRAIN_OVERRIDES else _PGO_PASS1_EXTRA
+                ok, raw = self._install(prof, plain + [f"{_PGO_TRAIN_FLAG}={profile_data}", update])
                 if ok:
                     ok, train_raw = self._train(prof)
                     raw += train_raw
@@ -471,8 +604,57 @@ class PhoronixWorkload(WorkloadBackend):
                 )
                 raw += use_raw
 
+        raw = reference_raw + raw
         log_path.write_text(raw)
         return BuildResult(ok=ok, log_path=log_path, raw_output=raw)
+
+    def _reference_image_path(self, prof: _Profile) -> Path:
+        return self.output_root / ".cache" / "phoronix" / prof.identifier[len(PTS_PREFIX):] / "reference.ppm"
+
+    def _ensure_reference_image(self, prof: _Profile) -> tuple[bool, str]:
+        """For a test in ``_REFERENCE_IMAGES``, render the reference image once
+        (a build with the reference flags, then one run) and check its hash.
+        Kept under ``<output_root>/.cache`` and reused while its hash matches."""
+        if prof.name not in _REFERENCE_IMAGES:
+            return True, ""
+        flags, expected = _REFERENCE_IMAGES[prof.name]
+        path = self._reference_image_path(prof)
+        if path.exists() and hashlib.sha256(path.read_bytes()).hexdigest() == expected:
+            return True, ""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        ok, raw = self._install(prof, list(flags))
+        raw = f"## reference image: build with {' '.join(flags)}\n{raw}"
+        if not ok:
+            return False, raw + "## reference image: build FAILED\n"
+        log = path.with_name("reference.log")
+        proc = subprocess.run(
+            ["sh", "-c", self._run_script(prof, log)],
+            cwd=self.build_dir(prof.identifier), env=self._env(prof.identifier),
+            capture_output=True, text=True,
+        )
+        rendered = Path(f"{log}.ppm")
+        digest = hashlib.sha256(rendered.read_bytes()).hexdigest() if rendered.exists() else None
+        if proc.returncode != 0 or digest != expected:
+            return False, raw + (
+                f"## reference image: render exited {proc.returncode}, sha256 {digest}, expected {expected} "
+                "-- not measuring against an unverified reference\n"
+            )
+        rendered.replace(path)
+        return True, raw + f"## reference image: rendered and verified ({path})\n"
+
+    def _image_valid(self, prof: _Profile, log: Path) -> bool:
+        """For a test in ``_REFERENCE_IMAGES``: does the image the run wrote next
+        to ``log`` match the reference? A matching image is deleted (C-Ray's is
+        6 MB per run); a mismatch is kept for inspection."""
+        if prof.name not in _REFERENCE_IMAGES:
+            return True
+        image, reference = Path(f"{log}.ppm"), self._reference_image_path(prof)
+        if not image.exists() or not reference.exists():
+            return False
+        if not _image_matches_reference(image.read_bytes(), reference.read_bytes()):
+            return False
+        image.unlink()
+        return True
 
     def _install(self, prof: _Profile, cflags: list[str]) -> tuple[bool, str]:
         build_dir = self.build_dir(prof.identifier)
@@ -499,21 +681,26 @@ class PhoronixWorkload(WorkloadBackend):
     def _train(self, prof: _Profile) -> tuple[bool, str]:
         """One unmeasured run of the instrumented build, writing the PGO profile."""
         log = self._work_dir(prof.identifier) / "pgo-train.log"
+        override = _TRAIN_OVERRIDES.get(prof.name)
         proc = subprocess.run(
-            ["sh", "-c", self._run_script(prof, log)],
+            ["sh", "-c", self._run_script(prof, log, command=override[0] if override else None)],
             cwd=self.build_dir(prof.identifier), env=self._env(prof.identifier),
             capture_output=True, text=True,
         )
         text = log.read_text(errors="replace") if log.exists() else ""
         ok = proc.returncode == 0 and _VALIDATORS[prof.name](text)
+        if override is None:
+            ok = ok and self._image_valid(prof, log)
+        else:
+            Path(f"{log}.ppm").unlink(missing_ok=True)
         return ok, f"## PGO training run ({'ok' if ok else 'FAILED'})\n{proc.stdout}{proc.stderr}{text}"
 
-    def _run_script(self, prof: _Profile, log: Path) -> str:
+    def _run_script(self, prof: _Profile, log: Path, command: Optional[str] = None) -> str:
         # PTS runs the test script with cwd and HOME both the install directory;
         # the script writes its output to $LOG_FILE and its exit status to
         # ~/test-exit-status. Fail on either.
         build_dir = shlex.quote(str(self.build_dir(prof.identifier)))
-        command = _RUN_OVERRIDES.get(prof.name)
+        command = command or _RUN_OVERRIDES.get(prof.name)
         if command is None:
             command = f"./{shlex.quote(prof.executable)} {prof.arguments}"
         elif "{cpu}" in command:
@@ -570,12 +757,19 @@ class PhoronixWorkload(WorkloadBackend):
             matches = pattern.findall(text)
             if not matches:
                 return failed
+            if not self._image_valid(prof, log):
+                return failed
             if prof.name in _FIRST_SCORE_ONLY:
                 matches = matches[:1]
             # A log with several scores (TSCP's and himeno's repeated runs)
             # contributes their mean: TSCP's scores are quantized, and a median
             # would stay on a step.
-            scores.append(statistics.fmean(float(m) for m in matches))
+            value = statistics.fmean(float(m) for m in matches) * prof.result_scale
+            if prof.lower_is_better:
+                if value <= 0:
+                    return failed
+                value = 1.0 / value
+            scores.append(value)
         # Median across iterations, the same outlier-robust aggregate the SPEC
         # backend uses for its per-iteration ratios.
         return RunResult(
