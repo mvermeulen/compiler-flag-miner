@@ -190,15 +190,19 @@ C_RAY_RESOLUTION = "1920x1080"
 # Test name -> (flags, sha256) of a reference image: a build of the same source
 # with these flags renders it once per output root, and the hash pins it, so a
 # changed source or a broken reference build is caught rather than trusted. A
-# measured run's image must match it except for a few rounding differences
-# (IMAGE_MAX_DIFFERING_FRACTION of its channel values). C-Ray's 1080p image is
-# byte-identical from -O0 through -O3, and PTS's own -O3 -ffast-math build;
-# -Ofast -march=native -funroll-loops changes one channel value of 6.2 million,
-# by 1 (erie, 2026-10-27). A miscompiled ray tracer changes far more.
+# measured run's image must match it except for rounding differences: at most
+# IMAGE_MAX_DIFFERING_FRACTION of its channel values may differ, none by more
+# than IMAGE_MAX_CHANNEL_DIFFERENCE. C-Ray's 1080p image is byte-identical from
+# -O0 through -O3, and PTS's own -O3 -ffast-math build, but builds that round
+# differently drift where rays bounce many times (the fractal's centre): a
+# strict-IEEE -O2 -mfpmath=387 build changes 0.13% of values by up to 7, and
+# -O3 -ffast-math with -flto or -fprofile-use 0.2% by up to 8 (erie,
+# 2026-10-28). A miscompiled ray tracer changes far more, or by far more.
 _REFERENCE_IMAGES: dict[str, tuple[tuple[str, ...], str]] = {
     "c-ray": (("-O2",), "ad97267474dc09f6a987c751942d6b1caf58e119b27763af63a3a3a00f2e3b4c"),
 }
-IMAGE_MAX_DIFFERING_FRACTION = 1e-4
+IMAGE_MAX_DIFFERING_FRACTION = 1e-2
+IMAGE_MAX_CHANNEL_DIFFERENCE = 32
 
 
 def _ppm_pixels(data: bytes) -> Optional[tuple[int, int, bytes]]:
@@ -229,8 +233,9 @@ def _image_matches_reference(image: bytes, reference: bytes) -> bool:
         return False
     if got[2] == want[2]:
         return True
-    differing = sum(1 for a, b in zip(got[2], want[2]) if a != b)
-    return differing <= IMAGE_MAX_DIFFERING_FRACTION * len(want[2])
+    differences = [abs(a - b) for a, b in zip(got[2], want[2]) if a != b]
+    return (len(differences) <= IMAGE_MAX_DIFFERING_FRACTION * len(want[2])
+            and max(differences) <= IMAGE_MAX_CHANNEL_DIFFERENCE)
 
 
 # Test name (identifier without "pts/" and version) -> output check.

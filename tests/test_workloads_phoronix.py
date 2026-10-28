@@ -489,9 +489,18 @@ def test_ppm_pixels_and_reference_comparison(monkeypatch):
     assert _image_matches_reference(reference, reference)
     one_off = bytearray(reference)
     one_off[-1] ^= 1
-    assert not _image_matches_reference(bytes(one_off), reference)  # 1 of 6,000 is over 1e-4
-    monkeypatch.setattr(phoronix, "IMAGE_MAX_DIFFERING_FRACTION", 1e-3)
     assert _image_matches_reference(bytes(one_off), reference)
+    many = bytearray(reference)
+    for i in range(61):  # 61 of 6,000 is over 1e-2
+        many[i * 97] ^= 1
+    assert not _image_matches_reference(bytes(many), reference)
+    far_off = bytearray(reference)
+    far_off[-1] = (far_off[-1] + 33) % 256  # one value, but by more than 32
+    assert not _image_matches_reference(bytes(far_off), reference)
+    far_off[-1] = (reference[-1] + 32) % 256
+    assert _image_matches_reference(bytes(far_off), reference)
+    monkeypatch.setattr(phoronix, "IMAGE_MAX_DIFFERING_FRACTION", 1e-4)
+    assert not _image_matches_reference(bytes(one_off), reference)
     assert not _image_matches_reference(_ppm(bytes(range(60)) * 100, 40, 50), reference)
 
 
