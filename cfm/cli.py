@@ -83,6 +83,11 @@ def build_parser() -> argparse.ArgumentParser:
              "focused run",
     )
     mine.add_argument(
+        "--no-shape-filter", action="store_true",
+        help="don't drop Phase 2 candidates whose topdown_signals contradict the baseline's "
+             "characterized shape; screen every catalog flag",
+    )
+    mine.add_argument(
         "--skip-vector-width", action="store_true",
         help="skip Phase 6's vector-width multiplier (-mprefer-vector-width=256/512, tried "
              "only on top of a winning set that has an -march=)",
@@ -182,6 +187,7 @@ def main(argv=None) -> int:
 
                 candidates = orchestrator.generate_candidates(
                     cfg, benchmark=args.benchmark, baseline=baseline, compiler=compiler,
+                    shape_filter=not args.no_shape_filter,
                 )
                 budget_exhausted = False
                 if args.max_trials is not None:

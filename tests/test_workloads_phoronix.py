@@ -15,7 +15,7 @@ from cfm.config import CfmConfig
 from cfm.workloads import workload_for
 from cfm.workloads.phoronix import (
     COREMARK_ITERATIONS, CRAFTY_SERIAL_NODES, TSCP_NODES, TSCP_PV, TSCP_RUNS, PhoronixWorkload,
-    _crafty_valid, _template_regex, _tscp_valid,
+    _crafty_valid, _himeno_valid, _template_regex, _tscp_valid,
 )
 from cfm.workloads import phoronix
 from cfm.workloads.spec_cpu2026 import SpecCpu2026Workload
@@ -414,3 +414,38 @@ def test_workload_for_keeps_one_phoronix_backend_so_pgo_profiles_are_reused(tmp_
     assert "PGO training run (ok)" in built.raw_output
     _, rebuilt = build(workload_for(cfg, BENCH), ["-O2", "-fprofile-use"])
     assert "reusing the profile" in rebuilt.raw_output
+
+
+HIMENO_LOG = """ MFLOPS: 7552.172875 time(s): 0.006282 {rehearsal}
+
+ Loop executed for 28653 times
+ Gosa : {final} 
+ MFLOPS measured : 7591.768531\tcpu : 59.686449
+"""
+
+
+@pytest.mark.parametrize("rehearsal, final, ok", [
+    ("3.288628e-03", "0.000000e+00", True),
+    ("3.288662e-03", "0.000000e+00", True),   # -ffast-math -march=native on erie
+    ("3.300000e-03", "0.000000e+00", False),  # off by 0.3%
+    ("3.288628e-03", "nan", False),
+    ("3.288628e-03", "1.000000e+00", False),  # residual grew
+])
+def test_himeno_validator(rehearsal, final, ok):
+    assert _himeno_valid(HIMENO_LOG.format(rehearsal=rehearsal, final=final)) is ok
+    assert not _himeno_valid("")
+
+
+def test_himeno_validator_checks_every_run_in_the_log():
+    good = HIMENO_LOG.format(rehearsal="3.288628e-03", final="0.000000e+00")
+    bad = HIMENO_LOG.format(rehearsal="3.300000e-03", final="0.000000e+00")
+    assert _himeno_valid(good * 3)
+    assert not _himeno_valid(good + bad + good)
+    # A run cut off before its result line.
+    assert not _himeno_valid(good + good.split(" Loop")[0])
+
+
+def test_himeno_template_reads_the_measured_line():
+    pattern = _template_regex(" MFLOPS measured : #_RESULT_#\tcpu : 59.868463")
+    text = HIMENO_LOG.format(rehearsal="3.288628e-03", final="0.000000e+00")
+    assert pattern.findall(text) == ["7591.768531"]

@@ -706,7 +706,7 @@ def _filter_implausible_candidates(
 
 def generate_candidates(
     cfg: CfmConfig, *, benchmark: str, baseline: BaselineResult,
-    compiler: Optional[GccCompiler] = None,
+    compiler: Optional[GccCompiler] = None, shape_filter: bool = True,
 ) -> list[FlagCandidate]:
     """doc/DESIGN.md sec. 6 Phase 2: every catalog entry applicable to this
     benchmark's language(s), signature-*ranked* then filtered. ``baseline`` itself
@@ -723,10 +723,17 @@ def generate_candidates(
     already-characterized shape -- "never spend a trial on a mechanically-
     implausible flag" -- a distinct, still-real *exclude* pass on top of ranking,
     not replaced by it: ranking only reorders what filtering leaves standing.
+    ``shape_filter=False`` (``cfm mine --no-shape-filter``) skips that pass and
+    keeps every ranked candidate: on pts/himeno (2026-10-27) a 61.9% memory-bound
+    read excluded 11 of 15 flags, the fast-math family among them, from a
+    vectorized floating-point solver.
     """
     compiler = compiler or GccCompiler()
     languages = workload_for(cfg, benchmark).benchmark_languages(benchmark)
     candidates = compiler.candidate_flags_for_signature(baseline, languages)
+    if not shape_filter:
+        print("info: --no-shape-filter -- keeping every candidate whatever the baseline shape")
+        return candidates
     return _filter_implausible_candidates(candidates, baseline)
 
 

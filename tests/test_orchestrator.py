@@ -516,6 +516,29 @@ def test_generate_candidates_passes_the_whole_baseline_through_for_m2_ranking(tm
     assert "-vector-flag" not in {c.flag for c in filtered}
 
 
+def test_generate_candidates_without_the_shape_filter_keeps_every_candidate(tmp_path):
+    cfg = _cfg(tmp_path)
+    _write_object_pm(Path(cfg.spec_dir), "fake_r", "C")
+    catalog_path = tmp_path / "catalog.json"
+    catalog_path.write_text(json.dumps({
+        "schema_version": 1, "source": "test", "note": "test",
+        "flags": [
+            {"flag": "-compute-flag", "languages": ["c"], "category": "misc", "risk": "safe",
+             "requires": [], "conflicts": [], "notes": "", "topdown_signals": ["compute-bound"]},
+        ],
+    }))
+    compiler = GccCompiler(catalog_path=catalog_path)
+    baseline = _baseline(resource_dominance="memory-bound")
+    baseline.resource_dominance_pct = 61.9
+
+    filtered = generate_candidates(cfg, benchmark="fake_r", baseline=baseline, compiler=compiler)
+    unfiltered = generate_candidates(
+        cfg, benchmark="fake_r", baseline=baseline, compiler=compiler, shape_filter=False,
+    )
+    assert filtered == []
+    assert [c.flag for c in unfiltered] == ["-compute-flag"]
+
+
 # -- _filter_implausible_candidates (M2.5 item 3) --------------------------------
 
 def _signaled_candidate(flag, topdown_signals):

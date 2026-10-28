@@ -129,15 +129,53 @@ def _crafty_valid(log: str) -> bool:
     )
 
 
+# Himeno times itself for a fixed duration, so its iteration count varies with
+# speed, and after ~28,000 iterations its final residual ("Gosa") underflows to
+# exactly 0. The check uses the residual of its 3-iteration rehearsal instead:
+# exactly this value for -O0 through -O3 builds on erie (2026-10-27), within
+# about 1e-5 relative for -ffast-math and AVX-512 builds, which reassociate the
+# residual's sum. A miscompiled solver lands far outside HIMENO_GOSA_REL_TOL.
+HIMENO_REHEARSAL_GOSA = 3.288628e-03
+HIMENO_GOSA_REL_TOL = 1e-4
+
+
+def _himeno_valid(log: str) -> bool:
+    # One log holds HIMENO_RUNS runs; every one has to check out.
+    rehearsals = re.findall(r"MFLOPS: \S+ time\(s\): \S+ (\S+)", log)
+    finals = re.findall(r"^ Gosa : (\S+)", log, re.M)
+    measured = log.count("MFLOPS measured :")
+    if not rehearsals or not (len(rehearsals) == len(finals) == measured):
+        return False
+    try:
+        pairs = [(float(r), float(f)) for r, f in zip(rehearsals, finals)]
+    except ValueError:
+        return False
+    return all(
+        abs(gosa - HIMENO_REHEARSAL_GOSA) <= HIMENO_GOSA_REL_TOL * HIMENO_REHEARSAL_GOSA
+        and 0.0 <= final_gosa <= gosa  # rejects nan too
+        for gosa, final_gosa in pairs
+    )
+
+
 # Test name (identifier without "pts/" and version) -> output check.
 _VALIDATORS: dict[str, Callable[[str], bool]] = {
     "coremark": _coremark_valid,
     "crafty": _crafty_valid,
+    "himeno": _himeno_valid,
     "tscp": _tscp_valid,
 }
 
 # Tests whose log holds later scores that aren't the benchmark's own result.
 _FIRST_SCORE_ONLY = frozenset({"crafty"})
+
+# Himeno's timed loop runs for this many seconds (60 upstream); see _BUILD_OVERRIDES.
+HIMENO_TARGET_SECONDS = 20.0
+
+# One himeno run's score varied by about 4% between runs of the same binary in
+# its first mine (experiment 13, 2026-10-27), which made the baseline CI about
+# +-5% wide. The run override runs it this many times and parse_result()
+# averages the scores, as for TSCP.
+HIMENO_RUNS = 3
 
 # Test name -> shell script run in place of the profile's install.sh, with the
 # same environment, for a profile whose build never lets CFLAGS reach the
@@ -161,6 +199,21 @@ echo $? > ~/install-exit-status
 cd ~
 printf '#!/bin/sh\\n./crafty "$@" > "$LOG_FILE" 2>&1\\necho $? > ~/test-exit-status\\n' > crafty-benchmark
 chmod +x crafty-benchmark
+""",
+    # Himeno: install.sh no longer builds with GCC 14+, which rejects the
+    # source's implicit declarations of free() and strcpy(); the override
+    # includes the two headers. It also shortens the run's fixed duration from
+    # 60 s to HIMENO_TARGET_SECONDS, which changes only how many iterations are
+    # timed (the solver's "target" seconds). The rest is install.sh's recipe,
+    # -mavx2 after the trial's flags included.
+    "himeno": f"""tar -xf himenobmtxpa-2.tar.xz
+sed -i 's/target = 60\\.0;/target = {HIMENO_TARGET_SECONDS:.1f};/' himenobmtxpa.c
+grep -q 'target = {HIMENO_TARGET_SECONDS:.1f};' himenobmtxpa.c || {{ echo 1 > ~/install-exit-status; exit 1; }}
+if grep -q avx2 /proc/cpuinfo; then CFLAGS="$CFLAGS -mavx2"; fi
+cc himenobmtxpa.c -O3 $CFLAGS -include stdlib.h -include string.h -o himenobmtxpa
+echo $? > ~/install-exit-status
+printf '#!/bin/sh\\n./himenobmtxpa s > "$LOG_FILE" 2>&1\\necho $? > ~/test-exit-status\\n' > himeno
+chmod +x himeno
 """,
 }
 
@@ -195,6 +248,11 @@ _RUN_OVERRIDES: dict[str, str] = {
     ),
     # One serial bench is about 15 s on erie, timed in centiseconds.
     "crafty": 'taskset -c {cpu} ./crafty bench quit > "$LOG_FILE" 2>&1',
+    # Grid size S (64x64x128, about 29 MB of arrays: larger than erie's 16 MB L3).
+    "himeno": (
+        f'for i in $(seq {HIMENO_RUNS}); do taskset -c {{cpu}} ./himenobmtxpa s || exit $?; done '
+        '> "$LOG_FILE" 2>&1'
+    ),
 }
 
 
@@ -514,8 +572,9 @@ class PhoronixWorkload(WorkloadBackend):
                 return failed
             if prof.name in _FIRST_SCORE_ONLY:
                 matches = matches[:1]
-            # A log with several scores (TSCP's repeated runs) contributes their
-            # mean: the scores are quantized, and a median would stay on a step.
+            # A log with several scores (TSCP's and himeno's repeated runs)
+            # contributes their mean: TSCP's scores are quantized, and a median
+            # would stay on a step.
             scores.append(statistics.fmean(float(m) for m in matches))
         # Median across iterations, the same outlier-robust aggregate the SPEC
         # backend uses for its per-iteration ratios.
