@@ -3,8 +3,9 @@
 The fifth Phoronix test mined. It is the first multithreaded one (16 pthreads, unpinned) and the first where
 lower is better: C-Ray 2.0 renders a sphere-fractal scene at 1920x1080 with 16 rays per pixel and reports
 the render time. The score cfm uses is renders per second (1 / seconds), so higher is still better. It was
-mined twice. The first mine (experiment 19) rejected correct renders as invalid, and the image check was
-fixed before the second (experiment 20).
+mined three times. The first mine (experiment 19) rejected correct renders as invalid, and the image check was
+fixed before the second (experiment 20). The third (experiment 21) ran with `--no-shape-filter`, followed by
+an interleaved A/B of the two mines' winners (experiments 22-30).
 
 The baseline is **`-O3 -ffast-math`**, not `-O3`: that is what C-Ray's Makefile hardcodes, so it is what PTS
 (and so Phoronix) actually measures. Every gain below is over PTS's own build.
@@ -29,8 +30,12 @@ The baseline is **`-O3 -ffast-math`**, not `-O3`: that is what C-Ray's Makefile 
 - **256-bit vectors beat 512-bit by 2%,** in both mines (+2.42% on `-march=native` alone, +1.96% with PGO).
   With `-march=native` (`znver5`), GCC vectorizes with 512-bit `zmm` registers by default; on this Zen5
   laptop part, C-Ray runs faster with 256-bit ones.
-- **Nothing else matters.** `-funroll-loops` and `-Ofast` are within 1% of the baseline in both mines.
-  `-flto` was 5.6% slower in its one screening trial and was pruned.
+- **`-fipa-pta` is worth +5-6%, but not once PGO is in.** The shape filter had excluded it from experiment 20.
+  Experiment 21 accepted it (+6.0% alone, +5.1% on `-march=native`), but in an interleaved A/B, adding it to
+  experiment 20's winner made that 0.5% slower. PGO's profile appears to buy the same improvement.
+- **Nothing else matters.** `-funroll-loops` and `-Ofast` are within 1% of the baseline in every mine. None of
+  the eight other flags the shape filter had excluded helped (experiment 21). `-flto` was 5.6% and 8.2% slower
+  in screening and was pruned both times.
 
 ## Making C-Ray minable
 
@@ -126,6 +131,65 @@ greedy winner by enough to replace it.
 The microarch multiplier was skipped because the winning set already has `-march=native`. There was no PGO
 near-miss candidate. The PGO reps share one code fingerprint (`b5a8c3a0`), so they measured one binary.
 
+## Experiment 21: without the shape filter
+
+| | |
+|---|---|
+| Command | `cfm mine pts/c-ray-2.0.0 --base-flags "-O3 -ffast-math" --no-shape-filter` |
+| Code | `main` at `24984ab` |
+| Started / finished | 2026-10-28T13:26:00Z / 15:14:38Z (109 min) |
+| Final status | `converged` |
+| Trials | 76 (682-757) |
+| Candidates | 14 screened (2 identical code to the baseline) + `-march=native` fast-tracked; `-flto` pruned |
+| Shape | `compute-bound`, 64% (local `deep-cpu` trial) |
+| Guards | 3 low-power reruns (735, 742, 743); no audit warnings; every image matched; **baseline recheck -3.90%, flagged** |
+| Power / temp | package power 25.1-30.0 W; CPU temp 74.0-85.1°C |
+| Result | `-O3 -ffast-math -march=native -fipa-pta -fprofile-use -mprefer-vector-width=256`, 49.6 s, +53.2% |
+
+**The baseline was measured while package power was still falling.** The characterization trial ran at 30 W,
+the calibration reps at 29 W then 28 W, and from Phase 3 on the host held about 26 W. The calibration renders
+took 75.5-76.6 s; the recheck after Phase 4 took 79.1 s (-3.90%). The low-power rule reruns a rep more than 8%
+under the calibration median (28.06 W), so 26 W didn't trigger it, and every Phase 4 delta reads about 3-4%
+low. The table gives each flag against both references.
+
+| Flag on `-O3 -ffast-math` | Render time | Δ vs. calibration (76.0 s) | Δ vs. recheck (79.1 s) | Verdict |
+|---|---|---|---|---|
+| `-march=native` | 60.32 s | +26.04% | +31.15% | accept |
+| `-fipa-pta` | 71.72 s | +6.00% | +10.29% | **accept** |
+| `-funroll-loops` | 77.14 s | -1.45% | +2.55% | reject |
+| `-fno-stack-protector` | 77.43 s | -1.81% | +2.17% | reject |
+| `-fcf-protection=none` | 78.04 s | -2.59% | +1.36% | reject |
+| `-fprefetch-loop-arrays` | 78.44 s | -3.08% | +0.85% | reject |
+| `-U_FORTIFY_SOURCE` | 78.56 s | -3.23% | +0.69% | reject |
+| `-Ofast` | 78.56 s | -3.23% | +0.70% | reject |
+| `-fno-pie -no-pie` | 78.78 s | -3.51% | +0.40% | reject |
+| `-fno-unswitch-loops` | 78.98 s | -3.74% | +0.16% | reject |
+| `-fno-ipa-cp-clone` | 79.04 s | -3.82% | +0.08% | reject |
+| `-fgraphite-identity` | 79.36 s | -4.20% | -0.32% | reject |
+
+`-fipa-pta` is the only new flag that stands out against either reference. In screening it was the fastest
+trial by 9% over the next. The rest sit within about 2.5% of the recheck. `-funroll-loops` reads +2.6% there,
+but it was flat in the other two mines.
+
+**Phase 5 and 6:** `-fipa-pta` on `-march=native` added +5.10% (59.4 s → 57.4 s). PGO on that added +14.58%,
+against +22.3% on `-march=native` alone in experiment 20, and 256-bit vectors +1.03%.
+
+### A/B: does `-fipa-pta` help on top of PGO?
+
+The two mines' winners can't be compared directly, because experiment 21's host ran slower: its
+`-march=native` reps took 60.3 s against 58.5 s in experiment 20. So `cfm measure` alternated them in one
+session (experiments 22-30), after one discarded warm-up, four runs each, at the mine's `quick` profile.
+
+| Flags | Runs | Render time | sd |
+|---|---|---|---|
+| `-O3 -ffast-math -march=native -fprofile-use -mprefer-vector-width=256` (exp. 20's winner) | 4 | **47.05 s** | 0.18% |
+| `+ -fipa-pta` (exp. 21's winner) | 4 | 47.29 s | 0.21% |
+
+**Adding `-fipa-pta` to the PGO build costs 0.5%.** It is small but consistent: every run with it was slower
+than every run without. So experiment 20's winner stands. Package power held 30 W through the A/B, and both
+sets' code fingerprints matched their mine builds (`82cc4ba8`, `eff4d01c`), so the trained profiles are
+reproducible across sessions.
+
 ## PGO training
 
 PTS has no separate training input, so the profile comes from rendering the same `sphfract.scn` scene at
@@ -143,9 +207,11 @@ from the profile itself (branch layout and inlining decisions in the intersectio
 | Shape | compute 42.6% | frontend 54.7% | frontend 42.4% | memory 62.0% | **compute 64.1%** |
 | Baseline | `-O3` | `-O3` | `-O3` | `-O3` | **`-O3 -ffast-math`** |
 | Winner gain | +8.86% | +6.07% | +7.05% | 0% | **+64.1%** |
-| `-march=native` | +2.58% | -3.61% | -1.73% | +0.25% | **+28.1% / +32.9%** |
+| `-march=native` | +2.58% | -3.61% | -1.73% | +0.25% | **+26.0% to +32.9%** |
 | `-funroll-loops` | **+5.86%** | **+2.30%** | -1.32% | -1.71% | about 0 |
-| `-flto` | -1.53% | **+1.43%** | +0.76% | -0.04% | -5.6% (screening) |
+| `-flto` | -1.53% | **+1.43%** | +0.76% | -0.04% | -5.6%, -8.2% (screening) |
+| `-fipa-pta` | +0.55% | -0.27% | -0.51% | identical code | **+6.0%**, but -0.5% with PGO |
+| `-fno-pie -no-pie` | +0.56% | -0.81% | **+4.66%** | -1.00% | about 0 |
 | PGO on the winner | **+3.10%** | -2.92% | **+2.54%** | -1.12% | **+22.3%** |
 
 C-Ray is the first test here where the ISA matters a lot: it is a vectorized floating-point kernel that fits in
@@ -153,13 +219,16 @@ cache, the case `-march=native` exists for. Himeno is also vectorized FP, but st
 
 ## Follow-ups
 
-1. **Re-mine with `--no-shape-filter`.** Nine flags were excluded on the compute-bound read, including
-   `-fno-pie -no-pie` (crafty's +4.7%). On a 64%-compute-bound read they are unlikely to matter, but this
-   wasn't measured.
+1. ~~**Re-mine with `--no-shape-filter`.**~~ Done (experiment 21): of the nine excluded flags only
+   `-fipa-pta` helps, and not once PGO is in. The filter cost nothing on C-Ray's final result, but it did hide
+   a real +6% flag.
 2. **PGO trained on a different scene.** Training on `simple.scn` or `reflbox.scn` (both ship with C-Ray) and
    measuring on `sphfract.scn` would show how much of the 22% survives a profile that doesn't match the
    workload.
-3. **The baseline offset between mines** (about 3.5%) is the largest seen on erie. Both mines' verdicts on the
+3. **The baseline offset between mines** (about 3.5%, and 3.9% within experiment 21) is the largest seen on
+   erie. Experiment 21's came from package power falling 30 → 26 W during calibration, too little for the 8%
+   low-power rule. A rerun threshold relative to the run's own power plateau, or a longer warm-up when power is
+   still falling, would catch it. Both mines' verdicts on the
    big effects agree, but a 1-2% flag can't be resolved across mines here.
-4. **`knowledge` counts C-Ray twice** for `-march=native`, `-funroll-loops`, `-Ofast` and
-   `-mprefer-vector-width=256` (experiments 19 and 20), as it counts himeno twice for its flags.
+4. **`knowledge` counts C-Ray two or three times** for `-march=native`, `-funroll-loops`, `-Ofast` and
+   `-mprefer-vector-width=256` (experiments 19-21), as it counts himeno twice for its flags.
