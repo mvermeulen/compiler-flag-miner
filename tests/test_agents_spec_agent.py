@@ -416,3 +416,44 @@ def test_power_sampler_reports_nothing_for_a_run_shorter_than_one_interval():
     from cfm.agents.spec_agent import _PowerSampler
     median, n = _PowerSampler(lambda: 30.0, interval=60.0).start().stop()
     assert (median, n) == (None, 0)
+
+
+# -- settle wait ----------------------------------------------------------------
+
+def test_run_one_trial_idles_settle_seconds_before_the_timed_run(tmp_path, monkeypatch):
+    import cfm.agents.spec_agent as spec_agent
+    events = []
+    monkeypatch.setattr(spec_agent, "_sleep", lambda s: events.append(("sleep", s)))
+
+    class _RecordingInstrumentation(_FullySucceedingInstrumentation):
+        def characterize(self, **kwargs):
+            events.append(("run",))
+            return super().characterize(**kwargs)
+
+    cfg = CfmConfig.from_env(
+        db_path=str(tmp_path / "cfm.db"), output_root=str(tmp_path / "results"),
+        settle_seconds=120.0,
+    )
+    run_one_trial(
+        cfg, benchmark="fake_r", flags=["-O3"],
+        workload=_FullySucceedingWorkload(audit_dump=None), instrumentation=_RecordingInstrumentation(),
+        power_reader=lambda: None,
+    )
+    assert events == [("sleep", 120.0), ("run",)]
+
+
+def test_run_one_trial_does_not_idle_by_default(tmp_path, monkeypatch):
+    import cfm.agents.spec_agent as spec_agent
+    slept = []
+    monkeypatch.setattr(spec_agent, "_sleep", slept.append)
+    monkeypatch.delenv("CFM_SETTLE_SECONDS", raising=False)
+    cfg = CfmConfig.from_env(
+        db_path=str(tmp_path / "cfm.db"), output_root=str(tmp_path / "results"),
+    )
+    assert cfg.settle_seconds == 0.0
+    run_one_trial(
+        cfg, benchmark="fake_r", flags=["-O3"],
+        workload=_FullySucceedingWorkload(audit_dump=None), instrumentation=_FullySucceedingInstrumentation(),
+        power_reader=lambda: None,
+    )
+    assert slept == []

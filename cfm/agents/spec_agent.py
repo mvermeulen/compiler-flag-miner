@@ -18,6 +18,7 @@ from __future__ import annotations
 import re
 import statistics
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Callable, Optional
@@ -216,6 +217,10 @@ def _extract_cpu_temp_c(raw_output: str) -> Optional[float]:
     return float(match.group(1)) if match else None
 
 
+# Indirection so tests can replace the settle wait.
+_sleep = time.sleep
+
+
 # One gate per output root for the life of the process, so the session's best
 # bandwidth reading carries across every trial of a `cfm mine` run.
 _SESSION_GATES: dict = {}
@@ -272,6 +277,8 @@ def run_one_trial(
     ``bandwidth_gate`` (cfm/bandwidth.py) runs between the build and the timed
     run, waiting out a throttled memory-bandwidth state; when omitted, the
     process-wide gate is used if ``cfg.bandwidth_gate`` is set, and none otherwise.
+    With ``cfg.settle_seconds`` set, the machine idles that long before the gate
+    and the timed run, so the run doesn't start straight after the build's load.
     ``skip_if_same_code_as`` names the flagset this trial builds on (the baseline,
     or the running set it adds to). When the built code's fingerprint equals the
     one already recorded for that flagset in this experiment, the flags under
@@ -341,6 +348,10 @@ def run_one_trial(
                     "experiment_id": experiment_id, "trial_id": trial_id, "build_status": "ok",
                     "ratio": None, "unchanged_from_trial_id": reference_trial_id,
                 }
+
+            if cfg.settle_seconds > 0:
+                print(f"info: idling {cfg.settle_seconds:g} s before the timed run of {flags}")
+                _sleep(cfg.settle_seconds)
 
             gate = bandwidth_gate or (_session_gate(cfg) if cfg.bandwidth_gate else None)
             gate_result = gate.wait() if gate is not None else None
