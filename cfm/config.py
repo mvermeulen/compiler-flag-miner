@@ -61,6 +61,10 @@ class CfmConfig:
     # power_check: re-run a confirmation or calibration rep whose package power
     # during the run reads well below the baseline's.
     power_check: bool = False
+    # settle_seconds: idle this long between a trial's build and its timed run,
+    # before the bandwidth gate probes (2026-10-31, for 854.graph500_s, whose
+    # timed runs slowed intermittently after back-to-back load).
+    settle_seconds: float = 0.0
 
     @classmethod
     def from_env(
@@ -79,6 +83,7 @@ class CfmConfig:
         bandwidth_gate: Optional[bool] = None,
         warmup_min_seconds: Optional[float] = None,
         power_check: Optional[bool] = None,
+        settle_seconds: Optional[float] = None,
     ) -> "CfmConfig":
         """Resolve config: explicit keyword argument (e.g. from argparse) wins over
         the environment; the environment wins over the built-in default. Read
@@ -129,5 +134,9 @@ class CfmConfig:
             power_check=(
                 power_check if power_check is not None
                 else _env_str("CFM_POWER_CHECK", "0") not in ("", "0")
+            ),
+            settle_seconds=(
+                settle_seconds if settle_seconds is not None
+                else float(_env_str("CFM_SETTLE_SECONDS", "0"))
             ),
         )

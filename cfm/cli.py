@@ -120,6 +120,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="don't re-run confirmation/calibration reps whose package power during the run "
              "reads well below the baseline's",
     )
+    mine.add_argument(
+        "--settle-seconds", type=float, default=None,
+        help="idle this many seconds between each trial's build and its timed run "
+             "(default 0, or CFM_SETTLE_SECONDS)",
+    )
 
     init_db = sub.add_parser("init-db", help="create/upgrade cfm.db at the configured path")
     init_db.add_argument("--db", dest="db_path", default=None)
@@ -176,6 +181,7 @@ def main(argv=None) -> int:
             output_root=args.output_root, db_path=args.db_path, lock_file=args.lock_file,
             bandwidth_gate=not args.no_bandwidth_gate,
             warmup_min_seconds=args.warmup_min_seconds, power_check=not args.no_power_check,
+            settle_seconds=args.settle_seconds,
         )
         compiler = GccCompiler(catalog_path=args.catalog) if args.catalog else GccCompiler()
         base_flags = args.base_flags.split()
