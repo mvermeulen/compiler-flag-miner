@@ -261,7 +261,12 @@ BASELINE_RECHECK_WARN_PCT = 0.5
 # (run_one_trial()'s median of samples) reads more than this far below the
 # reference is re-run like a slow rep, after LOW_POWER_RERUN_IDLE_S of idle. The
 # reference is the baseline calibration reps' median power for confirmation reps,
-# and the highest-power sibling for calibration reps. On erie under the `balanced`
+# and the highest-power sibling for calibration reps. A confirmation rep also has
+# to read that far below its highest-power sibling (when it has one), so a
+# flagset whose code draws less power on every rep isn't re-run: on 821.gcc_s
+# every PGO build ran at 33-34 W against -O3's 37 W, and the old rule re-ran all
+# four PGO flagsets three times each for the same numbers (12 of 71 trials,
+# doc/opportunities_niwot.md #33). On erie under the `balanced`
 # profile, power fell from about 24 W to 20 W partway through a coremark mine and
 # the score fell with it (r = 0.90), biasing every later delta by about -3%
 # (doc/mining_results.pts_coremark-1.0.1.2026-10-26.md). Under `performance` it
@@ -313,8 +318,10 @@ def _low_power_rep_indices(
     """Indices of the reps whose ``package_power_w`` is more than
     ``LOW_POWER_RERUN_PCT`` below the reference, lowest power first, plus the
     reference used. The reference is ``power_reference`` when given, else the
-    highest sibling reading. Empty unless ``cfg.power_check`` is on; reps with no
-    reading are never flagged."""
+    highest sibling reading. With ``power_reference`` and at least two readings, a
+    rep must also be that far below the highest sibling, so reps that all read low
+    together (the flagset's own power, not a dip) are left alone. Empty unless
+    ``cfg.power_check`` is on; reps with no reading are never flagged."""
     if not cfg.power_check:
         return [], None
     powers = [r.get("package_power_w") for r in measured]
@@ -323,6 +330,8 @@ def _low_power_rep_indices(
     if reference is None or reference <= 0:
         return [], reference
     floor = reference * (1.0 - LOW_POWER_RERUN_PCT / 100.0)
+    if power_reference is not None and len(known) >= 2:
+        floor = min(floor, max(known) * (1.0 - LOW_POWER_RERUN_PCT / 100.0))
     low = [i for i, p in enumerate(powers) if p is not None and p < floor]
     return sorted(low, key=lambda i: powers[i]), reference
 
