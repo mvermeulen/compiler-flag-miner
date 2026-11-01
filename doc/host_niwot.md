@@ -58,6 +58,7 @@ CFM_SPEC_CONFIG=ryzen350_64gb.gcc_O3.cfg .venv/bin/cfm mine <benchmark>
 | 2026-10-28 | `823.llvm_s` | frontend-bound 58.5% (corpus) | `-O3 -flto -fprofile-use` (LTO +7.2%, PGO +11.9% on top) | **+19.96%** | [link](mining_results.823.llvm_s.2026-10-28.md) |
 | 2026-10-29 | `827.cppcheck_s` | frontend-bound 74.1% (corpus) | `-O3 -fno-stack-protector -fprofile-use` (first PR #57 flag accepted; `-flto` -0.16%) | **+12.00%** | [link](mining_results.827.cppcheck_s.2026-10-29.md) |
 | 2026-10-30 | `838.diamond_s` | compute-bound 45.4% (corpus, under the 55% gate) | `-O3 -flto -funroll-loops -march=znver5` (`-march=znver5` +30.7% in Phase 6; `-march=native` -6.2% alone in Phase 4) | **+34.49%** | [link](mining_results.838.diamond_s.2026-10-30.md) |
+| 2026-11-01 | `821.gcc_s` | frontend-bound 59.7% (corpus) | `-O3 -fno-pie -no-pie -flto -fno-stack-protector -fprofile-use` (PGO +10.8%; first near-miss variant to win) | **+16.88%** | [link](mining_results.821.gcc_s.2026-10-31.md) |
 
 ## Summary by suite
 
@@ -123,14 +124,14 @@ and ran PGO on plain `-O3` (26.79, +7.78%), so it never measured the two togethe
 | **Suite geomean gain (12, unmined = 1.00×)** | | | | +0.00% | |
 | Mined-only geomean (0 of 12) | — | — | | — | |
 
-### intspeed (11 of 13 mined)
+### intspeed (12 of 13 mined)
 
 | Benchmark | Base (`-O3`) | Best | Winning flags | Gain | Write-up |
 |---|---|---|---|---|---|
 | `801.xz_s` | 0.9457 | 0.9457 | `-O3` (nothing accepted) | 0.0% | [2026-10-26](mining_results.801.xz_s.2026-10-26.md) |
 | `807.ntest_s` | 0.9026 | 1.0760 | `-O3 -march=native -flto -fprofile-use` | **+19.21%** | [2026-10-26](mining_results.807.ntest_s.2026-10-26.md) |
 | `817.flac_s` | 2.387 | 5.923 | `-O3 -fprefetch-loop-arrays -march=native -mprefer-vector-width=256` | **+148.16%** | [2026-10-27](mining_results.817.flac_s.2026-10-27.md) |
-| `821.gcc_s` | — | — | not mined yet | — | |
+| `821.gcc_s` | 1.1018 | 1.2877 | `-O3 -fno-pie -no-pie -flto -fno-stack-protector -fprofile-use` | **+16.88%** | [2026-10-31](mining_results.821.gcc_s.2026-10-31.md) |
 | `823.llvm_s` | 0.9252 | 1.1099 | `-O3 -flto -fprofile-use` | **+19.96%** | [2026-10-28](mining_results.823.llvm_s.2026-10-28.md) |
 | `827.cppcheck_s` | 1.0595 | 1.1866 | `-O3 -fno-stack-protector -fprofile-use` | **+12.00%** | [2026-10-29](mining_results.827.cppcheck_s.2026-10-29.md) |
 | `829.abc_s` | 2.754 | 2.818 | `-O3 -flto` (follow-up) | **+2.32%** | [2026-10-25](mining_results.829.abc_s.2026-10-25.md#follow-up--o3-against--o3--flto-27-2026-10-25) |
@@ -140,8 +141,8 @@ and ran PGO on plain `-O3` (26.79, +7.78%), so it never measured the two togethe
 | `846.minizinc_s` | 4.659 | 4.659 | `-O3` (nothing accepted) | 0.0% | [2026-10-24](mining_results.846.minizinc_s.2026-10-24.md) |
 | `853.ns3_s` | 6.527 | 7.602 | `-O3 -flto -fprofile-use` | **+16.46%** | [2026-10-24](mining_results.853.ns3_s.2026-10-24.md) |
 | `854.graph500_s` | — | — | not mined yet | — | |
-| **Suite geomean gain (13, unmined = 1.00×)** | | | | +17.79% | |
-| Mined-only geomean (11 of 13) | 2.094 | 2.541 | | +21.35% | |
+| **Suite geomean gain (13, unmined = 1.00×)** | | | | +19.21% | |
+| Mined-only geomean (12 of 13) | 1.985 | 2.401 | | +20.97% | |
 
 ### fpspeed (0 of 13 mined)
 
@@ -202,6 +203,7 @@ Suite geomean gain over every benchmark in the suite, unmined = 1.00×, recorded
 | `823.llvm_s` | +20.13% | +0.00% | +14.13% | +0.00% |
 | `827.cppcheck_s` | +20.13% | +0.00% | +15.13% | +0.00% |
 | `838.diamond_s` | +20.13% | +0.00% | +17.79% | +0.00% |
+| `821.gcc_s` | +20.13% | +0.00% | +19.21% | +0.00% |
 
 SPECspeed mining started on 2026-10-24 with `834.vpr_s`, the first `_s` benchmark cfm has mined on
 either host. Speed ratios come from one 16-thread process (`threads = 16`), not 16 copies. Since PR #55,
