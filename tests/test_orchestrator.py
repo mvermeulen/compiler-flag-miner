@@ -1935,6 +1935,35 @@ def test_confirm_reruns_a_low_power_rep_when_the_power_check_is_on(tmp_path, mon
     assert slept == [orchestrator.LOW_POWER_RERUN_IDLE_S]
 
 
+def test_confirm_does_not_rerun_a_flagset_whose_every_rep_draws_less_power(tmp_path, monkeypatch):
+    import cfm.orchestrator as orchestrator
+    cfg = CfmConfig.from_env(
+        spec_dir=str(tmp_path / "spec"), wspy_dir=str(tmp_path / "wspy-unused"),
+        output_root=str(tmp_path / "results"), db_path=str(tmp_path / "cfm.db"),
+        power_check=True,
+    )
+    conn = db.connect(cfg.db_path)
+    exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
+    conn.close()
+    baseline = _baseline(mean_ratio=100.0)
+    baseline.power_w = 37.0
+    slept = []
+    monkeypatch.setattr(orchestrator, "_sleep", slept.append)
+    # 821.gcc_s's PGO reps: all about 10% under the baseline's power, but level with
+    # each other, so it's the code's power, not a dip.
+    _power_sequence(monkeypatch, [33.1, 33.0, 33.1])
+    backends = ScriptedBackends(ratio_sequences={("-O3", "-x"): [116.0, 116.2, 116.1]})
+
+    [outcome] = confirm_candidates(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline,
+        screened=[_screened("-x")], workload=backends, instrumentation=backends,
+    )
+
+    assert outcome.ratios == [116.0, 116.2, 116.1]
+    assert len(outcome.trial_ids) == 3
+    assert slept == []
+
+
 def test_confirm_ignores_low_power_when_the_power_check_is_off(tmp_path, monkeypatch):
     cfg = _cfg(tmp_path)
     conn = db.connect(cfg.db_path)
