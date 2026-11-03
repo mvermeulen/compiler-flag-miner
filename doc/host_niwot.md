@@ -124,7 +124,7 @@ and ran PGO on plain `-O3` (26.79, +7.78%), so it never measured the two togethe
 | **Suite geomean gain (12, unmined = 1.00×)** | | | | +0.00% | |
 | Mined-only geomean (0 of 12) | — | — | | — | |
 
-### intspeed (12 of 13 mined)
+### intspeed (13 of 13 mined)
 
 | Benchmark | Base (`-O3`) | Best | Winning flags | Gain | Write-up |
 |---|---|---|---|---|---|
@@ -140,9 +140,9 @@ and ran PGO on plain `-O3` (26.79, +7.78%), so it never measured the two togethe
 | `838.diamond_s` | 0.9384 | 1.2620 | `-O3 -flto -funroll-loops -march=znver5` | **+34.49%** | [2026-10-30](mining_results.838.diamond_s.2026-10-30.md) |
 | `846.minizinc_s` | 4.659 | 4.659 | `-O3` (nothing accepted) | 0.0% | [2026-10-24](mining_results.846.minizinc_s.2026-10-24.md) |
 | `853.ns3_s` | 6.527 | 7.602 | `-O3 -flto -fprofile-use` | **+16.46%** | [2026-10-24](mining_results.853.ns3_s.2026-10-24.md) |
-| `854.graph500_s` | — | — | not mined yet | — | |
-| **Suite geomean gain (13, unmined = 1.00×)** | | | | +19.21% | |
-| Mined-only geomean (12 of 13) | 1.985 | 2.401 | | +20.97% | |
+| `854.graph500_s` | 0.8954 | 1.0374 | `-O3 -funroll-loops` | **+15.85%** | [2026-11-02](mining_results.854.graph500_s.2026-11-02.md) |
+| **Suite geomean gain (13, unmined = 1.00×)** | | | | +20.56% | |
+| Mined-only geomean (13 of 13) | 1.867 | 2.251 | | +20.56% | |
 
 ### fpspeed (0 of 13 mined)
 
@@ -204,6 +204,7 @@ Suite geomean gain over every benchmark in the suite, unmined = 1.00×, recorded
 | `827.cppcheck_s` | +20.13% | +0.00% | +15.13% | +0.00% |
 | `838.diamond_s` | +20.13% | +0.00% | +17.79% | +0.00% |
 | `821.gcc_s` | +20.13% | +0.00% | +19.21% | +0.00% |
+| `854.graph500_s` | +20.13% | +0.00% | +20.56% | +0.00% |
 
 SPECspeed mining started on 2026-10-24 with `834.vpr_s`, the first `_s` benchmark cfm has mined on
 either host. Speed ratios come from one 16-thread process (`threads = 16`), not 16 copies. Since PR #55,
