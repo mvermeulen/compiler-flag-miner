@@ -213,7 +213,7 @@ single-threaded speed benchmarks are pinned with `taskset` to a Zen5 CPU, and Op
 `853.ns3_s` was the first pinned mine (CPU 2); its baseline CI was ±0.23%, against ±0.6% for vpr_s and ±0.5% for ns3_r.
 `829.abc_s`, also pinned, was ±0.21%. `807.ntest_s`, the first OpenMP-placed mine, was ±0.33%. In speed, LTO paid about half its rate gain on ns3 (+10.3% vs +21.4%)
 and gem5 (+5.4% vs +11.0%), but more on vpr (+17.7% vs +11.4%), ntest (+3.6% vs +2.3% on top of `-march=native`) and llvm (+7.2% vs +1.4%). PGO on top paid about a third to a half of its rate gain: ntest +3.7% vs +11.3%, llvm +11.9% vs +23.1%.
-fprate mining moved to another host after `782.lbm_r` hit this host's memory-bandwidth throttle
+fprate mining moved to [`chicago`](host_chicago.md) after `782.lbm_r` hit this host's memory-bandwidth throttle
 ([note](lbm_swing_investigation.2026-10-23.md)).
 
 ## Cross-host comparison
