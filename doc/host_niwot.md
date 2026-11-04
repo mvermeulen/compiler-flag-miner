@@ -105,7 +105,7 @@ excluded both. The mines' own winners were `-O3 -fprefetch-loop-arrays` at 24.70
 ² From an interleaved follow-up (`cfm measure`, 3 rounds). The mine rejected `-flto` alone (+0.96%, under the 1% bar)
 and ran PGO on plain `-O3` (26.79, +7.78%), so it never measured the two together.
 
-### fprate (0 of 12 mined)
+### fprate (1 of 12 mined)
 
 | Benchmark | Base (`-O3`) | Best | Winning flags | Gain | Write-up |
 |---|---|---|---|---|---|
@@ -120,9 +120,9 @@ and ran PGO on plain `-O3` (26.79, +7.78%), so it never measured the two togethe
 | `766.femflow_r` | — | — | not mined yet | — | |
 | `767.nest_r` | — | — | not mined yet | — | |
 | `772.marian_r` | — | — | not mined yet | — | |
-| `782.lbm_r` | — | — | not mined yet | — | |
+| `782.lbm_r` | 5.738 | 5.738 | `-O3` (nothing accepted; throttle noise, ±12.6% baseline) | 0.0% | [2026-11-03](mining_results.782.lbm_r.2026-11-03.md) |
 | **Suite geomean gain (12, unmined = 1.00×)** | | | | +0.00% | |
-| Mined-only geomean (0 of 12) | — | — | | — | |
+| Mined-only geomean (1 of 12) | 5.738 | 5.738 | | +0.00% | |
 
 ### intspeed (13 of 13 mined)
 
@@ -205,6 +205,7 @@ Suite geomean gain over every benchmark in the suite, unmined = 1.00×, recorded
 | `838.diamond_s` | +20.13% | +0.00% | +17.79% | +0.00% |
 | `821.gcc_s` | +20.13% | +0.00% | +19.21% | +0.00% |
 | `854.graph500_s` | +20.13% | +0.00% | +20.56% | +0.00% |
+| `782.lbm_r` (600 s settle) | +20.13% | +0.00% | +20.56% | +0.00% |
 
 SPECspeed mining started on 2026-10-24 with `834.vpr_s`, the first `_s` benchmark cfm has mined on
 either host. Speed ratios come from one 16-thread process (`threads = 16`), not 16 copies. Since PR #55,
@@ -214,7 +215,9 @@ single-threaded speed benchmarks are pinned with `taskset` to a Zen5 CPU, and Op
 `829.abc_s`, also pinned, was ±0.21%. `807.ntest_s`, the first OpenMP-placed mine, was ±0.33%. In speed, LTO paid about half its rate gain on ns3 (+10.3% vs +21.4%)
 and gem5 (+5.4% vs +11.0%), but more on vpr (+17.7% vs +11.4%), ntest (+3.6% vs +2.3% on top of `-march=native`) and llvm (+7.2% vs +1.4%). PGO on top paid about a third to a half of its rate gain: ntest +3.7% vs +11.3%, llvm +11.9% vs +23.1%.
 fprate mining moved to [`chicago`](host_chicago.md) after `782.lbm_r` hit this host's memory-bandwidth throttle
-([note](lbm_swing_investigation.2026-10-23.md)).
+([note](lbm_swing_investigation.2026-10-23.md)). A 2026-11-03 re-mine with a 10-minute settle before every run didn't help: the same binary read 6.33 and 5.00, on
+discrete throttle levels that set in mid-run ([write-up](mining_results.782.lbm_r.2026-11-03.md)). The less
+bandwidth-heavy fprate benchmarks are being mined here anyway; cactus, fotonik3d and roms are held back.
 
 ## Cross-host comparison
 
