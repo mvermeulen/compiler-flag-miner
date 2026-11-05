@@ -1156,6 +1156,10 @@ Full branch/PR discipline, same shape as wspy's:
   flagset change therefore changes `.rodata`, and `code_fingerprint()` differs even when the generated code
   doesn't. That costs a timed run per no-op flag on coremark; it doesn't make a result wrong. Other PTS tests
   may do the same, so don't read a never-skipping guard on a PTS test as proof every flag changed the code.
+- **2026-11-05: `709.cactus_r` compiles `__DATE__`/`__TIME__` into its binary, so its code fingerprint differs on
+  every build.** The Cactus flesh's `datestamp.c` embeds the build time, so even two `-O3` builds never match and
+  the no-code-change guard can't skip a cactus trial. Like coremark (above), it costs a timed run per no-op flag
+  and doesn't make a result wrong, but matching fingerprints can't be used to check PGO reps on cactus either.
 - **Resolved 2026-10-27: `thread_placement()` pinned `821.gcc_s`'s 16 concurrent compiles to one CPU.**
   `benchmark_threading()` read only `@benchsets`, and gcc_s's (`intspeed specspeed`) has no thread
   marker, so it was classed single-threaded and got `taskset -c 2`. But its `object.pm` sets
