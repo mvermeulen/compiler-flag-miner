@@ -41,6 +41,8 @@ python3 -m pytest -q
 | Date | Benchmark | Shape (source) | Winning flags | Gain vs `-O3` | Write-up |
 |---|---|---|---|---|---|
 | 2026-11-03 | `782.lbm_r` | memory-bound 94.9% (corpus) | `-O3 -march=native` | **+2.92%** | [link](mining_results.782.lbm_r.2026-11-03b.md) |
+| 2026-11-04 | `782.lbm_r` (`--no-shape-filter`) | memory-bound 94.9% (corpus) | `-O3 -march=native` | **+3.52%** | [link](mining_results.782.lbm_r.2026-11-04.md) (`-Ofast` +1.03%, rejected on CI overlap) |
+| 2026-11-05 | `709.cactus_r` | | | | in progress |
 
 ## Standing facts about this host
 
@@ -51,12 +53,16 @@ python3 -m pytest -q
   the gate never waited after the first trial. lbm's `-O3` reps spread 0.08% (CI ±0.11%), against 17% (CI ±12.6%) on
   niwot the same night ([write-up](mining_results.782.lbm_r.2026-11-03.md)).
 - **Under 32 copies of lbm, package power sits at about 85 W** for the whole run, and the CPU at 91-95°C.
-- **A SPECrate trial of lbm takes about 19 minutes**, so a full mine is about 11 hours.
+- **A SPECrate trial of lbm takes about 19 minutes**, so a full mine is about 11 hours (21 with `--no-shape-filter`).
+- **The bandwidth gate sometimes catches the tail of the previous run.** In experiment 3 it waited 30 s before
+  10 of 66 runs, and each re-probe read the session best (~105 GB/s).
 
 ## Open items
 
 | # | Pri | Opportunity | How | What would change |
 |---|---|---|---|---|
 | 1 | ~~H~~ | ~~**Does fprate mine cleanly here?**~~ niwot's memory side halved its bandwidth for minutes at a time under lbm. | Mine `782.lbm_r` with the bandwidth gate on. | **Done 2026-11-04:** yes. No reruns, the gate waited once (30 s, first trial), baseline CI ±0.11%. |
-| 2 | M | **lbm without the shape filter.** The 94.9% memory-bound read excluded 11 of 15 candidates, `-funroll-loops` and `-Ofast` among them. | Re-mine with `--no-shape-filter` (about 11 hours more). | Whether anything beyond `-march=native` helps lbm. |
-| 3 | H | **The rest of fprate.** | Mine the other fprate benchmarks here. | fprate coverage, which niwot couldn't give. |
+| 2 | ~~M~~ | ~~**lbm without the shape filter.**~~ | Re-mine with `--no-shape-filter`. | **Done 2026-11-05:** nothing new accepted. `-Ofast` (+1.03%) and `-ffast-math` (same code) came closest; every other flag was within ±0.55%. |
+| 3 | H | **The rest of fprate.** | Mine the other fprate benchmarks here, starting with the three niwot holds back (cactus, fotonik3d, roms). | fprate coverage, which niwot couldn't give. |
+| 4 | L | **`-march=native -Ofast` on lbm.** Phase 5 never combined them because `-Ofast` was rejected alone, on a CI widened by one low baseline rep. | `cfm measure` both, interleaved with `-O3 -march=native`. | Whether fast-math adds ~1% on top of AVX-512 here. |
+| 5 | M | **A 0.7%-low calibration rep widened lbm's CI ninefold** (experiment 3, trial 39). Too small for either rerun rule. | Five calibration reps, or rerun a rep outside its siblings' spread by a smaller factor when the spread is tiny. | Tighter verdicts on ~1% effects. |
