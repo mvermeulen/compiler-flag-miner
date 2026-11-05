@@ -43,7 +43,8 @@ python3 -m pytest -q
 | 2026-11-03 | `782.lbm_r` | memory-bound 94.9% (corpus) | `-O3 -march=native` | **+2.92%** | [link](mining_results.782.lbm_r.2026-11-03b.md) |
 | 2026-11-04 | `782.lbm_r` (`--no-shape-filter`) | memory-bound 94.9% (corpus) | `-O3 -march=native` | **+3.52%** | [link](mining_results.782.lbm_r.2026-11-04.md) (`-Ofast` +1.03%, rejected on CI overlap) |
 | 2026-11-05 | `709.cactus_r` | memory-bound 71.6% (corpus) | `-O3 -march=native` | **+16.51%** | [link](mining_results.709.cactus_r.2026-11-05.md) (11 of 15 candidates excluded on shape) |
-| 2026-11-05 | `749.fotonik3d_r` | | | | in progress |
+| 2026-11-05 | `749.fotonik3d_r` | memory-bound 97.3% (corpus) | `-O3 -march=native -mprefer-vector-width=256` | **+7.04%** | [link](mining_results.749.fotonik3d_r.2026-11-05.md) (PGO -4.5%, LTO -2.4%) |
+| 2026-11-05 | `765.roms_r` | | | | in progress |
 
 ## Standing facts about this host
 
@@ -55,7 +56,7 @@ python3 -m pytest -q
   niwot the same night ([write-up](mining_results.782.lbm_r.2026-11-03.md)).
 - **Under 32 copies of lbm, package power sits at about 85 W** for the whole run, and the CPU at 91-95°C.
 - **A SPECrate trial of lbm takes about 19 minutes**, so a full mine is about 11 hours (21 with `--no-shape-filter`).
-- **Package power sits at 85.0 W under every 32-copy fprate mine so far** (lbm, cactus): the sustained package limit.
+- **Package power sits at 85.0 W under every 32-copy fprate mine so far** (lbm, cactus, fotonik3d): the sustained package limit.
 - **The bandwidth gate sometimes catches the tail of the previous run.** In experiment 3 it waited 30 s before
   10 of 66 runs, and each re-probe read the session best (~105 GB/s).
 
