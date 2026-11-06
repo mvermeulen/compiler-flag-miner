@@ -45,7 +45,8 @@ python3 -m pytest -q
 | 2026-11-05 | `709.cactus_r` | memory-bound 71.6% (corpus) | `-O3 -march=native` | **+16.51%** | [link](mining_results.709.cactus_r.2026-11-05.md) (11 of 15 candidates excluded on shape) |
 | 2026-11-05 | `749.fotonik3d_r` | memory-bound 97.3% (corpus) | `-O3 -march=native -mprefer-vector-width=256` | **+7.04%** | [link](mining_results.749.fotonik3d_r.2026-11-05.md) (PGO -4.5%, LTO -2.4%) |
 | 2026-11-05 | `765.roms_r` | memory-bound 95.0% (corpus) | `-O3 -march=native` | **+7.19%** | [link](mining_results.765.roms_r.2026-11-05.md) (`-mprefer-vector-width=256` -4.0%, PGO +0.8% rejected) |
-| 2026-11-06 | `722.palm_r` | | | | in progress |
+| 2026-11-06 | `722.palm_r` | memory-bound 69.2% (corpus) | `-O3 -march=native -fprofile-use` | **+5.20%** | [link](mining_results.722.palm_r.2026-11-06.md) (first PGO accept here, +1.03%; `-flto` +1.04% rejected on CI overlap) |
+| 2026-11-06 | `731.astcenc_r` | | | | in progress |
 
 ## Summary by suite
 
@@ -59,13 +60,13 @@ with 32 copies, so they aren't reportable SPEC scores and can't be compared with
 - **Mined-only geomean** covers only the benchmarks mined so far. Its gain is geomean(best) / geomean(base), the
   typical win per mined benchmark, not a suite score.
 
-### fprate (4 of 12 mined)
+### fprate (5 of 12 mined)
 
 | Benchmark | Base (`-O3`) | Best | Winning flags | Gain | Write-up |
 |---|---|---|---|---|---|
 | `709.cactus_r` | 91.446 | 106.547 | `-O3 -march=native` | **+16.51%** | [2026-11-05](mining_results.709.cactus_r.2026-11-05.md) |
-| `722.palm_r` | — | — | in progress | — | |
-| `731.astcenc_r` | — | — | not mined yet | — | |
+| `722.palm_r` | 76.561 | 80.540 | `-O3 -march=native -fprofile-use` | **+5.20%** | [2026-11-06](mining_results.722.palm_r.2026-11-06.md) |
+| `731.astcenc_r` | — | — | in progress | — | |
 | `736.ocio_r` | — | — | not mined yet | — | |
 | `737.gmsh_r` | — | — | not mined yet | — | |
 | `748.flightdm_r` | — | — | not mined yet | — | |
@@ -75,8 +76,8 @@ with 32 copies, so they aren't reportable SPEC scores and can't be compared with
 | `767.nest_r` | — | — | not mined yet | — | |
 | `772.marian_r` | — | — | not mined yet | — | |
 | `782.lbm_r` | 16.033 | 16.598 | `-O3 -march=native` | **+3.52%** | [2026-11-04](mining_results.782.lbm_r.2026-11-04.md) (`--no-shape-filter`) |
-| **Suite geomean gain (12, unmined = 1.00×)** | | | | +2.74% | |
-| Mined-only geomean (4 of 12) | 37.973 | 41.186 | | +8.46% | |
+| **Suite geomean gain (12, unmined = 1.00×)** | | | | +3.18% | |
+| Mined-only geomean (5 of 12) | 43.690 | 47.097 | | +7.80% | |
 
 ### Suite geomean progression
 
@@ -89,6 +90,7 @@ fprate suite geomean gain (12 benchmarks, unmined = 1.00×), recorded after each
 | `709.cactus_r` | +1.57% |
 | `749.fotonik3d_r` | +2.15% |
 | `765.roms_r` | +2.74% |
+| `722.palm_r` | +3.18% |
 
 ## Standing facts about this host
 
@@ -100,7 +102,7 @@ fprate suite geomean gain (12 benchmarks, unmined = 1.00×), recorded after each
   niwot the same night ([write-up](mining_results.782.lbm_r.2026-11-03.md)).
 - **Under 32 copies of lbm, package power sits at about 85 W** for the whole run, and the CPU at 91-95°C.
 - **A SPECrate trial of lbm takes about 19 minutes**, so a full mine is about 11 hours (21 with `--no-shape-filter`).
-- **Package power sits at 85.0 W under every 32-copy fprate mine so far** (lbm, cactus, fotonik3d, roms): the sustained package limit.
+- **Package power sits at 85.0 W under every 32-copy fprate mine so far** (lbm, cactus, fotonik3d, roms, palm): the sustained package limit.
 - **The bandwidth gate sometimes catches the tail of the previous run.** In experiment 3 it waited 30 s before
   10 of 66 runs, and each re-probe read the session best (~105 GB/s).
 
@@ -114,3 +116,4 @@ fprate suite geomean gain (12 benchmarks, unmined = 1.00×), recorded after each
 | 4 | L | **`-march=native -Ofast` on lbm.** Phase 5 never combined them because `-Ofast` was rejected alone, on a CI widened by one low baseline rep. | `cfm measure` both, interleaved with `-O3 -march=native`. | Whether fast-math adds ~1% on top of AVX-512 here. |
 | 5 | M | **A 0.7%-low calibration rep widened lbm's CI ninefold** (experiment 3, trial 39). Too small for either rerun rule. | Five calibration reps, or rerun a rep outside its siblings' spread by a smaller factor when the spread is tiny. | Tighter verdicts on ~1% effects. |
 | 6 | M | **cactus without the shape filter.** The 71.6% memory-bound read excluded `-Ofast`, `-ffast-math` and `-funroll-loops`. | Re-mine with `--no-shape-filter` (about 6 hours). | Whether fast-math adds to `-march=native`'s +16.5%. |
+| 7 | M | **`-flto` on palm.** It read +1.04% alone but was rejected on CI overlap (baseline ±0.73%), so it was never tried with `-march=native -fprofile-use`, which won (+5.20%). | `cfm measure` `-O3 -march=native -flto -fprofile-use`, interleaved with the winner (3 rounds). | Whether LTO adds ~1% on top of PGO here, as it did for intrate on niwot. |
