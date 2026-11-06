@@ -46,19 +46,57 @@ sources the backend builds from. Only tests with an output validator in `cfm/wor
 | 2026-10-27 | `pts/himeno-1.3.0` (exp. 13, 15) | memory-bound 62.0% (local) | `-O3` | **0%** | [link](mining_results.pts_himeno-1.3.0.2026-10-27.md) (exp. 15 with `--no-shape-filter`, 3 runs per rep) |
 | 2026-10-28 | `pts/c-ray-2.0.0` (exp. 19-21) | compute-bound 64.1% (local) | `-O3 -ffast-math -march=native -fprofile-use -mprefer-vector-width=256` | **+64.1%** over `-O3 -ffast-math` | [link](mining_results.pts_c-ray-2.0.0.2026-10-28.md) (baseline is PTS's own build; exp. 19's image check was too strict; exp. 21 `--no-shape-filter` found `-fipa-pta` +6%, redundant with PGO) |
 
-Base and best are each test's own score (coremark Iterations/Sec over 16 processes, TSCP and crafty nodes/sec on one
-pinned core), not SPEC ratios:
+The first coremark mine (`balanced`, 361,329 → 385,356 with `-O3 -fprofile-use`) is kept for history. Its power
+sag made every verdict except PGO's unreliable.
 
-| Benchmark | Base (`-O3`) | Best | Winning flags | Gain |
-|---|---|---|---|---|
-| `pts/coremark-1.0.1` | 382,163 | 416,025 | `-O3 -funroll-loops -fprofile-use` | **+8.86%** |
-| `pts/tscp-1.2.2` | 2,576,439 | 2,732,788 | `-O3 -flto -funroll-loops` | **+6.07%** |
-| `pts/crafty-1.4.5` | 13,456,441 | 14,405,707 | `-O3 -fno-pie -no-pie -fprofile-use` | **+7.05%** (three mines: +7.05% to +8.93%, winners all 14.4-14.5M) |
-| `pts/himeno-1.3.0` | 7,800 MFLOPS | — | `-O3` | **0%** (best: `-march=native` +0.25%; streams 29 MB per sweep, memory-bound) |
-| `pts/c-ray-2.0.0` | 77.7 s (`-O3 -ffast-math`) | 47.3 s | `-O3 -ffast-math -march=native -fprofile-use -mprefer-vector-width=256` | **+64.1%** (`-march=native` about +30%, PGO +22% on top, 256-bit vectors +2%) |
+## Summary by suite
 
-The first mine (`balanced`, 361,329 → 385,356 with `-O3 -fprofile-use`) is kept for history. Its power sag
-made every verdict except PGO's unreliable.
+The method is the same as [niwot's](host_niwot.md#summary-by-suite). Each row is the latest converged `cfm mine`
+result on this host for that benchmark. *Base* is the plain `-O3` score, *best* is the winning flag set's confirmed
+score, and *gain* is best / base.
+
+### Phoronix Test Suite (5 tests mined)
+
+Base and best are each test's own score, not SPEC ratios:
+
+- coremark is Iterations/Sec over 16 processes.
+- TSCP and crafty are nodes/sec on one pinned core.
+- himeno is MFLOPS.
+- c-ray is render seconds, where lower is better; its gain is base time / best time.
+
+Unlike a SPEC suite, PTS has no fixed set of tests here, so there is no unmined = 1.00× row. The geomean covers
+the mined tests only. Their units differ, so only the gain is averaged, not the base and best scores.
+
+| Benchmark | Base (`-O3`) | Best | Winning flags | Gain | Write-up |
+|---|---|---|---|---|---|
+| `pts/coremark-1.0.1` | 382,163 | 416,025 | `-O3 -funroll-loops -fprofile-use` | **+8.86%** | [2026-10-27](mining_results.pts_coremark-1.0.1.2026-10-26b.md) |
+| `pts/tscp-1.2.2` | 2,576,439 | 2,732,788 | `-O3 -flto -funroll-loops` | **+6.07%** | [2026-10-27](mining_results.pts_tscp-1.2.2.2026-10-27.md) |
+| `pts/crafty-1.4.5` | 13,456,441 | 14,405,707 | `-O3 -fno-pie -no-pie -fprofile-use` | **+7.05%** | [2026-10-27](mining_results.pts_crafty-1.4.5.2026-10-27b.md) (three mines: +7.05% to +8.93%, winners all 14.4-14.5M) |
+| `pts/himeno-1.3.0` | 7,800 MFLOPS | — | `-O3` (nothing accepted) | 0.0% | [2026-10-27](mining_results.pts_himeno-1.3.0.2026-10-27.md) (best: `-march=native` +0.25%; streams 29 MB per sweep, memory-bound) |
+| `pts/c-ray-2.0.0` | 77.7 s ¹ | 47.3 s | `-O3 -ffast-math -march=native -fprofile-use -mprefer-vector-width=256` | **+64.1%** | [2026-10-28](mining_results.pts_c-ray-2.0.0.2026-10-28.md) (`-march=native` about +30%, PGO +22% on top, 256-bit vectors +2%) |
+| **Geomean gain (5 of 5 mined)** | | | | **+15.19%** | |
+| Geomean gain without c-ray (4) | | | | +5.44% | |
+
+¹ c-ray's base is PTS's own `-O3 -ffast-math` build, not plain `-O3`.
+
+### SPEC CPU2026 (0 mined)
+
+SPEC is installed but not mined here yet (open item 6). Mined suites get niwot-style tables, with every benchmark
+listed and unmined ones counted as 1.00×.
+
+### Geomean progression
+
+PTS geomean gain over the tests mined so far, recorded after each mine.
+
+| After | PTS tests | Geomean gain |
+|---|---|---|
+| `pts/coremark-1.0.1` (`balanced`) | 1 | +6.65% |
+| `pts/coremark-1.0.1` re-mine (`performance`) | 1 | +8.86% |
+| `pts/tscp-1.2.2` | 2 | +7.46% |
+| `pts/crafty-1.4.5` | 3 | +7.38% |
+| `pts/crafty-1.4.5` PGO re-mines | 3 | +7.32% |
+| `pts/himeno-1.3.0` | 4 | +5.44% |
+| `pts/c-ray-2.0.0` | 5 | +15.19% |
 
 ## Standing facts about this host
 
