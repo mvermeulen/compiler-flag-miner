@@ -46,6 +46,48 @@ python3 -m pytest -q
 | 2026-11-05 | `749.fotonik3d_r` | memory-bound 97.3% (corpus) | `-O3 -march=native -mprefer-vector-width=256` | **+7.04%** | [link](mining_results.749.fotonik3d_r.2026-11-05.md) (PGO -4.5%, LTO -2.4%) |
 | 2026-11-05 | `765.roms_r` | | | | in progress |
 
+## Summary by suite
+
+The method is the same as [niwot's](host_niwot.md#summary-by-suite). Each row is the latest converged `cfm mine`
+experiment on this host for that benchmark. *Base* is the plain `-O3` calibration mean, *best* is the winning
+flag set's confirmed mean, and *gain* is best / base. Ratios come from single-iteration `--action=validate` runs
+with 32 copies, so they aren't reportable SPEC scores and can't be compared with niwot's 16-copy ratios.
+
+- **Suite geomean gain** is the geomean of every benchmark's gain, with each unmined benchmark counted as 1.00×.
+  It rises as mining finds wins, and once every row is mined it is the suite-level gain.
+- **Mined-only geomean** covers only the benchmarks mined so far. Its gain is geomean(best) / geomean(base), the
+  typical win per mined benchmark, not a suite score.
+
+### fprate (3 of 12 mined)
+
+| Benchmark | Base (`-O3`) | Best | Winning flags | Gain | Write-up |
+|---|---|---|---|---|---|
+| `709.cactus_r` | 91.446 | 106.547 | `-O3 -march=native` | **+16.51%** | [2026-11-05](mining_results.709.cactus_r.2026-11-05.md) |
+| `722.palm_r` | — | — | not mined yet | — | |
+| `731.astcenc_r` | — | — | not mined yet | — | |
+| `736.ocio_r` | — | — | not mined yet | — | |
+| `737.gmsh_r` | — | — | not mined yet | — | |
+| `748.flightdm_r` | — | — | not mined yet | — | |
+| `749.fotonik3d_r` | 38.726 | 41.452 | `-O3 -march=native -mprefer-vector-width=256` | **+7.04%** | [2026-11-05](mining_results.749.fotonik3d_r.2026-11-05.md) |
+| `765.roms_r` | — | — | in progress | — | |
+| `766.femflow_r` | — | — | not mined yet | — | |
+| `767.nest_r` | — | — | not mined yet | — | |
+| `772.marian_r` | — | — | not mined yet | — | |
+| `782.lbm_r` | 16.033 | 16.598 | `-O3 -march=native` | **+3.52%** | [2026-11-04](mining_results.782.lbm_r.2026-11-04.md) (`--no-shape-filter`) |
+| **Suite geomean gain (12, unmined = 1.00×)** | | | | +2.15% | |
+| Mined-only geomean (3 of 12) | 38.435 | 41.852 | | +8.89% | |
+
+### Suite geomean progression
+
+fprate suite geomean gain (12 benchmarks, unmined = 1.00×), recorded after each mine.
+
+| After | fprate (12) |
+|---|---|
+| `782.lbm_r` | +0.24% |
+| `782.lbm_r` `--no-shape-filter` re-mine | +0.29% |
+| `709.cactus_r` | +1.57% |
+| `749.fotonik3d_r` | +2.15% |
+
 ## Standing facts about this host
 
 - **Experiment 1 (`782.lbm_r`, 2026-11-03) was stopped during its first warm-up rep** to switch the power
