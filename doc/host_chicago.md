@@ -49,7 +49,8 @@ python3 -m pytest -q
 | 2026-11-06 | `731.astcenc_r` | frontend-bound 44.3% (corpus, under the 55% gate) | `-O3 -march=native -Ofast` | **+29.49%** | [link](mining_results.731.astcenc_r.2026-11-06.md) (same winner, gain and code fingerprints as niwot's +29.64%) |
 | 2026-11-07 | `736.ocio_r` | memory-bound 58.5% (corpus) | `-O3 -march=native -flto` | **+22.04%** | [link](mining_results.736.ocio_r.2026-11-07.md) (first LTO accept here; PGO -5.1%; 11 of 14 excluded on shape) |
 | 2026-11-07 | `737.gmsh_r` | memory-bound 42.7% (corpus, under the 55% gate) | `-O3 -flto` | **+2.40%** | [link](mining_results.737.gmsh_r.2026-11-07.md) (first `-march=native` reject here, -0.42%; PGO +0.68% under the 1% bar) |
-| 2026-11-07 | `748.flightdm_r` | | | | in progress |
+| 2026-11-07 | `748.flightdm_r` | frontend-bound 42.0% (corpus, under the 55% gate) | `-O3 -flto -fno-stack-protector -fprofile-use` | **+26.48%** | [link](mining_results.748.flightdm_r.2026-11-07.md) (LTO +10.7%, PGO +12.6%, both as on niwot; first hardening-flag accept here) |
+| 2026-11-07 | `766.femflow_r` | | | | in progress |
 
 ## Summary by suite
 
@@ -63,7 +64,7 @@ with 32 copies, so they aren't reportable SPEC scores and can't be compared with
 - **Mined-only geomean** covers only the benchmarks mined so far. Its gain is geomean(best) / geomean(base), the
   typical win per mined benchmark, not a suite score.
 
-### fprate (8 of 12 mined)
+### fprate (9 of 12 mined)
 
 | Benchmark | Base (`-O3`) | Best | Winning flags | Gain | Write-up |
 |---|---|---|---|---|---|
@@ -72,15 +73,15 @@ with 32 copies, so they aren't reportable SPEC scores and can't be compared with
 | `731.astcenc_r` | 77.592 | 100.477 | `-O3 -march=native -Ofast` | **+29.49%** | [2026-11-06](mining_results.731.astcenc_r.2026-11-06.md) |
 | `736.ocio_r` | 83.802 | 102.273 | `-O3 -march=native -flto` | **+22.04%** | [2026-11-07](mining_results.736.ocio_r.2026-11-07.md) |
 | `737.gmsh_r` | 59.371 | 60.796 | `-O3 -flto` | **+2.40%** | [2026-11-07](mining_results.737.gmsh_r.2026-11-07.md) |
-| `748.flightdm_r` | — | — | in progress | — | |
+| `748.flightdm_r` | 96.219 | 121.701 | `-O3 -flto -fno-stack-protector -fprofile-use` | **+26.48%** | [2026-11-07](mining_results.748.flightdm_r.2026-11-07.md) |
 | `749.fotonik3d_r` | 38.726 | 41.452 | `-O3 -march=native -mprefer-vector-width=256` | **+7.04%** | [2026-11-05](mining_results.749.fotonik3d_r.2026-11-05.md) |
 | `765.roms_r` | 36.618 | 39.250 | `-O3 -march=native` | **+7.19%** | [2026-11-05](mining_results.765.roms_r.2026-11-05.md) |
-| `766.femflow_r` | — | — | not mined yet | — | |
+| `766.femflow_r` | — | — | in progress | — | |
 | `767.nest_r` | — | — | not mined yet | — | |
 | `772.marian_r` | — | — | not mined yet | — | |
 | `782.lbm_r` | 16.033 | 16.598 | `-O3 -march=native` | **+3.52%** | [2026-11-04](mining_results.782.lbm_r.2026-11-04.md) (`--no-shape-filter`) |
-| **Suite geomean gain (12, unmined = 1.00×)** | | | | +7.40% | |
-| Mined-only geomean (8 of 12) | 52.914 | 58.896 | | +11.31% | |
+| **Suite geomean gain (12, unmined = 1.00×)** | | | | +9.53% | |
+| Mined-only geomean (9 of 12) | 56.549 | 63.843 | | +12.90% | |
 
 ### Suite geomean progression
 
@@ -97,6 +98,7 @@ fprate suite geomean gain (12 benchmarks, unmined = 1.00×), recorded after each
 | `731.astcenc_r` | +5.43% |
 | `736.ocio_r` | +7.19% |
 | `737.gmsh_r` | +7.40% |
+| `748.flightdm_r` | +9.53% |
 
 ## Standing facts about this host
 
@@ -108,7 +110,7 @@ fprate suite geomean gain (12 benchmarks, unmined = 1.00×), recorded after each
   niwot the same night ([write-up](mining_results.782.lbm_r.2026-11-03.md)).
 - **Under 32 copies of lbm, package power sits at about 85 W** for the whole run, and the CPU at 91-95°C.
 - **A SPECrate trial of lbm takes about 19 minutes**, so a full mine is about 11 hours (21 with `--no-shape-filter`).
-- **Package power sits at 85.0 W under every 32-copy fprate mine so far** (lbm, cactus, fotonik3d, roms, palm, astcenc, ocio, gmsh): the sustained package limit.
+- **Package power sits at 85.0 W under every 32-copy fprate mine so far** (lbm, cactus, fotonik3d, roms, palm, astcenc, ocio, gmsh, flightdm): the sustained package limit.
 - **The bandwidth gate sometimes catches the tail of the previous run.** In experiment 3 it waited 30 s before
   10 of 66 runs, and each re-probe read the session best (~105 GB/s).
 

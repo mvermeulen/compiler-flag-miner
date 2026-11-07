@@ -23,8 +23,10 @@ filter's 55% confidence margin, so no candidate was excluded on shape.
 - **Every other candidate was within ±0.8% of `-O3`.** `-fipa-pta` (-0.78%) was the only CI-clear loss. The
   security-hardening flags all read slightly positive (`-fno-stack-protector` +0.76%, `-fno-pie -no-pie` +0.59%,
   `-fcf-protection=none` +0.47%, `-U_FORTIFY_SOURCE` +0.26%), all inside the baseline CI.
-- **`-ffast-math` and `-fno-math-errno` built code identical to `-O3`**, so their timed runs were skipped. `-Ofast`
-  did change the code (`3439d7b7`) and read +0.14%.
+- **`-ffast-math` and `-fno-math-errno` built code identical to `-O3`**, so their timed runs were skipped. The SPEC
+  config gives gmsh `PORTABILITY = -fno-fast-math`, which lands after `OPTIMIZE` and cancels both (niwot's
+  [flightdm write-up](mining_results.748.flightdm_r.2026-11-05.md) found the same). `-Ofast` did change the code
+  (`3439d7b7`), since its non-fast-math parts survive, and read +0.14%.
 
 ## Run metadata
 
