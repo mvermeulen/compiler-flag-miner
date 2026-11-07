@@ -1115,6 +1115,22 @@ class CombinationResult:
     pair_trials: list[ConfirmationOutcome] = field(default_factory=list)
 
 
+def _record_phase4_reuse(cfg: CfmConfig, outcome: ConfirmationOutcome) -> None:
+    if not outcome.trial_ids:
+        return
+    conn = db.connect(cfg.db_path)
+    try:
+        db.record_hypothesis(
+            conn, trial_id=outcome.trial_ids[0], proposed_by="rule",
+            rationale=(
+                f"combination step 1 reuses this Phase 4 accept of {outcome.flags} "
+                "(same flagset, same baseline comparison) instead of re-measuring it"
+            ),
+        )
+    finally:
+        conn.close()
+
+
 def greedy_combine(
     cfg: CfmConfig,
     *,
@@ -1134,6 +1150,8 @@ def greedy_combine(
     when the next addition doesn't clear the bar. A small random-pair tournament
     over the same accepted set catches synergy the greedy order might miss,
     bounded to ``max_pair_trials`` "so it doesn't blow the budget."
+    The first step, which is the top Phase 4 accept on the baseline again, reuses
+    that Phase 4 result instead of measuring it a second time.
     """
     rng = rng or random.Random()
     accepted = sorted(
@@ -1154,11 +1172,19 @@ def greedy_combine(
         if flag in current_flags:
             continue
         trial_flags = current_flags + [flag]
-        step = _confirm_flagset(
-            cfg, experiment_id=experiment_id, benchmark=benchmark, baseline=baseline,
-            flags=trial_flags, phase="combination", compare_ci=current_ci, compare_flags=current_flags,
-            parent_trial_id=parent_trial_id, workload=workload, instrumentation=instrumentation,
-        )
+        if trial_flags == candidate.flags and current_ci is baseline.ci and candidate.ci is not None:
+            # The first step is the Phase 4 trial over again: same flagset, same
+            # baseline comparison. Re-measuring it only gave a second sample that
+            # also had to clear the bar alone, and on 737.gmsh_r a wider second CI
+            # threw away a +1.7% accept (doc/opportunities_niwot.md #39).
+            step = candidate
+            _record_phase4_reuse(cfg, candidate)
+        else:
+            step = _confirm_flagset(
+                cfg, experiment_id=experiment_id, benchmark=benchmark, baseline=baseline,
+                flags=trial_flags, phase="combination", compare_ci=current_ci, compare_flags=current_flags,
+                parent_trial_id=parent_trial_id, workload=workload, instrumentation=instrumentation,
+            )
         steps.append(step)
         if step.accepted:
             current_flags = trial_flags
