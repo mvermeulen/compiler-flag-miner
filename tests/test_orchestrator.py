@@ -1133,15 +1133,16 @@ def test_full_pipeline_surfaces_a_genuinely_better_flag(tmp_path):
     candidates = [_candidate("-good-flag"), _candidate("-bad-flag")]
     # Every phase now renders baseline.flags + [candidate.flag] (confirmed live,
     # 2026-08-22 -- see screen_candidates()'s own comment for why), so Phase 3's
-    # screening run, Phase 4's 3 confirmation reps, *and* Phase 5's own greedy
-    # step for "-good-flag" all share the identical ("-O3", "-good-flag") queue
-    # key -- one queue of 1+3+3=7 entries, consumed in call order.
+    # screening run and Phase 4's 3 confirmation reps share the ("-O3",
+    # "-good-flag") queue key. Phase 5's first greedy step is that same flagset
+    # against the same baseline, so it reuses Phase 4's result (#39); the 112s
+    # would only be consumed if it re-measured.
     backends = ScriptedBackends(ratio_sequences={
         ("-O3",): [100.0, 100.0, 100.0, 100.0],  # baseline: 1 characterization + 3 calibration
         ("-O3", "-good-flag"): [
             110.0,                # 1 screening
             111.0, 111.0, 111.0,  # 3 confirmation
-            112.0, 112.0, 112.0,  # Phase 5's greedy step
+            112.0, 112.0, 112.0,  # never reached
         ],
         ("-O3", "-bad-flag"): [80.0],  # 1 screening only (pruned)
     })
@@ -1167,7 +1168,8 @@ def test_full_pipeline_surfaces_a_genuinely_better_flag(tmp_path):
     assert len(confirmed) == 1
     assert confirmed[0].accepted is True
     assert combination.winning_flags == ["-O3", "-good-flag"]
-    assert combination.winning_ci.mean == pytest.approx(112.0)
+    assert combination.winning_ci.mean == pytest.approx(111.0)
+    assert combination.steps[0] is confirmed[0]
 
 
 def test_full_pipeline_reports_baseline_when_nothing_helps(tmp_path):
@@ -1762,6 +1764,50 @@ def test_greedy_combine_compares_code_against_the_running_set_not_the_baseline(t
     assert result.winning_flags == ["-O3", "-a"]
     assert [s.unchanged for s in result.steps] == [False, True]
     assert ("-O3", "-a", "-b") not in backends.timed_runs
+
+
+def test_greedy_combine_reuses_the_phase4_accept_as_its_first_step(tmp_path):
+    # 737.gmsh_r (#39): -flto was accepted in Phase 4, then the greedy step measured
+    # the same flagset again, got a wider CI that overlapped baseline, and rejected
+    # it. The first step now reuses the Phase 4 outcome; only later steps measure.
+    cfg = _cfg(tmp_path)
+    conn = db.connect(cfg.db_path)
+    exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
+    trial_id = db.record_trial(
+        conn, experiment_id=exp_id, phase="confirmation", flags=["-O3", "-a"],
+        optimize_string="-O3 -a", build_status="ok", ratio=110.0,
+    )
+    conn.close()
+    baseline = _baseline(mean_ratio=100.0)
+    phase4 = ConfirmationOutcome(
+        flags=["-O3", "-a"], trial_ids=[trial_id], ratios=[110.0, 110.5, 111.0],
+        ci=confidence_interval([110.0, 110.5, 111.0]), delta_vs_baseline_pct=10.5,
+        accepted=True, reason="",
+    )
+    backends = ScriptedBackends(ratio_sequences={
+        # A re-measure of step 1 would read this and reject.
+        ("-O3", "-a"): [95.0, 125.0, 110.0],
+        ("-O3", "-a", "-b"): [120.0, 120.5, 121.0],
+    })
+    other = ConfirmationOutcome(
+        flags=["-O3", "-b"], trial_ids=[], ratios=[], ci=None,
+        delta_vs_baseline_pct=5.0, accepted=True, reason="",
+    )
+
+    result = greedy_combine(
+        cfg, experiment_id=exp_id, benchmark="fake_r", baseline=baseline, confirmed=[other, phase4],
+        workload=backends, instrumentation=backends, max_pair_trials=0,
+    )
+
+    assert result.steps[0] is phase4
+    assert result.winning_flags == ["-O3", "-a", "-b"]
+    assert ("-O3", "-a") not in backends.timed_runs
+    conn = db.connect(cfg.db_path)
+    try:
+        notes = [r[0] for r in conn.execute("SELECT rationale FROM hypotheses WHERE trial_id=?", (trial_id,))]
+    finally:
+        conn.close()
+    assert any("reuses this Phase 4 accept" in n for n in notes)
 
 
 # -- vector-width deferral and multiplier ---------------------------------------

@@ -383,8 +383,11 @@ Confirmed-positive flags are combined **greedily**: sort by observed lift, add o
 running "candidate peak" set, re-confirm the cumulative set at each step (interaction effects are not
 assumed additive — a combination can underperform the sum of its parts, or occasionally outperform it).
 Stop adding when the next flag's addition doesn't clear the statistical bar over the current cumulative
-set. A small tournament of random *pairs* from the surviving set (not just the greedy path) catches
-synergy the greedy order might miss, bounded to a fixed small trial count so it doesn't blow the budget.
+set. The first step is the top Phase 4 accept on the baseline again, so it reuses that Phase 4 result
+rather than measuring it a second time: a second sample that also had to clear the bar alone threw away
+`737.gmsh_r`'s +1.7% `-flto` accept (`doc/opportunities_niwot.md` #39). A small tournament of random *pairs*
+from the surviving set (not just the greedy path) catches synergy the greedy order might miss, bounded to a
+fixed small trial count so it doesn't blow the budget.
 
 ### Phase 6 — Compounding multipliers (LTO / PGO / microarch)
 Tried once the flag-level search plateaus, each as its own bigger trial layered on top of the winning
