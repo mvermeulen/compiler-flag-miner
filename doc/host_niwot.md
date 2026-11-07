@@ -105,7 +105,7 @@ excluded both. The mines' own winners were `-O3 -fprefetch-loop-arrays` at 24.70
 ² From an interleaved follow-up (`cfm measure`, 3 rounds). The mine rejected `-flto` alone (+0.96%, under the 1% bar)
 and ran PGO on plain `-O3` (26.79, +7.78%), so it never measured the two together.
 
-### fprate (4 of 12 mined)
+### fprate (5 of 12 mined)
 
 | Benchmark | Base (`-O3`) | Best | Winning flags | Gain | Write-up |
 |---|---|---|---|---|---|
@@ -113,7 +113,7 @@ and ran PGO on plain `-O3` (26.79, +7.78%), so it never measured the two togethe
 | `722.palm_r` | — | — | not mined yet | — | |
 | `731.astcenc_r` | 36.591 | 47.438 | `-O3 -march=native -Ofast` | **+29.64%** | [2026-11-04](mining_results.731.astcenc_r.2026-11-04.md) |
 | `736.ocio_r` | — | — | not mined yet | — | |
-| `737.gmsh_r` | — | — | not mined yet | — | |
+| `737.gmsh_r` | 27.829 | 27.829 | `-O3` (`-flto` +1.69% accepted in Phase 4, rejected by the greedy re-measure, #39) | 0.0% | [2026-11-06](mining_results.737.gmsh_r.2026-11-06.md) |
 | `748.flightdm_r` | 47.765 | 60.094 | `-O3 -flto -fprofile-use` | **+25.81%** | [2026-11-05](mining_results.748.flightdm_r.2026-11-05.md) |
 | `749.fotonik3d_r` | — | — | not mined yet | — | |
 | `765.roms_r` | — | — | not mined yet | — | |
@@ -122,7 +122,7 @@ and ran PGO on plain `-O3` (26.79, +7.78%), so it never measured the two togethe
 | `772.marian_r` | — | — | not mined yet | — | |
 | `782.lbm_r` | 5.738 | 5.738 | `-O3` (nothing accepted; throttle noise, ±12.6% baseline) | 0.0% | [2026-11-03](mining_results.782.lbm_r.2026-11-03.md) |
 | **Suite geomean gain (12, unmined = 1.00×)** | | | | +4.27% | |
-| Mined-only geomean (4 of 12) | 25.621 | 29.049 | | +13.38% | |
+| Mined-only geomean (5 of 12) | 26.048 | 28.801 | | +10.57% | |
 
 ### intspeed (13 of 13 mined)
 
@@ -209,6 +209,7 @@ Suite geomean gain over every benchmark in the suite, unmined = 1.00×, recorded
 | `731.astcenc_r` | +20.13% | +2.19% | +20.56% | +0.00% |
 | `748.flightdm_r` | +20.13% | +4.16% | +20.56% | +0.00% |
 | `767.nest_r` | +20.13% | +4.27% | +20.56% | +0.00% |
+| `737.gmsh_r` | +20.13% | +4.27% | +20.56% | +0.00% |
 
 SPECspeed mining started on 2026-10-24 with `834.vpr_s`, the first `_s` benchmark cfm has mined on
 either host. Speed ratios come from one 16-thread process (`threads = 16`), not 16 copies. Since PR #55,
