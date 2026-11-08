@@ -105,7 +105,7 @@ excluded both. The mines' own winners were `-O3 -fprefetch-loop-arrays` at 24.70
 ² From an interleaved follow-up (`cfm measure`, 3 rounds). The mine rejected `-flto` alone (+0.96%, under the 1% bar)
 and ran PGO on plain `-O3` (26.79, +7.78%), so it never measured the two together.
 
-### fprate (6 of 12 mined)
+### fprate (7 of 12 mined)
 
 | Benchmark | Base (`-O3`) | Best | Winning flags | Gain | Write-up |
 |---|---|---|---|---|---|
@@ -119,10 +119,10 @@ and ran PGO on plain `-O3` (26.79, +7.78%), so it never measured the two togethe
 | `765.roms_r` | — | — | not mined yet | — | |
 | `766.femflow_r` | — | — | not mined yet | — | |
 | `767.nest_r` | 42.970 | 43.532 | `-O3 -march=native` (PGO -6.36%) | **+1.31%** | [2026-11-05](mining_results.767.nest_r.2026-11-05.md) |
-| `772.marian_r` | — | — | not mined yet | — | |
+| `772.marian_r` | 57.103 | 93.307 | `-O3 -march=native` (prefetch +19%, graphite +16% alone, nothing on top) | **+63.40%** | [2026-11-08](mining_results.772.marian_r.2026-11-08b.md) |
 | `782.lbm_r` | 5.738 | 5.738 | `-O3` (nothing accepted; throttle noise, ±12.6% baseline) | 0.0% | [2026-11-03](mining_results.782.lbm_r.2026-11-03.md) |
-| **Suite geomean gain (12, unmined = 1.00×)** | | | | +6.04% | |
-| Mined-only geomean (6 of 12) | 27.848 | 31.314 | | +12.45% | |
+| **Suite geomean gain (12, unmined = 1.00×)** | | | | +10.47% | |
+| Mined-only geomean (7 of 12) | 30.856 | 36.600 | | +18.62% | |
 
 ### intspeed (13 of 13 mined)
 
@@ -211,6 +211,7 @@ Suite geomean gain over every benchmark in the suite, unmined = 1.00×, recorded
 | `767.nest_r` | +20.13% | +4.27% | +20.56% | +0.00% |
 | `737.gmsh_r` | +20.13% | +4.27% | +20.56% | +0.00% |
 | `736.ocio_r` | +20.13% | +6.04% | +20.56% | +0.00% |
+| `772.marian_r` | +20.13% | +10.47% | +20.56% | +0.00% |
 
 SPECspeed mining started on 2026-10-24 with `834.vpr_s`, the first `_s` benchmark cfm has mined on
 either host. Speed ratios come from one 16-thread process (`threads = 16`), not 16 copies. Since PR #55,
