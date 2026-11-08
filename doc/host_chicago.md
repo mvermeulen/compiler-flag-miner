@@ -53,6 +53,7 @@ python3 -m pytest -q
 | 2026-11-07 | `766.femflow_r` | memory-bound 69.4% (corpus) | `-O3 -flto -march=native` | **+132.01%** | [link](mining_results.766.femflow_r.2026-11-07.md) (`-march=native` alone +130.5%, AVX-512 autovectorization; `-mprefer-vector-width=256` -15.7%) |
 | 2026-11-08 | `767.nest_r` | memory-bound 47.9% (corpus, under the 55% gate) | `-O3 -fno-stack-protector` | **+1.34%** | [link](mining_results.767.nest_r.2026-11-08.md) (`-march=native` +0.43% rejected; PGO -6.1% as on niwot) |
 | 2026-11-08 | `772.marian_r` | memory-bound 63.1% (corpus) | `-O3 -march=native` | **+72.43%** | [link](mining_results.772.marian_r.2026-11-08.md) (AVX-512 autovectorization; `-fprefetch-loop-arrays` +15.2% alone, nothing on top; 11 of 14 excluded on shape) |
+| 2026-11-08 | `800.pot3d_s` | | | | in progress (first fpspeed mine here) |
 
 ## Summary by suite
 
@@ -133,3 +134,4 @@ fprate suite geomean gain (12 benchmarks, unmined = 1.00×), recorded after each
 | 8 | M | **ocio without the shape filter.** Its 58.5% memory-bound read, just over the 55% gate, excluded 11 of 14 candidates, `-Ofast` and `-ffast-math` among them; on astcenc (under the gate) `-Ofast` added +7.6% on top of `-march=native`. | Re-mine with `--no-shape-filter` (about 8 hours). | Whether fast-math adds to `-march=native -flto`'s +22.0%. |
 | 9 | L | **PGO on gmsh.** `-flto -fprofile-use` read +0.68% on top of `-flto`, CI-clear of it, and was rejected only on the 1% bar. | Nothing unless the bar changes; the measurement stands. | About +3.1% over `-O3` instead of +2.4%. |
 | 10 | L | **The pair tournament skips the 1% bar for its marginal flag.** A pair replaces the greedy winner on a clear CI and a higher mean alone (`greedy_combine()`), so on femflow it added `-flto` on +0.5% over `-march=native`, which the greedy step had just rejected under the bar; on flightdm it recovered a step a single low rep had sunk. | Apply `MIN_PRACTICAL_SIGNIFICANCE_PCT` to a replacing pair's gain over the greedy winner too. | Winning sets carry only flags the evidence supports. |
+| 11 | M | **marian without the shape filter.** Its 63.1% memory-bound read excluded 11 of 14 candidates, `-Ofast` and `-ffast-math` among them, on a neural-network decoder that `-march=native` sped up 72%. | Re-mine with `--no-shape-filter` (about 10 hours; PGO trials alone take an hour each). | Whether fast-math adds to the +72%. |
