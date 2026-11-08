@@ -26,7 +26,7 @@ benchmark this project has mined, on any host. Each 32-copy run went from 527 s 
   512-bit width.
 - **`-flto` gave +16.76% alone, but only +0.53% on top of `-march=native`.** The greedy step read +0.50%, CI-clear of
   `-march=native` but under the 1% bar, and was rejected. The pair `-flto -march=native` then built the same code
-  (`5673a072`), was accepted against `-O3` (+132.01%), and replaced the greedy winner because its mean was higher.
+  (`5673a072`), was accepted against `-O3` (+132.01%), and replaced the greedy winner because its CI was clear of the winner's and its mean higher.
   So the final winner carries `-flto` on a +0.5% margin that the greedy walk itself rejected.
 - **PGO lost 2.01%** on top of `-flto -march=native`. Its three reps agreed and built the same code (`d00eddc9`).
 - **`-fgraphite-identity` was pruned at screening** (83.839, -5.9% against the last calibration rep).
@@ -100,8 +100,8 @@ The greedy deltas are against the step before, the pair delta against `-O3`, and
   build with a fixed `-march=x86-64` baseline, any code written to be autovectorized at AVX-512 width can gain like
   this.
 - **The pair tournament again decided the final flagset**, as on flightdm. Here it added `-flto` on a +0.5% margin
-  the greedy walk had rejected under the 1% bar. The pair is compared against `-O3`, not against the greedy winner,
-  so the 1% bar never applies to its marginal flag. Harmless here (both builds are correct and `-flto` didn't
+  the greedy walk had rejected under the 1% bar. A pair replaces the greedy winner when its CI is clear of the
+  winner's and its mean is higher (`greedy_combine()`), with no 1% bar, so a CI-clear +0.5% is enough. Harmless here (both builds are correct and `-flto` didn't
   hurt), but the winning set is one flag longer than the greedy walk's evidence supports.
 - **niwot hasn't mined femflow yet.** With 16 copies and half the memory bandwidth, the same flag should still win
   big there, but by how much is an open question.

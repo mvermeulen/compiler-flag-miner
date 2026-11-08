@@ -52,7 +52,7 @@ python3 -m pytest -q
 | 2026-11-07 | `748.flightdm_r` | frontend-bound 42.0% (corpus, under the 55% gate) | `-O3 -flto -fno-stack-protector -fprofile-use` | **+26.48%** | [link](mining_results.748.flightdm_r.2026-11-07.md) (LTO +10.7%, PGO +12.6%, both as on niwot; first hardening-flag accept here) |
 | 2026-11-07 | `766.femflow_r` | memory-bound 69.4% (corpus) | `-O3 -flto -march=native` | **+132.01%** | [link](mining_results.766.femflow_r.2026-11-07.md) (`-march=native` alone +130.5%, AVX-512 autovectorization; `-mprefer-vector-width=256` -15.7%) |
 | 2026-11-08 | `767.nest_r` | memory-bound 47.9% (corpus, under the 55% gate) | `-O3 -fno-stack-protector` | **+1.34%** | [link](mining_results.767.nest_r.2026-11-08.md) (`-march=native` +0.43% rejected; PGO -6.1% as on niwot) |
-| 2026-11-08 | `772.marian_r` | | | | in progress |
+| 2026-11-08 | `772.marian_r` | memory-bound 63.1% (corpus) | `-O3 -march=native` | **+72.43%** | [link](mining_results.772.marian_r.2026-11-08.md) (AVX-512 autovectorization; `-fprefetch-loop-arrays` +15.2% alone, nothing on top; 11 of 14 excluded on shape) |
 
 ## Summary by suite
 
@@ -66,7 +66,7 @@ with 32 copies, so they aren't reportable SPEC scores and can't be compared with
 - **Mined-only geomean** covers only the benchmarks mined so far. Its gain is geomean(best) / geomean(base), the
   typical win per mined benchmark, not a suite score.
 
-### fprate (11 of 12 mined)
+### fprate (12 of 12 mined)
 
 | Benchmark | Base (`-O3`) | Best | Winning flags | Gain | Write-up |
 |---|---|---|---|---|---|
@@ -80,10 +80,10 @@ with 32 copies, so they aren't reportable SPEC scores and can't be compared with
 | `765.roms_r` | 36.618 | 39.250 | `-O3 -march=native` | **+7.19%** | [2026-11-05](mining_results.765.roms_r.2026-11-05.md) |
 | `766.femflow_r` | 89.074 | 206.665 | `-O3 -flto -march=native` | **+132.01%** | [2026-11-07](mining_results.766.femflow_r.2026-11-07.md) |
 | `767.nest_r` | 89.606 | 90.811 | `-O3 -fno-stack-protector` | **+1.34%** | [2026-11-08](mining_results.767.nest_r.2026-11-08.md) |
-| `772.marian_r` | — | — | in progress | — | |
+| `772.marian_r` | 121.729 | 209.894 | `-O3 -march=native` | **+72.43%** | [2026-11-08](mining_results.772.marian_r.2026-11-08.md) |
 | `782.lbm_r` | 16.033 | 16.598 | `-O3 -march=native` | **+3.52%** | [2026-11-04](mining_results.782.lbm_r.2026-11-04.md) (`--no-shape-filter`) |
-| **Suite geomean gain (12, unmined = 1.00×)** | | | | +17.61% | |
-| Mined-only geomean (11 of 12) | 61.452 | 73.350 | | +19.36% | |
+| **Suite geomean gain (12, unmined = 1.00×)** | | | | +23.08% | |
+| Mined-only geomean (12 of 12) | 65.054 | 80.066 | | +23.08% | |
 
 ### Suite geomean progression
 
@@ -103,6 +103,7 @@ fprate suite geomean gain (12 benchmarks, unmined = 1.00×), recorded after each
 | `748.flightdm_r` | +9.53% |
 | `766.femflow_r` | +17.48% |
 | `767.nest_r` | +17.61% |
+| `772.marian_r` | +23.08% |
 
 ## Standing facts about this host
 
@@ -114,7 +115,7 @@ fprate suite geomean gain (12 benchmarks, unmined = 1.00×), recorded after each
   niwot the same night ([write-up](mining_results.782.lbm_r.2026-11-03.md)).
 - **Under 32 copies of lbm, package power sits at about 85 W** for the whole run, and the CPU at 91-95°C.
 - **A SPECrate trial of lbm takes about 19 minutes**, so a full mine is about 11 hours (21 with `--no-shape-filter`).
-- **Package power sits at 85.0 W under every 32-copy fprate mine so far** (lbm, cactus, fotonik3d, roms, palm, astcenc, ocio, gmsh, flightdm, femflow, nest): the sustained package limit.
+- **Package power sits at 85.0 W under every 32-copy fprate mine so far** (lbm, cactus, fotonik3d, roms, palm, astcenc, ocio, gmsh, flightdm, femflow, nest, marian): the sustained package limit.
 - **The bandwidth gate sometimes catches the tail of the previous run.** In experiment 3 it waited 30 s before
   10 of 66 runs, and each re-probe read the session best (~105 GB/s).
 
@@ -131,4 +132,4 @@ fprate suite geomean gain (12 benchmarks, unmined = 1.00×), recorded after each
 | 7 | M | **`-flto` on palm.** It read +1.04% alone but was rejected on CI overlap (baseline ±0.73%), so it was never tried with `-march=native -fprofile-use`, which won (+5.20%). | `cfm measure` `-O3 -march=native -flto -fprofile-use`, interleaved with the winner (3 rounds). | Whether LTO adds ~1% on top of PGO here, as it did for intrate on niwot. |
 | 8 | M | **ocio without the shape filter.** Its 58.5% memory-bound read, just over the 55% gate, excluded 11 of 14 candidates, `-Ofast` and `-ffast-math` among them; on astcenc (under the gate) `-Ofast` added +7.6% on top of `-march=native`. | Re-mine with `--no-shape-filter` (about 8 hours). | Whether fast-math adds to `-march=native -flto`'s +22.0%. |
 | 9 | L | **PGO on gmsh.** `-flto -fprofile-use` read +0.68% on top of `-flto`, CI-clear of it, and was rejected only on the 1% bar. | Nothing unless the bar changes; the measurement stands. | About +3.1% over `-O3` instead of +2.4%. |
-| 10 | L | **The pair tournament skips the 1% bar for its marginal flag.** A pair is compared against `-O3`, so on femflow it added `-flto` on +0.5% over `-march=native`, which the greedy step had just rejected; on flightdm it recovered a step a single low rep had sunk. | Compare a replacing pair against the greedy winner as well, with the same bar. | Winning sets carry only flags the evidence supports. |
+| 10 | L | **The pair tournament skips the 1% bar for its marginal flag.** A pair replaces the greedy winner on a clear CI and a higher mean alone (`greedy_combine()`), so on femflow it added `-flto` on +0.5% over `-march=native`, which the greedy step had just rejected under the bar; on flightdm it recovered a step a single low rep had sunk. | Apply `MIN_PRACTICAL_SIGNIFICANCE_PCT` to a replacing pair's gain over the greedy winner too. | Winning sets carry only flags the evidence supports. |
