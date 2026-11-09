@@ -53,7 +53,8 @@ python3 -m pytest -q
 | 2026-11-07 | `766.femflow_r` | memory-bound 69.4% (corpus) | `-O3 -flto -march=native` | **+132.01%** | [link](mining_results.766.femflow_r.2026-11-07.md) (`-march=native` alone +130.5%, AVX-512 autovectorization; `-mprefer-vector-width=256` -15.7%) |
 | 2026-11-08 | `767.nest_r` | memory-bound 47.9% (corpus, under the 55% gate) | `-O3 -fno-stack-protector` | **+1.34%** | [link](mining_results.767.nest_r.2026-11-08.md) (`-march=native` +0.43% rejected; PGO -6.1% as on niwot) |
 | 2026-11-08 | `772.marian_r` | memory-bound 63.1% (corpus) | `-O3 -march=native` | **+72.43%** | [link](mining_results.772.marian_r.2026-11-08.md) (AVX-512 autovectorization; `-fprefetch-loop-arrays` +15.2% alone, nothing on top; 11 of 14 excluded on shape) |
-| 2026-11-08 | `800.pot3d_s` | | | | in progress (first fpspeed mine here) |
+| 2026-11-08 | `800.pot3d_s` | memory-bound 52.0% (corpus, under the 55% gate) | (`-O3 -fno-unswitch-loops`) | (+115.71%) | [link](mining_results.800.pot3d_s.2026-11-08.md) (**not usable**: every trial pinned to one CPU, `doconcurrent` classed single-threaded; fixed in PR #70, re-mine pending) |
+| 2026-11-09 | `803.sph_exa_s` | | | | in progress |
 
 ## Summary by suite
 
@@ -86,6 +87,16 @@ with 32 copies, so they aren't reportable SPEC scores and can't be compared with
 | **Suite geomean gain (12, unmined = 1.00×)** | | | | +23.08% | |
 | Mined-only geomean (12 of 12) | 65.054 | 80.066 | | +23.08% | |
 
+### fpspeed (0 of 13 mined)
+
+SPECspeed runs one copy with `threads = 32`. The config's `-ftree-parallelize-loops`, which auto-parallelizes Fortran
+loops in every fpspeed build, was raised from 24 to 32 on 2026-11-06 to match, before the first fpspeed mine.
+
+| Benchmark | Base (`-O3`) | Best | Winning flags | Gain | Write-up |
+|---|---|---|---|---|---|
+| `800.pot3d_s` | | | | | not counted: [2026-11-08](mining_results.800.pot3d_s.2026-11-08.md) ran pinned to one CPU; re-mine after PR #70 |
+| **Suite geomean gain (13, unmined = 1.00×)** | | | | +0.00% | |
+
 ### Suite geomean progression
 
 fprate suite geomean gain (12 benchmarks, unmined = 1.00×), recorded after each mine.
@@ -117,6 +128,8 @@ fprate suite geomean gain (12 benchmarks, unmined = 1.00×), recorded after each
 - **Under 32 copies of lbm, package power sits at about 85 W** for the whole run, and the CPU at 91-95°C.
 - **A SPECrate trial of lbm takes about 19 minutes**, so a full mine is about 11 hours (21 with `--no-shape-filter`).
 - **Package power sits at 85.0 W under every 32-copy fprate mine so far** (lbm, cactus, fotonik3d, roms, palm, astcenc, ocio, gmsh, flightdm, femflow, nest, marian): the sustained package limit.
+- **SPECspeed runs use 32 threads**, and `-ftree-parallelize-loops=32` (raised from 24 on 2026-11-06).
+- **A speed benchmark drawing far under 85 W is mis-placed**: pot3d_s, pinned to one CPU, drew 24.6 W.
 - **The bandwidth gate sometimes catches the tail of the previous run.** In experiment 3 it waited 30 s before
   10 of 66 runs, and each re-probe read the session best (~105 GB/s).
 
@@ -135,3 +148,5 @@ fprate suite geomean gain (12 benchmarks, unmined = 1.00×), recorded after each
 | 9 | L | **PGO on gmsh.** `-flto -fprofile-use` read +0.68% on top of `-flto`, CI-clear of it, and was rejected only on the 1% bar. | Nothing unless the bar changes; the measurement stands. | About +3.1% over `-O3` instead of +2.4%. |
 | 10 | L | **The pair tournament skips the 1% bar for its marginal flag.** A pair replaces the greedy winner on a clear CI and a higher mean alone (`greedy_combine()`), so on femflow it added `-flto` on +0.5% over `-march=native`, which the greedy step had just rejected under the bar; on flightdm it recovered a step a single low rep had sunk. | Apply `MIN_PRACTICAL_SIGNIFICANCE_PCT` to a replacing pair's gain over the greedy winner too. | Winning sets carry only flags the evidence supports. |
 | 11 | M | **marian without the shape filter.** Its 63.1% memory-bound read excluded 11 of 14 candidates, `-Ofast` and `-ffast-math` among them, on a neural-network decoder that `-march=native` sped up 72%. | Re-mine with `--no-shape-filter` (about 10 hours; PGO trials alone take an hour each). | Whether fast-math adds to the +72%. |
+| 12 | H | **Re-mine `800.pot3d_s` with correct thread placement.** Experiment 15 pinned all 32 auto-parallel threads to CPU 1 (`doconcurrent` was classed single-threaded). | Merge PR #70, then re-mine. | pot3d's real result. Also says whether `-fno-unswitch-loops`'s +115.7% (pinned) has anything to do with how many loops get parallelized. |
+| 13 | L | **Experiment 15's knowledge rows came from the pinned run.** `-fno-unswitch-loops` now reads accepted 1 of 4, mean +29.2%, in the memory-bound cluster; `-march=native` gained a +2.8% accept. | Leave them (one accept of four doesn't fast-track) or remove experiment 15's contributions after the re-mine. | Cleaner memory-bound priors. |
