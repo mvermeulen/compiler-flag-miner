@@ -84,8 +84,8 @@ _MULTIPROCESS_RE = re.compile(r"^\$multiprocess\s*=\s*['\"]yes['\"]", re.MULTILI
 
 
 def benchmark_threading(spec_dir, bench: str) -> str:
-    """'openmp', 'threads' (pthread/C++ threads), 'multiprocess' or 'serial', from the benchmark's
-    own object.pm. 'multiprocess' is `$multiprocess = 'yes'` with no thread benchset: each command is
+    """'openmp' (OpenMP or auto-parallelized DO CONCURRENT), 'threads' (pthread/C++ threads),
+    'multiprocess' or 'serial', from the benchmark's own object.pm. 'multiprocess' is `$multiprocess = 'yes'` with no thread benchset: each command is
     single-threaded, but specinvoke runs many of them at once (821.gcc_s runs ~2,800 compiles 16 at a
     time), so pinning them all to one CPU would crowd every concurrent command onto it."""
     object_pm = Path(spec_dir) / "benchspec" / "CPU" / bench / "Spec" / "object.pm"
@@ -94,7 +94,11 @@ def benchmark_threading(spec_dir, bench: str) -> str:
     text = object_pm.read_text()
     match = _BENCHSETS_RE.search(text)
     benchsets = set(match.group(1).split()) if match else set()
-    if "openmp" in benchsets:
+    # 'doconcurrent' (800.pot3d_s): Fortran DO CONCURRENT loops, which the config's
+    # -ftree-parallelize-loops=N turns into libgomp parallel regions of N threads. They're OpenMP
+    # threads at run time, so they get OpenMP placement; classed 'serial', all N were pinned to one
+    # CPU (experiment 15).
+    if benchsets & {"openmp", "doconcurrent"}:
         return "openmp"
     if benchsets & {"pthread", "cxxthreads"}:
         return "threads"

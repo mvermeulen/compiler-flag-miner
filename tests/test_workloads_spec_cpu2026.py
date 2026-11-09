@@ -280,6 +280,16 @@ def test_generate_config_binds_openmp_speed_threads(tmp_path):
     assert "taskset" not in text
 
 
+def test_generate_config_binds_doconcurrent_speed_threads_like_openmp(tmp_path):
+    # 800.pot3d_s's shape: no openmp benchset, but -ftree-parallelize-loops makes its DO CONCURRENT
+    # loops libgomp threads. Classed serial, all 32 were pinned to one CPU (experiment 15).
+    workload = _speed_workload(tmp_path, "fpspeed doconcurrent specspeed")
+    assert benchmark_threading(tmp_path / "spec", "800.x_s") == "openmp"
+    text = workload.generate_config("800.x_s", "peak", ["-O3"]).read_text()
+    assert "   submit = env OMP_PLACES=threads OMP_PROC_BIND=close ${command}\n" in _peak_section(text, "800.x_s")
+    assert "taskset" not in text
+
+
 def test_generate_config_leaves_pthread_speed_benchmark_unpinned(tmp_path):
     workload = _speed_workload(tmp_path, "intspeed pthread specspeed")
     text = workload.generate_config("800.x_s", "peak", ["-O3"]).read_text()
