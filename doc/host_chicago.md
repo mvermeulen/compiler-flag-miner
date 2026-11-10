@@ -55,7 +55,8 @@ python3 -m pytest -q
 | 2026-11-08 | `772.marian_r` | memory-bound 63.1% (corpus) | `-O3 -march=native` | **+72.43%** | [link](mining_results.772.marian_r.2026-11-08.md) (AVX-512 autovectorization; `-fprefetch-loop-arrays` +15.2% alone, nothing on top; 11 of 14 excluded on shape) |
 | 2026-11-08 | `800.pot3d_s` | memory-bound 52.0% (corpus, under the 55% gate) | (`-O3 -fno-unswitch-loops`) | (+115.71%) | [link](mining_results.800.pot3d_s.2026-11-08.md) (**not usable**: every trial pinned to one CPU, `doconcurrent` classed single-threaded; fixed in PR #70, re-mine pending) |
 | 2026-11-09 | `803.sph_exa_s` | memory-bound 67.4% (corpus) | `-O3 -march=native -fprofile-use` | **+12.73%** | [link](mining_results.803.sph_exa_s.2026-11-09.md) (`-march=native` +9.1%, PGO +3.4% on top; 11 of 14 excluded on shape) |
-| 2026-11-10 | `809.cactus_s` | | | | in progress |
+| 2026-11-10 | `809.cactus_s` | memory-bound 70.9% (corpus) | `-O3 -march=native` | **+14.53%** | [link](mining_results.809.cactus_s.2026-11-10.md) (as cactus_r's +16.5%; LTO, PGO flat; 11 of 14 excluded on shape) |
+| 2026-11-10 | `811.tealeaf_s` | | | | in progress |
 
 ## Summary by suite
 
@@ -88,7 +89,7 @@ with 32 copies, so they aren't reportable SPEC scores and can't be compared with
 | **Suite geomean gain (12, unmined = 1.00×)** | | | | +23.08% | |
 | Mined-only geomean (12 of 12) | 65.054 | 80.066 | | +23.08% | |
 
-### fpspeed (1 of 13 mined)
+### fpspeed (2 of 13 mined)
 
 SPECspeed runs one copy with `threads = 32`. The config's `-ftree-parallelize-loops`, which auto-parallelizes Fortran
 loops in every fpspeed build, was raised from 24 to 32 on 2026-11-06 to match, before the first fpspeed mine.
@@ -97,8 +98,9 @@ loops in every fpspeed build, was raised from 24 to 32 on 2026-11-06 to match, b
 |---|---|---|---|---|---|
 | `800.pot3d_s` | | | | | not counted: [2026-11-08](mining_results.800.pot3d_s.2026-11-08.md) ran pinned to one CPU; re-mine after PR #70 |
 | `803.sph_exa_s` | 3.3481 | 3.7743 | `-O3 -march=native -fprofile-use` | **+12.73%** | [2026-11-09](mining_results.803.sph_exa_s.2026-11-09.md) |
-| **Suite geomean gain (13, unmined = 1.00×)** | | | | +0.93% | |
-| Mined-only geomean (1 of 13) | 3.3481 | 3.7743 | | +12.73% | |
+| `809.cactus_s` | 4.2796 | 4.9012 | `-O3 -march=native` | **+14.53%** | [2026-11-10](mining_results.809.cactus_s.2026-11-10.md) |
+| **Suite geomean gain (13, unmined = 1.00×)** | | | | +1.98% | |
+| Mined-only geomean (2 of 13) | 3.785 | 4.301 | | +13.62% | |
 
 ### Suite geomean progression
 
@@ -120,6 +122,7 @@ Suite geomean gain (unmined = 1.00×), recorded after each mine: fprate over 12 
 | `767.nest_r` | +17.61% | — |
 | `772.marian_r` | +23.08% | — |
 | `803.sph_exa_s` | +23.08% | +0.93% |
+| `809.cactus_s` | +23.08% | +1.98% |
 
 ## Standing facts about this host
 
