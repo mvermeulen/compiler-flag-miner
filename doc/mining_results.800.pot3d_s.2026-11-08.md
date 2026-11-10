@@ -5,6 +5,9 @@ This is the first fpspeed benchmark mined on `chicago` (see [`host_chicago.md`](
 whose loops are written as `DO CONCURRENT`. Its corpus shape is memory-bound at 52.0%, under the 55% shape margin,
 so no candidate was excluded on shape.
 
+**Superseded by the [2026-11-10 re-mine](mining_results.800.pot3d_s.2026-11-10.md)** with correct thread
+placement: `-O3 -Ofast`, +28.25%, and `-fno-unswitch-loops` -31.8%.
+
 ## Headline result
 
 **Not a usable result: every trial ran pinned to one CPU.** The reported winner, `-O3 -fno-unswitch-loops` at
