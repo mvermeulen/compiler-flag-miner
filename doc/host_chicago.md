@@ -56,7 +56,8 @@ python3 -m pytest -q
 | 2026-11-08 | `800.pot3d_s` | memory-bound 52.0% (corpus, under the 55% gate) | (`-O3 -fno-unswitch-loops`) | (+115.71%) | [link](mining_results.800.pot3d_s.2026-11-08.md) (**not usable**: every trial pinned to one CPU, `doconcurrent` classed single-threaded; fixed in PR #70, re-mine pending) |
 | 2026-11-09 | `803.sph_exa_s` | memory-bound 67.4% (corpus) | `-O3 -march=native -fprofile-use` | **+12.73%** | [link](mining_results.803.sph_exa_s.2026-11-09.md) (`-march=native` +9.1%, PGO +3.4% on top; 11 of 14 excluded on shape) |
 | 2026-11-10 | `809.cactus_s` | memory-bound 70.9% (corpus) | `-O3 -march=native` | **+14.53%** | [link](mining_results.809.cactus_s.2026-11-10.md) (as cactus_r's +16.5%; LTO, PGO flat; 11 of 14 excluded on shape) |
-| 2026-11-10 | `811.tealeaf_s` | | | | in progress |
+| 2026-11-10 | `811.tealeaf_s` | memory-bound 70.7% (corpus) | `-O3` | 0.00% | [link](mining_results.811.tealeaf_s.2026-11-10.md) (clean reject: every candidate within ±0.16%, `-march=native` +0.02%; PGO trials 88 min each) |
+| 2026-11-10 | `800.pot3d_s` (re-mine) | | | | in progress (PR #70's OpenMP placement) |
 
 ## Summary by suite
 
@@ -89,7 +90,7 @@ with 32 copies, so they aren't reportable SPEC scores and can't be compared with
 | **Suite geomean gain (12, unmined = 1.00×)** | | | | +23.08% | |
 | Mined-only geomean (12 of 12) | 65.054 | 80.066 | | +23.08% | |
 
-### fpspeed (2 of 13 mined)
+### fpspeed (3 of 13 mined)
 
 SPECspeed runs one copy with `threads = 32`. The config's `-ftree-parallelize-loops`, which auto-parallelizes Fortran
 loops in every fpspeed build, was raised from 24 to 32 on 2026-11-06 to match, before the first fpspeed mine.
@@ -99,8 +100,9 @@ loops in every fpspeed build, was raised from 24 to 32 on 2026-11-06 to match, b
 | `800.pot3d_s` | | | | | not counted: [2026-11-08](mining_results.800.pot3d_s.2026-11-08.md) ran pinned to one CPU; re-mine after PR #70 |
 | `803.sph_exa_s` | 3.3481 | 3.7743 | `-O3 -march=native -fprofile-use` | **+12.73%** | [2026-11-09](mining_results.803.sph_exa_s.2026-11-09.md) |
 | `809.cactus_s` | 4.2796 | 4.9012 | `-O3 -march=native` | **+14.53%** | [2026-11-10](mining_results.809.cactus_s.2026-11-10.md) |
+| `811.tealeaf_s` | 1.4308 | 1.4308 | `-O3` | 0.00% | [2026-11-10](mining_results.811.tealeaf_s.2026-11-10.md) |
 | **Suite geomean gain (13, unmined = 1.00×)** | | | | +1.98% | |
-| Mined-only geomean (2 of 13) | 3.785 | 4.301 | | +13.62% | |
+| Mined-only geomean (3 of 13) | 2.737 | 2.980 | | +8.89% | |
 
 ### Suite geomean progression
 
@@ -123,6 +125,7 @@ Suite geomean gain (unmined = 1.00×), recorded after each mine: fprate over 12 
 | `772.marian_r` | +23.08% | — |
 | `803.sph_exa_s` | +23.08% | +0.93% |
 | `809.cactus_s` | +23.08% | +1.98% |
+| `811.tealeaf_s` | +23.08% | +1.98% |
 
 ## Standing facts about this host
 
@@ -155,5 +158,5 @@ Suite geomean gain (unmined = 1.00×), recorded after each mine: fprate over 12 
 | 9 | L | **PGO on gmsh.** `-flto -fprofile-use` read +0.68% on top of `-flto`, CI-clear of it, and was rejected only on the 1% bar. | Nothing unless the bar changes; the measurement stands. | About +3.1% over `-O3` instead of +2.4%. |
 | 10 | L | **The pair tournament skips the 1% bar for its marginal flag.** A pair replaces the greedy winner on a clear CI and a higher mean alone (`greedy_combine()`), so on femflow it added `-flto` on +0.5% over `-march=native`, which the greedy step had just rejected under the bar; on flightdm it recovered a step a single low rep had sunk. | Apply `MIN_PRACTICAL_SIGNIFICANCE_PCT` to a replacing pair's gain over the greedy winner too. | Winning sets carry only flags the evidence supports. |
 | 11 | M | **marian without the shape filter.** Its 63.1% memory-bound read excluded 11 of 14 candidates, `-Ofast` and `-ffast-math` among them, on a neural-network decoder that `-march=native` sped up 72%. | Re-mine with `--no-shape-filter` (about 10 hours; PGO trials alone take an hour each). | Whether fast-math adds to the +72%. |
-| 12 | H | **Re-mine `800.pot3d_s` with correct thread placement.** Experiment 15 pinned all 32 auto-parallel threads to CPU 1 (`doconcurrent` was classed single-threaded). | Merge PR #70, then re-mine. | pot3d's real result. Also says whether `-fno-unswitch-loops`'s +115.7% (pinned) has anything to do with how many loops get parallelized. |
+| 12 | H | **Re-mine `800.pot3d_s` with correct thread placement** (PR #70 merged 2026-11-10; re-mine started the same day). Experiment 15 pinned all 32 auto-parallel threads to CPU 1 (`doconcurrent` was classed single-threaded). | Merge PR #70, then re-mine. | pot3d's real result. Also says whether `-fno-unswitch-loops`'s +115.7% (pinned) has anything to do with how many loops get parallelized. |
 | 13 | L | **Experiment 15's knowledge rows came from the pinned run.** `-fno-unswitch-loops` now reads accepted 1 of 4, mean +29.2%, in the memory-bound cluster; `-march=native` gained a +2.8% accept. | Leave them (one accept of four doesn't fast-track) or remove experiment 15's contributions after the re-mine. | Cleaner memory-bound priors. |
