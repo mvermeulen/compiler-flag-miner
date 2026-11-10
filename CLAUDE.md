@@ -1172,6 +1172,16 @@ Full branch/PR discipline, same shape as wspy's:
   mean one running process, not just no thread benchset. A pinned trial taking many times its
   expected wall-clock is the symptom.
 
+- **Resolved 2026-11-09: `800.pot3d_s` (`doconcurrent`) was classed single-threaded, so its 32 auto-parallel
+  threads ran pinned to one CPU.** Its `@benchsets` are `fpspeed doconcurrent specspeed`, with no `openmp`.
+  Its DO CONCURRENT loops are parallelized by the config's `-ftree-parallelize-loops=32`, which makes them
+  libgomp parallel regions, but `benchmark_threading()` returned `serial` and every trial got
+  `taskset -c 1`. Experiment 15 (chicago) ran at ratio 0.35 and 24.6 W of package power, against 85 W on
+  every fprate mine, and its +115.7% `-fno-unswitch-loops` win was measured inside that one-CPU setup.
+  Fixed by classing `doconcurrent` as `openmp` (`OMP_PLACES`/`OMP_PROC_BIND` apply to libgomp threads either
+  way). It's the only `doconcurrent` benchmark in the suite. **Lesson** (second time after `821.gcc_s`): a
+  speed benchmark's package power far below the host's rate-mine level is the symptom to check for.
+
 - **2026-10-27: GCC 15 doesn't record a user `-D` macro in `.GCC.command.line`, so the compiled-flags audit
   reports one as NOT FOUND.** Checked directly on `erie`: `gcc -O3 -DCFM_MARKER -frecord-gcc-switches` records
   `-O3` and the specs' own `-D_FORTIFY_SOURCE=3`, but not `-DCFM_MARKER`; `-U _FORTIFY_SOURCE` *is* recorded,
