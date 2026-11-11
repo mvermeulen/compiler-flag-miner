@@ -58,7 +58,8 @@ python3 -m pytest -q
 | 2026-11-10 | `809.cactus_s` | memory-bound 70.9% (corpus) | `-O3 -march=native` | **+14.53%** | [link](mining_results.809.cactus_s.2026-11-10.md) (as cactus_r's +16.5%; LTO, PGO flat; 11 of 14 excluded on shape) |
 | 2026-11-10 | `811.tealeaf_s` | memory-bound 70.7% (corpus) | `-O3` | 0.00% | [link](mining_results.811.tealeaf_s.2026-11-10.md) (clean reject: every candidate within ±0.16%, `-march=native` +0.02%; PGO trials 88 min each) |
 | 2026-11-10 | `800.pot3d_s` (re-mine) | memory-bound 52.0% (corpus, under the 55% gate) | `-O3 -Ofast` | **+28.25%** | [link](mining_results.800.pot3d_s.2026-11-10.md) (OpenMP placement; baseline 4.1× the pinned run's; `-ffast-math` +27.8%, likely more parallelized reductions; `-fno-unswitch-loops` now -31.8%) |
-| 2026-11-10 | `816.nab_s` | | | | in progress |
+| 2026-11-10 | `816.nab_s` | memory-bound 46.6% (corpus, under the 55% gate) | `-O3 -ffast-math -march=native -fprofile-use` | **+15.10%** | [link](mining_results.816.nab_s.2026-11-10.md) (`-ffast-math` +4.6%; `-march=native` +1.4% alone, +6.4% on top of fast-math; PGO about +3.4% on top) |
+| 2026-11-10 | `820.cloverleaf_s` | | | | in progress |
 
 ## Summary by suite
 
@@ -91,7 +92,7 @@ with 32 copies, so they aren't reportable SPEC scores and can't be compared with
 | **Suite geomean gain (12, unmined = 1.00×)** | | | | +23.08% | |
 | Mined-only geomean (12 of 12) | 65.054 | 80.066 | | +23.08% | |
 
-### fpspeed (4 of 13 mined)
+### fpspeed (5 of 13 mined)
 
 SPECspeed runs one copy with `threads = 32`. The config's `-ftree-parallelize-loops`, which auto-parallelizes Fortran
 loops in every fpspeed build, was raised from 24 to 32 on 2026-11-06 to match, before the first fpspeed mine.
@@ -102,8 +103,9 @@ loops in every fpspeed build, was raised from 24 to 32 on 2026-11-06 to match, b
 | `803.sph_exa_s` | 3.3481 | 3.7743 | `-O3 -march=native -fprofile-use` | **+12.73%** | [2026-11-09](mining_results.803.sph_exa_s.2026-11-09.md) |
 | `809.cactus_s` | 4.2796 | 4.9012 | `-O3 -march=native` | **+14.53%** | [2026-11-10](mining_results.809.cactus_s.2026-11-10.md) |
 | `811.tealeaf_s` | 1.4308 | 1.4308 | `-O3` | 0.00% | [2026-11-10](mining_results.811.tealeaf_s.2026-11-10.md) |
-| **Suite geomean gain (13, unmined = 1.00×)** | | | | +3.95% | |
-| Mined-only geomean (4 of 13) | 2.333 | 2.646 | | +13.43% | |
+| `816.nab_s` | 3.3639 | 3.8717 | `-O3 -ffast-math -march=native -fprofile-use` | **+15.10%** | [2026-11-10](mining_results.816.nab_s.2026-11-10.md) |
+| **Suite geomean gain (13, unmined = 1.00×)** | | | | +5.09% | |
+| Mined-only geomean (5 of 13) | 2.510 | 2.855 | | +13.77% | |
 
 ### Suite geomean progression
 
@@ -128,6 +130,7 @@ Suite geomean gain (unmined = 1.00×), recorded after each mine: fprate over 12 
 | `809.cactus_s` | +23.08% | +1.98% |
 | `811.tealeaf_s` | +23.08% | +1.98% |
 | `800.pot3d_s` re-mine | +23.08% | +3.95% |
+| `816.nab_s` | +23.08% | +5.09% |
 
 ## Standing facts about this host
 
@@ -162,4 +165,4 @@ Suite geomean gain (unmined = 1.00×), recorded after each mine: fprate over 12 
 | 11 | M | **marian without the shape filter.** Its 63.1% memory-bound read excluded 11 of 14 candidates, `-Ofast` and `-ffast-math` among them, on a neural-network decoder that `-march=native` sped up 72%. | Re-mine with `--no-shape-filter` (about 10 hours; PGO trials alone take an hour each). | Whether fast-math adds to the +72%. |
 | 12 | ~~H~~ | ~~**Re-mine `800.pot3d_s` with correct thread placement**~~ (PR #70 merged 2026-11-10). Experiment 15 pinned all 32 auto-parallel threads to CPU 1 (`doconcurrent` was classed single-threaded). | Merge PR #70, then re-mine. | **Done 2026-11-10:** +28.25% with `-Ofast`; `-fno-unswitch-loops` reads -31.8% with correct placement. |
 | 13 | L | **Experiment 15's knowledge rows came from the pinned run.** `-fno-unswitch-loops` now reads accepted 1 of 4, mean +29.2%, in the memory-bound cluster; `-march=native` gained a +2.8% accept. | Leave them (one accept of four doesn't fast-track) or remove experiment 15's contributions after the re-mine. | Cleaner memory-bound priors. |
-| 14 | M | **Fast-math on the shape-filtered fpspeed benchmarks.** On pot3d_s (52.0%, under the gate) `-Ofast` gained +28.3%, probably by letting GCC parallelize floating-point reductions. sph_exa_s, cactus_s and tealeaf_s (67-71% memory-bound) never measured it. | Re-mine them with `--no-shape-filter`, or `cfm measure` `-Ofast` on top of each winner. | Whether the fpspeed geomean is missing large fast-math wins. |
+| 14 | M | **Fast-math on the shape-filtered fpspeed benchmarks.** On pot3d_s (52.0%, under the gate) `-Ofast` gained +28.3%, probably by letting GCC parallelize floating-point reductions; on nab_s (46.6%) `-ffast-math` gained +4.6% alone and made `-march=native` worth +6.4% instead of +1.4%. sph_exa_s, cactus_s and tealeaf_s (67-71% memory-bound) never measured it. | Re-mine them with `--no-shape-filter`, or `cfm measure` `-Ofast` on top of each winner. | Whether the fpspeed geomean is missing large fast-math wins. |
