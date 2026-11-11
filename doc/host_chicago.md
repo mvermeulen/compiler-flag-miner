@@ -61,7 +61,8 @@ python3 -m pytest -q
 | 2026-11-10 | `816.nab_s` | memory-bound 46.6% (corpus, under the 55% gate) | `-O3 -ffast-math -march=native -fprofile-use` | **+15.10%** | [link](mining_results.816.nab_s.2026-11-10.md) (`-ffast-math` +4.6%; `-march=native` +1.4% alone, +6.4% on top of fast-math; PGO about +3.4% on top) |
 | 2026-11-11 | `820.cloverleaf_s` | memory-bound 88.2% (corpus) | `-O3` | 0.00% | [link](mining_results.820.cloverleaf_s.2026-11-11.md) (clean reject: `-march=native` +0.55% and `-march=native -fprofile-use` +0.80%, both CI-clear but under the 1% bar; 8 excluded on shape) |
 | 2026-11-11 | `822.palm_s` | memory-bound 56.2% (corpus) | `-O3 -march=native -fprofile-use` | **+23.54%** | [link](mining_results.822.palm_s.2026-11-11.md) (`-march=native` +19.2% against palm_r's +4.1%; PGO +3.6% on top; `-flto` +0.84% rejected on CI overlap; 8 excluded on shape) |
-| 2026-11-11 | `849.fotonik3d_s` | | | | in progress |
+| 2026-11-11 | `849.fotonik3d_s` | memory-bound 92.7% (corpus) | `-O3` | 0.00% | [link](mining_results.849.fotonik3d_s.2026-11-11.md) (`-march=native` -0.71% against fotonik3d_r's +5.4%; PGO -1.25%; 8 excluded on shape) |
+| 2026-11-11 | `857.namd_s` | | | | in progress |
 
 ## Summary by suite
 
@@ -94,7 +95,7 @@ with 32 copies, so they aren't reportable SPEC scores and can't be compared with
 | **Suite geomean gain (12, unmined = 1.00×)** | | | | +23.08% | |
 | Mined-only geomean (12 of 12) | 65.054 | 80.066 | | +23.08% | |
 
-### fpspeed (7 of 13 mined)
+### fpspeed (8 of 13 mined)
 
 SPECspeed runs one copy with `threads = 32`. The config's `-ftree-parallelize-loops`, which auto-parallelizes Fortran
 loops in every fpspeed build, was raised from 24 to 32 on 2026-11-06 to match, before the first fpspeed mine.
@@ -108,8 +109,9 @@ loops in every fpspeed build, was raised from 24 to 32 on 2026-11-06 to match, b
 | `816.nab_s` | 3.3639 | 3.8717 | `-O3 -ffast-math -march=native -fprofile-use` | **+15.10%** | [2026-11-10](mining_results.816.nab_s.2026-11-10.md) |
 | `820.cloverleaf_s` | 1.8570 | 1.8570 | `-O3` | 0.00% | [2026-11-11](mining_results.820.cloverleaf_s.2026-11-11.md) |
 | `822.palm_s` | 3.1325 | 3.8698 | `-O3 -march=native -fprofile-use` | **+23.54%** | [2026-11-11](mining_results.822.palm_s.2026-11-11.md) |
+| `849.fotonik3d_s` | 1.9366 | 1.9366 | `-O3` | 0.00% | [2026-11-11](mining_results.849.fotonik3d_s.2026-11-11.md) |
 | **Suite geomean gain (13, unmined = 1.00×)** | | | | +6.81% | |
-| Mined-only geomean (7 of 13) | 2.482 | 2.804 | | +13.01% | |
+| Mined-only geomean (8 of 13) | 2.406 | 2.678 | | +11.30% | |
 
 ### Suite geomean progression
 
@@ -137,6 +139,7 @@ Suite geomean gain (unmined = 1.00×), recorded after each mine: fprate over 12 
 | `816.nab_s` | +23.08% | +5.09% |
 | `820.cloverleaf_s` | +23.08% | +5.09% |
 | `822.palm_s` | +23.08% | +6.81% |
+| `849.fotonik3d_s` | +23.08% | +6.81% |
 
 ## Standing facts about this host
 
@@ -172,3 +175,4 @@ Suite geomean gain (unmined = 1.00×), recorded after each mine: fprate over 12 
 | 12 | ~~H~~ | ~~**Re-mine `800.pot3d_s` with correct thread placement**~~ (PR #70 merged 2026-11-10). Experiment 15 pinned all 32 auto-parallel threads to CPU 1 (`doconcurrent` was classed single-threaded). | Merge PR #70, then re-mine. | **Done 2026-11-10:** +28.25% with `-Ofast`; `-fno-unswitch-loops` reads -31.8% with correct placement. |
 | 13 | L | **Experiment 15's knowledge rows came from the pinned run.** `-fno-unswitch-loops` now reads accepted 1 of 4, mean +29.2%, in the memory-bound cluster; `-march=native` gained a +2.8% accept. | Leave them (one accept of four doesn't fast-track) or remove experiment 15's contributions after the re-mine. | Cleaner memory-bound priors. |
 | 14 | M | **Fast-math on the shape-filtered fpspeed benchmarks.** On pot3d_s (52.0%, under the gate) `-Ofast` gained +28.3%, probably by letting GCC parallelize floating-point reductions; on nab_s (46.6%) `-ffast-math` gained +4.6% alone and made `-march=native` worth +6.4% instead of +1.4%. sph_exa_s, cactus_s, tealeaf_s (67-71% memory-bound) and cloverleaf_s (88.2%) never measured it. | Re-mine them with `--no-shape-filter`, or `cfm measure` `-Ofast` on top of each winner. | Whether the fpspeed geomean is missing large fast-math wins. |
+| 15 | L | **`-march=native -mprefer-vector-width=256` on fotonik3d_s.** `-march=native` read -0.71% there, so the vector-width multiplier (which needs an `-march=` in the winning set) never ran; on fotonik3d_r 256-bit vectors added +1.5% on top of `-march=native`. | `cfm measure` `-O3 -march=native -mprefer-vector-width=256`, interleaved with `-O3` (3 rounds). | Whether the rate result's vector-width effect carries to speed. |
