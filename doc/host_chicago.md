@@ -60,7 +60,8 @@ python3 -m pytest -q
 | 2026-11-10 | `800.pot3d_s` (re-mine) | memory-bound 52.0% (corpus, under the 55% gate) | `-O3 -Ofast` | **+28.25%** | [link](mining_results.800.pot3d_s.2026-11-10.md) (OpenMP placement; baseline 4.1× the pinned run's; `-ffast-math` +27.8%, likely more parallelized reductions; `-fno-unswitch-loops` now -31.8%) |
 | 2026-11-10 | `816.nab_s` | memory-bound 46.6% (corpus, under the 55% gate) | `-O3 -ffast-math -march=native -fprofile-use` | **+15.10%** | [link](mining_results.816.nab_s.2026-11-10.md) (`-ffast-math` +4.6%; `-march=native` +1.4% alone, +6.4% on top of fast-math; PGO about +3.4% on top) |
 | 2026-11-11 | `820.cloverleaf_s` | memory-bound 88.2% (corpus) | `-O3` | 0.00% | [link](mining_results.820.cloverleaf_s.2026-11-11.md) (clean reject: `-march=native` +0.55% and `-march=native -fprofile-use` +0.80%, both CI-clear but under the 1% bar; 8 excluded on shape) |
-| 2026-11-11 | `822.palm_s` | | | | in progress |
+| 2026-11-11 | `822.palm_s` | memory-bound 56.2% (corpus) | `-O3 -march=native -fprofile-use` | **+23.54%** | [link](mining_results.822.palm_s.2026-11-11.md) (`-march=native` +19.2% against palm_r's +4.1%; PGO +3.6% on top; `-flto` +0.84% rejected on CI overlap; 8 excluded on shape) |
+| 2026-11-11 | `849.fotonik3d_s` | | | | in progress |
 
 ## Summary by suite
 
@@ -93,7 +94,7 @@ with 32 copies, so they aren't reportable SPEC scores and can't be compared with
 | **Suite geomean gain (12, unmined = 1.00×)** | | | | +23.08% | |
 | Mined-only geomean (12 of 12) | 65.054 | 80.066 | | +23.08% | |
 
-### fpspeed (6 of 13 mined)
+### fpspeed (7 of 13 mined)
 
 SPECspeed runs one copy with `threads = 32`. The config's `-ftree-parallelize-loops`, which auto-parallelizes Fortran
 loops in every fpspeed build, was raised from 24 to 32 on 2026-11-06 to match, before the first fpspeed mine.
@@ -106,8 +107,9 @@ loops in every fpspeed build, was raised from 24 to 32 on 2026-11-06 to match, b
 | `811.tealeaf_s` | 1.4308 | 1.4308 | `-O3` | 0.00% | [2026-11-10](mining_results.811.tealeaf_s.2026-11-10.md) |
 | `816.nab_s` | 3.3639 | 3.8717 | `-O3 -ffast-math -march=native -fprofile-use` | **+15.10%** | [2026-11-10](mining_results.816.nab_s.2026-11-10.md) |
 | `820.cloverleaf_s` | 1.8570 | 1.8570 | `-O3` | 0.00% | [2026-11-11](mining_results.820.cloverleaf_s.2026-11-11.md) |
-| **Suite geomean gain (13, unmined = 1.00×)** | | | | +5.09% | |
-| Mined-only geomean (6 of 13) | 2.387 | 2.658 | | +11.35% | |
+| `822.palm_s` | 3.1325 | 3.8698 | `-O3 -march=native -fprofile-use` | **+23.54%** | [2026-11-11](mining_results.822.palm_s.2026-11-11.md) |
+| **Suite geomean gain (13, unmined = 1.00×)** | | | | +6.81% | |
+| Mined-only geomean (7 of 13) | 2.482 | 2.804 | | +13.01% | |
 
 ### Suite geomean progression
 
@@ -134,6 +136,7 @@ Suite geomean gain (unmined = 1.00×), recorded after each mine: fprate over 12 
 | `800.pot3d_s` re-mine | +23.08% | +3.95% |
 | `816.nab_s` | +23.08% | +5.09% |
 | `820.cloverleaf_s` | +23.08% | +5.09% |
+| `822.palm_s` | +23.08% | +6.81% |
 
 ## Standing facts about this host
 
