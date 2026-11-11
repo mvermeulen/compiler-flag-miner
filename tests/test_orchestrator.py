@@ -589,6 +589,20 @@ def test_filter_never_excludes_lto_on_shape(pct):
     assert ("-freorder-functions" in kept) is (pct is None or pct < 55.0)
 
 
+@pytest.mark.parametrize("pct", [58.5, 55.0, 45.4, None])
+def test_filter_never_excludes_fno_math_errno_on_shape(pct):
+    # 736.ocio_r: memory-bound 58.5% excluded -fno-math-errno, which then measured +4.00% (#30).
+    baseline = _baseline(resource_dominance="memory-bound", resource_dominance_pct=pct)
+    survivors = _filter_implausible_candidates(
+        [_signaled_candidate("-fno-math-errno", ["compute-bound"]),
+         _signaled_candidate("-ffast-math", ["compute-bound"])],
+        baseline,
+    )
+    kept = [c.flag for c in survivors]
+    assert "-fno-math-errno" in kept
+    assert ("-ffast-math" in kept) is (pct is None or pct < 55.0)
+
+
 def test_shape_exempt_flags_are_real_catalog_entries():
     from cfm.compilers.gcc import GccCompiler
     from cfm.orchestrator import SHAPE_EXEMPT_FLAGS
