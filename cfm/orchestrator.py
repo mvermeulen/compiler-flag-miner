@@ -146,8 +146,12 @@ CONFIDENT_SHAPE_MIN_PCT = 55.0
 # #28). On niwot a shape exclusion hid an LTO or PGO gain on five of six memory-bound
 # benchmarks, the last at a confident 72.9% (829.abc_s, -flto +2.32%), and only zstd
 # was right to exclude. Screening -flto costs one LTO build per mine. PGO was never
-# a Phase 2 candidate; Phase 6 always tries it (PR #53).
-SHAPE_EXEMPT_FLAGS = frozenset({"-flto"})
+# a Phase 2 candidate; Phase 6 always tries it (PR #53). -fno-math-errno added
+# 2026-11-10 (#30): its catalog tag is compute-bound, but what it does (inlining sqrt,
+# treating libm calls as pure so loops around them vectorize) doesn't depend on the
+# bottleneck. 736.ocio_r's --no-shape-filter re-mine accepted it at +4.00% alone and
+# +2.10% on top of -march=native after a 58.5% memory-bound shape had excluded it.
+SHAPE_EXEMPT_FLAGS = frozenset({"-flto", "-fno-math-errno"})
 
 
 @dataclass

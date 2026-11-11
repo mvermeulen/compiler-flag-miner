@@ -947,6 +947,10 @@ compiler-flag-miner/
        and a direct check measured +2.32%. That made five of six memory-bound benchmarks on `niwot`
        where a shape exclusion hid an LTO or PGO gain. Even a confident shape doesn't predict LTO,
        and screening it costs one LTO build per mine, so it is always screened, as PGO is always tried.
+       **Changed 2026-11-10: `-fno-math-errno` is exempt too** (#30). `736.ocio_r`'s 58.5% memory-bound
+       shape excluded it; a `--no-shape-filter` re-mine accepted it at +4.00% alone and +2.10% on top of
+       `-march=native`. Its effect (inlining `sqrt`, letting loops around libm calls vectorize) doesn't
+       depend on the bottleneck, and a flag that changes no code costs only a build (#58).
      - Phase 4/5 confirmation uses a small, fixed number of `quick`-profile reps (not `deep-cpu`'s 3)
        and an **asymmetric accept bar**: require a clearly large, unambiguous improvement to accept
        (statistical *and* practical significance — non-overlapping CI is necessary but not sufficient;
