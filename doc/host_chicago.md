@@ -63,7 +63,8 @@ python3 -m pytest -q
 | 2026-11-11 | `822.palm_s` | memory-bound 56.2% (corpus) | `-O3 -march=native -fprofile-use` | **+23.54%** | [link](mining_results.822.palm_s.2026-11-11.md) (`-march=native` +19.2% against palm_r's +4.1%; PGO +3.6% on top; `-flto` +0.84% rejected on CI overlap; 8 excluded on shape) |
 | 2026-11-11 | `849.fotonik3d_s` | memory-bound 92.7% (corpus) | `-O3` | 0.00% | [link](mining_results.849.fotonik3d_s.2026-11-11.md) (`-march=native` -0.71% against fotonik3d_r's +5.4%; PGO -1.25%; 8 excluded on shape) |
 | 2026-11-11 | `857.namd_s` | memory-bound 41.2% (corpus, under the 55% gate) | `-O3 -march=native` | **+17.52%** | [link](mining_results.857.namd_s.2026-11-11.md) (first fast-math loss here, `-Ofast` -2.8%; PGO +0.47% for 37-minute trials) |
-| 2026-11-12 | `865.roms_s` | | | | in progress |
+| 2026-11-12 | `865.roms_s` | memory-bound 95.1% (corpus) | `-O3 -march=native` | **+1.95%** | [link](mining_results.865.roms_s.2026-11-12.md) (against roms_r's +7.2%; PGO -0.35%, `-mprefer-vector-width=256` -0.52% on top; 8 excluded on shape) |
+| 2026-11-12 | `867.nest_s` | | | | in progress |
 
 ## Summary by suite
 
@@ -96,7 +97,7 @@ with 32 copies, so they aren't reportable SPEC scores and can't be compared with
 | **Suite geomean gain (12, unmined = 1.00×)** | | | | +23.08% | |
 | Mined-only geomean (12 of 12) | 65.054 | 80.066 | | +23.08% | |
 
-### fpspeed (9 of 13 mined)
+### fpspeed (10 of 13 mined)
 
 SPECspeed runs one copy with `threads = 32`. The config's `-ftree-parallelize-loops`, which auto-parallelizes Fortran
 loops in every fpspeed build, was raised from 24 to 32 on 2026-11-06 to match, before the first fpspeed mine.
@@ -112,8 +113,9 @@ loops in every fpspeed build, was raised from 24 to 32 on 2026-11-06 to match, b
 | `822.palm_s` | 3.1325 | 3.8698 | `-O3 -march=native -fprofile-use` | **+23.54%** | [2026-11-11](mining_results.822.palm_s.2026-11-11.md) |
 | `849.fotonik3d_s` | 1.9366 | 1.9366 | `-O3` | 0.00% | [2026-11-11](mining_results.849.fotonik3d_s.2026-11-11.md) |
 | `857.namd_s` | 2.4912 | 2.9276 | `-O3 -march=native` | **+17.52%** | [2026-11-11](mining_results.857.namd_s.2026-11-11.md) |
-| **Suite geomean gain (13, unmined = 1.00×)** | | | | +8.14% | |
-| Mined-only geomean (9 of 13) | 2.415 | 2.704 | | +11.97% | |
+| `865.roms_s` | 2.6194 | 2.6705 | `-O3 -march=native` | **+1.95%** | [2026-11-12](mining_results.865.roms_s.2026-11-12.md) |
+| **Suite geomean gain (13, unmined = 1.00×)** | | | | +8.30% | |
+| Mined-only geomean (10 of 13) | 2.435 | 2.701 | | +10.93% | |
 
 ### Suite geomean progression
 
@@ -143,6 +145,7 @@ Suite geomean gain (unmined = 1.00×), recorded after each mine: fprate over 12 
 | `822.palm_s` | +23.08% | +6.81% |
 | `849.fotonik3d_s` | +23.08% | +6.81% |
 | `857.namd_s` | +23.08% | +8.14% |
+| `865.roms_s` | +23.08% | +8.30% |
 
 ## Standing facts about this host
 
