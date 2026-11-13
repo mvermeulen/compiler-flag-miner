@@ -65,7 +65,8 @@ python3 -m pytest -q
 | 2026-11-11 | `857.namd_s` | memory-bound 41.2% (corpus, under the 55% gate) | `-O3 -march=native` | **+17.52%** | [link](mining_results.857.namd_s.2026-11-11.md) (first fast-math loss here, `-Ofast` -2.8%; PGO +0.47% for 37-minute trials) |
 | 2026-11-12 | `865.roms_s` | memory-bound 95.1% (corpus) | `-O3 -march=native` | **+1.95%** | [link](mining_results.865.roms_s.2026-11-12.md) (against roms_r's +7.2%; PGO -0.35%, `-mprefer-vector-width=256` -0.52% on top; 8 excluded on shape) |
 | 2026-11-12 | `867.nest_s` | memory-bound 65.6% (corpus) | `-O3` | 0.00% | [link](mining_results.867.nest_s.2026-11-12.md) (noisy: `-O3` runs spread 4.2%, baseline CI ±3.65%; `-march=native` +3.67% rejected on CI overlap, about +2.7% over six runs; 10 excluded on shape) |
-| 2026-11-12 | `872.marian_s` | | | | in progress |
+| 2026-11-12 | `872.marian_s` | memory-bound 86.9% (corpus) | `-O3 -march=native` | **+56.38%** | [link](mining_results.872.marian_s.2026-11-12.md) (`-mprefer-vector-width=256` -15.1% on top; `-fprefetch-loop-arrays` about +1.8% on top, rejected on CI overlap as on marian_r; PGO -1.0% at 1h42m a trial; 10 excluded on shape) |
+| 2026-11-13 | `881.neutron_s` | | | | in progress |
 
 ## Summary by suite
 
@@ -98,7 +99,7 @@ with 32 copies, so they aren't reportable SPEC scores and can't be compared with
 | **Suite geomean gain (12, unmined = 1.00×)** | | | | +23.08% | |
 | Mined-only geomean (12 of 12) | 65.054 | 80.066 | | +23.08% | |
 
-### fpspeed (11 of 13 mined)
+### fpspeed (12 of 13 mined)
 
 SPECspeed runs one copy with `threads = 32`. The config's `-ftree-parallelize-loops`, which auto-parallelizes Fortran
 loops in every fpspeed build, was raised from 24 to 32 on 2026-11-06 to match, before the first fpspeed mine.
@@ -116,8 +117,9 @@ loops in every fpspeed build, was raised from 24 to 32 on 2026-11-06 to match, b
 | `857.namd_s` | 2.4912 | 2.9276 | `-O3 -march=native` | **+17.52%** | [2026-11-11](mining_results.857.namd_s.2026-11-11.md) |
 | `865.roms_s` | 2.6194 | 2.6705 | `-O3 -march=native` | **+1.95%** | [2026-11-12](mining_results.865.roms_s.2026-11-12.md) |
 | `867.nest_s` | 4.3744 | 4.3744 | `-O3` | 0.00% | [2026-11-12](mining_results.867.nest_s.2026-11-12.md) |
-| **Suite geomean gain (13, unmined = 1.00×)** | | | | +8.30% | |
-| Mined-only geomean (11 of 13) | 2.568 | 2.822 | | +9.89% | |
+| `872.marian_s` | 4.4193 | 6.9108 | `-O3 -march=native` | **+56.38%** | [2026-11-12](mining_results.872.marian_s.2026-11-12.md) |
+| **Suite geomean gain (13, unmined = 1.00×)** | | | | +12.09% | |
+| Mined-only geomean (12 of 13) | 2.687 | 3.041 | | +13.16% | |
 
 ### Suite geomean progression
 
@@ -149,6 +151,7 @@ Suite geomean gain (unmined = 1.00×), recorded after each mine: fprate over 12 
 | `857.namd_s` | +23.08% | +8.14% |
 | `865.roms_s` | +23.08% | +8.30% |
 | `867.nest_s` | +23.08% | +8.30% |
+| `872.marian_s` | +23.08% | +12.09% |
 
 ## Standing facts about this host
 
@@ -186,3 +189,4 @@ Suite geomean gain (unmined = 1.00×), recorded after each mine: fprate over 12 
 | 14 | M | **Fast-math on the shape-filtered fpspeed benchmarks.** On pot3d_s (52.0%, under the gate) `-Ofast` gained +28.3%, probably by letting GCC parallelize floating-point reductions; on nab_s (46.6%) `-ffast-math` gained +4.6% alone and made `-march=native` worth +6.4% instead of +1.4%. sph_exa_s, cactus_s, tealeaf_s (67-71% memory-bound) and cloverleaf_s (88.2%) never measured it. | Re-mine them with `--no-shape-filter`, or `cfm measure` `-Ofast` on top of each winner. | Whether the fpspeed geomean is missing large fast-math wins. |
 | 15 | L | **`-march=native -mprefer-vector-width=256` on fotonik3d_s.** `-march=native` read -0.71% there, so the vector-width multiplier (which needs an `-march=` in the winning set) never ran; on fotonik3d_r 256-bit vectors added +1.5% on top of `-march=native`. | `cfm measure` `-O3 -march=native -mprefer-vector-width=256`, interleaved with `-O3` (3 rounds). | Whether the rate result's vector-width effect carries to speed. |
 | 16 | M | **`-march=native` on nest_s, under the noise.** `-O3` runs spread 4.2% (4.302-4.483), so the baseline CI was ±3.65% and `-march=native`'s +3.67% was rejected on overlap; six runs of its code (with the same-code `-march=znver5`) average +2.69%. | `cfm measure` `-O3` and `-O3 -march=native` interleaved, 6+ rounds each. | Whether nest_s has a ~2.7% win the 3-rep CI test can't see, and how to mine a benchmark this noisy. |
+| 17 | L | **`-fprefetch-loop-arrays` on top of `-march=native` on marian.** Rejected on CI overlap on both marian_r (+1.68%) and marian_s (+1.63%), and both times the pair tournament measured the same code higher; on marian_s the six runs pool to +1.77%, CI clear. | `cfm measure` `-O3 -march=native` and `-O3 -march=native -fprefetch-loop-arrays` interleaved (3+ rounds each), on both. | Whether marian's winner is missing a real ~1.7% step; also bears on item 10's pair rule. |
