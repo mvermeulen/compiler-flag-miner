@@ -66,7 +66,7 @@ python3 -m pytest -q
 | 2026-11-12 | `865.roms_s` | memory-bound 95.1% (corpus) | `-O3 -march=native` | **+1.95%** | [link](mining_results.865.roms_s.2026-11-12.md) (against roms_r's +7.2%; PGO -0.35%, `-mprefer-vector-width=256` -0.52% on top; 8 excluded on shape) |
 | 2026-11-12 | `867.nest_s` | memory-bound 65.6% (corpus) | `-O3` | 0.00% | [link](mining_results.867.nest_s.2026-11-12.md) (noisy: `-O3` runs spread 4.2%, baseline CI ±3.65%; `-march=native` +3.67% rejected on CI overlap, about +2.7% over six runs; 10 excluded on shape) |
 | 2026-11-12 | `872.marian_s` | memory-bound 86.9% (corpus) | `-O3 -march=native` | **+56.38%** | [link](mining_results.872.marian_s.2026-11-12.md) (`-mprefer-vector-width=256` -15.1% on top; `-fprefetch-loop-arrays` about +1.8% on top, rejected on CI overlap as on marian_r; PGO -1.0% at 1h42m a trial; 10 excluded on shape) |
-| 2026-11-13 | `881.neutron_s` | | | | in progress |
+| 2026-11-13 | `881.neutron_s` | memory-bound 67.0% (corpus) | `-O3 -flto -march=native` | **+10.89%** | [link](mining_results.881.neutron_s.2026-11-13.md) (`-flto` +6.2%, `-march=native` +2.0% alone, +4.4% on top of LTO; PGO -25.4% at 15% lower package power; 10 excluded on shape) |
 
 ## Summary by suite
 
@@ -99,7 +99,7 @@ with 32 copies, so they aren't reportable SPEC scores and can't be compared with
 | **Suite geomean gain (12, unmined = 1.00×)** | | | | +23.08% | |
 | Mined-only geomean (12 of 12) | 65.054 | 80.066 | | +23.08% | |
 
-### fpspeed (12 of 13 mined)
+### fpspeed (13 of 13 mined)
 
 SPECspeed runs one copy with `threads = 32`. The config's `-ftree-parallelize-loops`, which auto-parallelizes Fortran
 loops in every fpspeed build, was raised from 24 to 32 on 2026-11-06 to match, before the first fpspeed mine.
@@ -118,8 +118,9 @@ loops in every fpspeed build, was raised from 24 to 32 on 2026-11-06 to match, b
 | `865.roms_s` | 2.6194 | 2.6705 | `-O3 -march=native` | **+1.95%** | [2026-11-12](mining_results.865.roms_s.2026-11-12.md) |
 | `867.nest_s` | 4.3744 | 4.3744 | `-O3` | 0.00% | [2026-11-12](mining_results.867.nest_s.2026-11-12.md) |
 | `872.marian_s` | 4.4193 | 6.9108 | `-O3 -march=native` | **+56.38%** | [2026-11-12](mining_results.872.marian_s.2026-11-12.md) |
-| **Suite geomean gain (13, unmined = 1.00×)** | | | | +12.09% | |
-| Mined-only geomean (12 of 13) | 2.687 | 3.041 | | +13.16% | |
+| `881.neutron_s` | 2.0946 | 2.3227 | `-O3 -flto -march=native` | **+10.89%** | [2026-11-13](mining_results.881.neutron_s.2026-11-13.md) |
+| **Suite geomean gain (13, unmined = 1.00×)** | | | | +12.99% | |
+| Mined-only geomean (13 of 13) | 2.636 | 2.978 | | +12.99% | |
 
 ### Suite geomean progression
 
@@ -152,6 +153,7 @@ Suite geomean gain (unmined = 1.00×), recorded after each mine: fprate over 12 
 | `865.roms_s` | +23.08% | +8.30% |
 | `867.nest_s` | +23.08% | +8.30% |
 | `872.marian_s` | +23.08% | +12.09% |
+| `881.neutron_s` | +23.08% | +12.99% |
 
 ## Standing facts about this host
 
