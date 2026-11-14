@@ -117,7 +117,7 @@ and ran PGO on plain `-O3` (26.79, +7.78%), so it never measured the two togethe
 | `748.flightdm_r` | 47.765 | 60.094 | `-O3 -flto -fprofile-use` | **+25.81%** | [2026-11-05](mining_results.748.flightdm_r.2026-11-05.md) |
 | `749.fotonik3d_r` | — | — | not mined yet | — | |
 | `765.roms_r` | — | — | not mined yet | — | |
-| `766.femflow_r` | 43.082 | 89.001 | `-O3 -march=native` (`-flto` +15% alone, nothing on top; PGO -27.18%) | **+106.58%** | [2026-11-09](mining_results.766.femflow_r.2026-11-09.md) |
+| `766.femflow_r` | 43.082 | 89.001 | `-O3 -march=native` (`-flto` +15% alone, nothing on top; PGO -27.18%; the `--no-shape-filter` re-mine picked the same, +108.68%, PGO -30.07% on the same binary) | **+106.58%** | [2026-11-09](mining_results.766.femflow_r.2026-11-09.md), [2026-11-14](mining_results.766.femflow_r.2026-11-14.md) |
 | `767.nest_r` | 42.970 | 43.532 | `-O3 -march=native` (PGO -6.36%) | **+1.31%** | [2026-11-05](mining_results.767.nest_r.2026-11-05.md) |
 | `772.marian_r` | 57.103 | 93.307 | `-O3 -march=native` (prefetch +19%, graphite +16% alone, nothing on top; the `--no-shape-filter` re-mine picked the same, +64.13%, fast-math -2.5% on top) | **+63.40%** | [2026-11-08](mining_results.772.marian_r.2026-11-08b.md), [2026-11-12](mining_results.772.marian_r.2026-11-12.md) |
 | `782.lbm_r` | 5.738 | 5.738 | `-O3` (nothing accepted; throttle noise, ±12.6% baseline) | 0.0% | [2026-11-03](mining_results.782.lbm_r.2026-11-03.md) |
@@ -216,6 +216,7 @@ Suite geomean gain over every benchmark in the suite, unmined = 1.00×, recorded
 | `722.palm_r` | +20.13% | +18.24% | +20.56% | +0.00% |
 | `736.ocio_r` `--no-shape-filter` re-mine | +20.13% | +18.55% | +20.56% | +0.00% |
 | `772.marian_r` `--no-shape-filter` re-mine (same winner, row kept) | +20.13% | +18.55% | +20.56% | +0.00% |
+| `766.femflow_r` `--no-shape-filter` re-mine (same winner, row kept) | +20.13% | +18.55% | +20.56% | +0.00% |
 
 SPECspeed mining started on 2026-10-24 with `834.vpr_s`, the first `_s` benchmark cfm has mined on
 either host. Speed ratios come from one 16-thread process (`threads = 16`), not 16 copies. Since PR #55,
