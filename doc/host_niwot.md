@@ -105,7 +105,7 @@ excluded both. The mines' own winners were `-O3 -fprefetch-loop-arrays` at 24.70
 ² From an interleaved follow-up (`cfm measure`, 3 rounds). The mine rejected `-flto` alone (+0.96%, under the 1% bar)
 and ran PGO on plain `-O3` (26.79, +7.78%), so it never measured the two together.
 
-### fprate (10 of 12 mined)
+### fprate (11 of 12 mined)
 
 | Benchmark | Base (`-O3`) | Best | Winning flags | Gain | Write-up |
 |---|---|---|---|---|---|
@@ -115,14 +115,14 @@ and ran PGO on plain `-O3` (26.79, +7.78%), so it never measured the two togethe
 | `736.ocio_r` | 38.325 | 48.370 | `-O3 -march=native -fno-math-errno` (`--no-shape-filter` re-mine; the shape-filtered mine got `-O3 -march=native`, +22.35%) | **+26.21%** | [2026-11-10](mining_results.736.ocio_r.2026-11-10.md), [2026-11-07](mining_results.736.ocio_r.2026-11-07b.md) |
 | `737.gmsh_r` | 27.829 | 27.829 | `-O3` (`-flto` +1.69% accepted in Phase 4, rejected by the greedy re-measure, #39) | 0.0% | [2026-11-06](mining_results.737.gmsh_r.2026-11-06.md) |
 | `748.flightdm_r` | 47.765 | 60.094 | `-O3 -flto -fprofile-use` | **+25.81%** | [2026-11-05](mining_results.748.flightdm_r.2026-11-05.md) |
-| `749.fotonik3d_r` | — | — | not mined yet | — | |
+| `749.fotonik3d_r` | 14.078 | 14.078 | `-O3` (the mine reported `-O3 -mtune=znver5` +9.92%, a throttle-level mismatch: `-O3` read 15.87 on the same 17 W level; recheck +12.76% flagged; `-march=native` rejected twice on CI overlap) | 0.0% | [2026-11-14](mining_results.749.fotonik3d_r.2026-11-14.md) |
 | `765.roms_r` | — | — | not mined yet | — | |
 | `766.femflow_r` | 43.082 | 89.001 | `-O3 -march=native` (`-flto` +15% alone, nothing on top; PGO -27.18%; the `--no-shape-filter` re-mine picked the same, +108.68%, PGO -30.07% on the same binary) | **+106.58%** | [2026-11-09](mining_results.766.femflow_r.2026-11-09.md), [2026-11-14](mining_results.766.femflow_r.2026-11-14.md) |
 | `767.nest_r` | 42.970 | 43.532 | `-O3 -march=native` (PGO -6.36%) | **+1.31%** | [2026-11-05](mining_results.767.nest_r.2026-11-05.md) |
 | `772.marian_r` | 57.103 | 93.307 | `-O3 -march=native` (prefetch +19%, graphite +16% alone, nothing on top; the `--no-shape-filter` re-mine picked the same, +64.13%, fast-math -2.5% on top) | **+63.40%** | [2026-11-08](mining_results.772.marian_r.2026-11-08b.md), [2026-11-12](mining_results.772.marian_r.2026-11-12.md) |
 | `782.lbm_r` | 5.738 | 5.738 | `-O3` (nothing accepted; throttle noise, ±12.6% baseline) | 0.0% | [2026-11-03](mining_results.782.lbm_r.2026-11-03.md) |
 | **Suite geomean gain (12, unmined = 1.00×)** | | | | +20.50% | |
-| Mined-only geomean (10 of 12) | 33.461 | 41.851 | | +25.07% | |
+| Mined-only geomean (11 of 12) | 30.928 | 37.904 | | +22.56% | |
 
 ### intspeed (13 of 13 mined)
 
@@ -218,6 +218,7 @@ Suite geomean gain over every benchmark in the suite, unmined = 1.00×, recorded
 | `772.marian_r` `--no-shape-filter` re-mine (same winner, row kept) | +20.13% | +18.55% | +20.56% | +0.00% |
 | `766.femflow_r` `--no-shape-filter` re-mine (same winner, row kept) | +20.13% | +18.55% | +20.56% | +0.00% |
 | `709.cactus_r` (held back, mined clean) | +20.13% | +20.50% | +20.56% | +0.00% |
+| `749.fotonik3d_r` (held back, throttled; recorded 0.0%) | +20.13% | +20.50% | +20.56% | +0.00% |
 
 SPECspeed mining started on 2026-10-24 with `834.vpr_s`, the first `_s` benchmark cfm has mined on
 either host. Speed ratios come from one 16-thread process (`threads = 16`), not 16 copies. Since PR #55,
@@ -230,7 +231,7 @@ fprate mining moved to [`chicago`](host_chicago.md) after `782.lbm_r` hit this h
 ([note](lbm_swing_investigation.2026-10-23.md)). A 2026-11-03 re-mine with a 10-minute settle before every run didn't help: the same binary read 6.33 and 5.00, on
 discrete throttle levels that set in mid-run ([write-up](mining_results.782.lbm_r.2026-11-03.md)). The less
 bandwidth-heavy fprate benchmarks are being mined here anyway. Of the three held back, cactus was mined on 2026-11-14
-with no throttle sign at all (no reruns, recheck +0.35%); fotonik3d and roms follow.
+with no throttle sign at all (no reruns, recheck +0.35%). fotonik3d (2026-11-14) throttled like lbm: the same `-O3` binary read on three levels tracking 15/16/17 W, 15 slow-rep reruns, and the one accept (`-mtune=znver5`, +9.92%) was a level mismatch, so it is recorded as 0.0% ([write-up](mining_results.749.fotonik3d_r.2026-11-14.md)). roms follows.
 
 ## Cross-host comparison
 
