@@ -328,6 +328,67 @@ def _mine_common_mocks(monkeypatch, baseline, combination):
     )
 
 
+def _throttled_baseline(exp_id):
+    baseline = _fake_baseline(exp_id=exp_id)
+    baseline.phase1_ratios = [12.17, 12.19, 13.05, 13.07, 14.89, 14.89]
+    return baseline
+
+
+def test_mine_stops_after_phase_1_on_a_throttled_baseline(tmp_path, monkeypatch, capsys):
+    from cfm import db
+    conn = db.connect(str(tmp_path / "cfm.db"))
+    exp_id = db.create_experiment(conn, benchmark="fake_r", hostname="h", compiler="gcc")
+    trial_id = db.record_trial(
+        conn, experiment_id=exp_id, phase="confirmation", flags=["-O3"], optimize_string="-O3",
+        build_status="ok", ratio=12.17,
+    )
+    conn.close()
+    baseline = _throttled_baseline(exp_id)
+    baseline.trial_ids = [trial_id]
+    monkeypatch.setattr(cli.orchestrator, "run_baseline", lambda *a, **k: baseline)
+    monkeypatch.setattr(
+        cli.orchestrator, "generate_candidates",
+        lambda *a, **k: pytest.fail("Phase 2 must not run after a throttle stop"),
+    )
+
+    exit_code = cli.main(["mine", "fake_r", "--db", str(tmp_path / "cfm.db"), "--lock-file", str(tmp_path / "test.lock")])
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    summary = json.loads(out[out.index("{"):])
+    assert summary["stopped_as_throttled"] is True
+    assert summary["winning_flags"] == ["-O3"]
+    assert summary["gain_vs_baseline_pct"] is None
+    conn = db.connect(str(tmp_path / "cfm.db"))
+    try:
+        assert db.get_experiment(conn, exp_id)["status"] == "failed"
+        rationales = [r[0] for r in conn.execute(
+            "SELECT rationale FROM hypotheses WHERE trial_id=?", (trial_id,))]
+        assert any(r.startswith("throttle stop:") for r in rationales)
+        assert conn.execute("SELECT COUNT(*) FROM knowledge").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_mine_no_throttle_stop_keeps_mining(tmp_path, monkeypatch, capsys):
+    baseline = _throttled_baseline(exp_id=1)
+    combination = CombinationResult(winning_flags=["-O3"], winning_ci=baseline.ci)
+    _mine_common_mocks(monkeypatch, baseline, combination)
+    monkeypatch.setattr(
+        cli.orchestrator, "run_pgo_multiplier",
+        lambda *a, combination, **k: _fake_pgo_not_attempted(combination),
+    )
+
+    exit_code = cli.main([
+        "mine", "fake_r", "--no-throttle-stop",
+        "--db", str(tmp_path / "cfm.db"), "--lock-file", str(tmp_path / "test.lock"),
+    ])
+
+    assert exit_code == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["stopped_as_throttled"] is False
+
+
 def test_mine_skip_pgo_never_calls_run_pgo_multiplier(tmp_path, monkeypatch, capsys):
     baseline = _fake_baseline()
     combination = CombinationResult(winning_flags=["-O3"], winning_ci=baseline.ci)

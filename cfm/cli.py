@@ -121,6 +121,11 @@ def build_parser() -> argparse.ArgumentParser:
              "reads well below the baseline's",
     )
     mine.add_argument(
+        "--no-throttle-stop", action="store_true",
+        help="keep mining even when the baseline's own reps sit on more than one throttle "
+             "level (two or more more than 10%% below the fastest)",
+    )
+    mine.add_argument(
         "--settle-seconds", type=float, default=None,
         help="idle this many seconds between each trial's build and its timed run "
              "(default 0, or CFM_SETTLE_SECONDS)",
@@ -190,6 +195,39 @@ def main(argv=None) -> int:
         try:
             with host_lock(cfg, command=f"cfm mine {args.benchmark}"):
                 baseline = orchestrator.run_baseline(cfg, benchmark=args.benchmark, base_flags=base_flags)
+
+                throttle_reason = None if args.no_throttle_stop else orchestrator.throttle_stop_reason(baseline)
+                if throttle_reason:
+                    # Stopped before any candidate is measured, so no knowledge
+                    # row is written. experiments.status has no 'throttled'
+                    # value (a CHECK change needs a table rebuild); 'failed' plus
+                    # this hypothesis row and the summary's stopped_as_throttled
+                    # say what happened.
+                    conn = db.connect(cfg.db_path)
+                    try:
+                        db.record_hypothesis(
+                            conn, trial_id=baseline.trial_ids[-1], proposed_by="rule",
+                            rationale=f"throttle stop: {throttle_reason}",
+                        )
+                        db.finish_experiment(conn, baseline.experiment_id, status="failed")
+                    finally:
+                        conn.close()
+                    print(f"warning: {throttle_reason}")
+                    print(json.dumps({
+                        "experiment_id": baseline.experiment_id,
+                        "benchmark": args.benchmark,
+                        "baseline_flags": baseline.flags,
+                        "baseline_ratio_mean": baseline.ci.mean,
+                        "baseline_phase1_ratios": baseline.phase1_ratios,
+                        "baseline_resource_dominance": baseline.resource_dominance,
+                        "baseline_resource_dominance_pct": baseline.resource_dominance_pct,
+                        "baseline_power_w": baseline.power_w,
+                        "stopped_as_throttled": True,
+                        "throttle_stop_reason": throttle_reason,
+                        "winning_flags": baseline.flags,
+                        "gain_vs_baseline_pct": None,
+                    }, indent=2, default=str))
+                    return 0
 
                 candidates = orchestrator.generate_candidates(
                     cfg, benchmark=args.benchmark, baseline=baseline, compiler=compiler,
@@ -390,6 +428,7 @@ def main(argv=None) -> int:
             "baseline_recheck_ratio": baseline_recheck.ratio,
             "baseline_recheck_delta_pct": baseline_recheck.delta_pct,
             "baseline_recheck_flagged": baseline_recheck.flagged,
+            "stopped_as_throttled": False,
             "candidates_screened": len(screened),
             "candidates_confirmed": sum(1 for c in confirmed + confirmed_known if c.accepted),
             "candidates_fast_tracked_from_prior_knowledge": [c.flag for c in fast_tracked],

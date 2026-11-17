@@ -1259,7 +1259,7 @@ manual/opt-in, never part of the automated suite.
 ratio → one row each in `cfm.db`'s `experiments`/`trials` tables (`db.py`), regardless of outcome.
 
 **Data flow (M1):** `cfm mine` (`cli.py`) → `orchestrator.run_baseline()` (Phase 1, 3×
-`run_one_trial()` at the `deep-cpu` profile) → `orchestrator.generate_candidates()` (Phase 2,
+`run_one_trial()` at the `deep-cpu` profile) → `orchestrator.throttle_stop_reason()` (since 2026-11-17: when at least 2 of Phase 1's own baseline reps, warm-ups and re-runs included, read more than 10% below the fastest, the mine stops here, marked `failed` with a `throttle stop:` hypothesis and `stopped_as_throttled` in the summary, no knowledge rows; `--no-throttle-stop` skips it; doc/DESIGN.md's throttle-stop bullet) → `orchestrator.generate_candidates()` (Phase 2,
 `compilers/gcc.py` filtered by `benchmark_languages()`) → `knowledge_agent.known_flags_for_cluster()` +
 `orchestrator.split_candidates_by_known_prior()` (M4: partitions into a real-accepted-prior fast track,
 straight to Phase 4 via `orchestrator.confirm_known_candidates()`, and everything else unchanged) →

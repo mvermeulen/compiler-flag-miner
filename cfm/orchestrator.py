@@ -184,6 +184,11 @@ class BaselineResult:
     # Median package power of the calibration reps (W), the reference
     # _low_power_rep_indices() checks confirmation reps against. None without a sensor.
     power_w: Optional[float] = None
+    # Every usable baseline-flags ratio Phase 1 measured, in order: warm-up reps,
+    # calibration reps (including ones the rerun rules later replaced), then the
+    # re-runs. throttle_stop_reason() reads it; ``ratios`` above is only the kept
+    # calibration reps.
+    phase1_ratios: list[float] = field(default_factory=list)
 
     @property
     def most_recent_ratio(self) -> float:
@@ -277,6 +282,19 @@ BASELINE_RECHECK_WARN_PCT = 0.5
 # held within about 2%.
 LOW_POWER_RERUN_PCT = 8.0
 LOW_POWER_RERUN_IDLE_S = 30.0
+
+# A mine stops after Phase 1 when at least THROTTLE_STOP_MIN_SLOW_REPS of the
+# baseline's own reps (warm-up, calibration and re-runs alike) read more than
+# THROTTLE_STOP_PCT below the fastest one: the same binary running on two or more
+# throttle levels, which no later phase can measure through
+# (doc/opportunities_niwot.md #37 (b)). On niwot, 782.lbm_r, 749.fotonik3d_r and
+# 765.roms_r had 4, 10 and 6 such reps; they spent 24-40 hours each for a 0.0%
+# result, a false accept and two throttled -march=native rejects in the knowledge
+# table. Every clean mine there had none (palm_r's bimodal -O3 spread 3.9%), and
+# both 854.graph500_s mines (OpenMP noise, #36) had at most one. Two, not one, so
+# a single outlier rep (777.zstd_r's trial 542) doesn't stop a mine.
+THROTTLE_STOP_PCT = 10.0
+THROTTLE_STOP_MIN_SLOW_REPS = 2
 
 # Indirection so tests can replace the clock and the idle wait.
 _clock = time.monotonic
@@ -575,8 +593,10 @@ def run_baseline(
             measured.append(result)
         if result.get("wspy_run_ref"):
             wspy_run_refs.append(result["wspy_run_ref"])
+    phase1_ratios = warmup_ratios + [r["ratio"] for r in measured]
     measured, replacements = _rerun_slow_reps(cfg, measured, calibration_rep)
     trial_ids.extend(r["trial_id"] for r in replacements)
+    phase1_ratios += [r["ratio"] for r in replacements if r.get("ratio") is not None]
     ratios = [r["ratio"] for r in measured]
     powers = [r["package_power_w"] for r in measured if r.get("package_power_w") is not None]
     power_w = statistics.median(powers) if powers else None
@@ -619,6 +639,25 @@ def run_baseline(
         trial_ids=trial_ids,
         characterization_source=characterization_source,
         power_w=power_w,
+        phase1_ratios=phase1_ratios,
+    )
+
+
+def throttle_stop_reason(baseline: BaselineResult) -> Optional[str]:
+    """Why the mine should stop after Phase 1 because its baseline ran on more
+    than one throttle level, or None. See ``THROTTLE_STOP_PCT``."""
+    ratios = baseline.phase1_ratios
+    if not ratios or max(ratios) <= 0:
+        return None
+    fastest = max(ratios)
+    floor = fastest * (1.0 - THROTTLE_STOP_PCT / 100.0)
+    slow = [r for r in ratios if r < floor]
+    if len(slow) < THROTTLE_STOP_MIN_SLOW_REPS:
+        return None
+    return (
+        f"{len(slow)} of {len(ratios)} baseline reps read more than {THROTTLE_STOP_PCT:g}% below the "
+        f"fastest ({fastest:.6g}): {', '.join(f'{r:.6g}' for r in slow)}. The baseline ran on more "
+        f"than one throttle level, so the mine stopped after Phase 1 (doc/opportunities_niwot.md #37)"
     )
 
 

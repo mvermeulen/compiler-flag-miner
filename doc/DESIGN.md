@@ -987,6 +987,18 @@ compiler-flag-miner/
        Residual risk: all of one flagset's reps throttled the same way, which is what stopped
        `782.lbm_r`'s guarded mine (experiment 165): every probe passed, the throttle began mid-run, and
        the three calibration reps were all slow, within 7% of each other.
+     - **Throttle stop (2026-11-17).** A guard can't make a throttled benchmark measurable: on `niwot`,
+       `749.fotonik3d_r` and `765.roms_r` ran 24 and 40 hours with the guards above for a 0.0% result,
+       a false accept (a flagset whose kept reps all landed on a faster level) and throttled
+       `-march=native` rejects in the knowledge table. So `cfm mine` stops after Phase 1 when
+       `throttle_stop_reason()` finds at least `THROTTLE_STOP_MIN_SLOW_REPS` (2) of the baseline's own
+       reps (warm-up, calibration and re-runs, `BaselineResult.phase1_ratios`) more than
+       `THROTTLE_STOP_PCT` (10%) below the fastest. Two, so one outlier rep doesn't stop a mine. On
+       `niwot`'s history it fires on lbm, fotonik3d and roms (4-10 such reps) and on no other mine. The
+       experiment is marked `failed` with a `throttle stop:` hypothesis, the summary says
+       `stopped_as_throttled`, and no knowledge row is written, since no candidate was measured.
+       `--no-throttle-stop` keeps mining. Cost on a throttled benchmark: Phase 1 only, about 4-6 hours
+       with a 10-minute settle.
      - **SPECspeed thread placement (2026-10-23).** `niwot` mixes Zen5 (5.09 GHz) and Zen5c (3.51 GHz)
        cores, so an unpinned single-threaded speed run lands on either. `generate_config()` adds
        `use_submit_for_speed = yes` and a `submit` wrapper to a `_s` benchmark's peak section, by its
