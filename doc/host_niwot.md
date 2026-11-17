@@ -222,7 +222,7 @@ Suite geomean gain over every benchmark in the suite, unmined = 1.00×, recorded
 | `765.roms_r` (held back, throttled; nothing accepted) | +20.13% | +20.50% | +20.56% | +0.00% |
 
 SPECspeed mining started on 2026-10-24 with `834.vpr_s`, the first `_s` benchmark cfm has mined on
-either host. Speed ratios come from one 16-thread process (`threads = 16`), not 16 copies. Since PR #55,
+either host. Speed ratios come from one 16-thread process (`threads = 16`), not 16 copies. Before fpspeed (2026-11-17), the config's `-ftree-parallelize-loops`, which auto-parallelizes `800.pot3d_s`'s `DO CONCURRENT` loops (the only `doconcurrent` benchmark), was lowered from 24 to 16 to match, as `chicago` raised its to 32. Since PR #55,
 single-threaded speed benchmarks are pinned with `taskset` to a Zen5 CPU, and OpenMP ones bind thread
 *i* to CPU *i*. pthread benchmarks (vpr_s among them) can't be pinned from outside and run unpinned.
 `853.ns3_s` was the first pinned mine (CPU 2); its baseline CI was ±0.23%, against ±0.6% for vpr_s and ±0.5% for ns3_r.
