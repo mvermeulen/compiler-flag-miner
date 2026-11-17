@@ -762,6 +762,58 @@ def test_run_baseline_reruns_a_slow_calibration_rep(tmp_path):
     assert len(result.trial_ids) == 7  # 1 characterization + 2 warm-up + 3 calibration + 1 re-run
 
 
+def test_run_baseline_records_every_phase1_ratio_in_order(tmp_path):
+    cfg = _cfg(tmp_path)
+    backends = ScriptedBackends(
+        ratio_sequences={("-O3",): [999.0, 100.0, 100.0, 100.0, 80.0, 101.0, 99.0]},
+    )
+
+    result = run_baseline(
+        cfg, benchmark="fake_r", base_flags=["-O3"],
+        workload=backends, instrumentation=backends, reference_matrix_fetch=_no_reference_matrix,
+    )
+
+    # Characterization (999) excluded; warm-ups, calibration (80 included though
+    # replaced), then the re-run.
+    assert result.phase1_ratios == [100.0, 100.0, 100.0, 80.0, 101.0, 99.0]
+    assert result.ratios == [100.0, 99.0, 101.0]
+
+
+def _phase1_baseline(phase1_ratios):
+    baseline = _baseline(mean_ratio=100.0)
+    baseline.phase1_ratios = phase1_ratios
+    return baseline
+
+
+@pytest.mark.parametrize("phase1_ratios", [
+    # 749.fotonik3d_r on niwot (experiment 201): three levels, 10 reps slow.
+    [11.966, 15.875, 14.008, 12.062, 14.078, 14.088, 12.032, 14.274, 13.997, 12.577, 13.962],
+    # 765.roms_r (experiment 202).
+    [12.174, 12.188, 13.046, 13.071, 12.195, 12.235, 14.886, 14.893],
+    # 782.lbm_r re-mine (experiment 188).
+    [5.854, 5.048, 5.065, 5.91, 5.903, 5.1, 5.384, 5.12, 5.402],
+])
+def test_throttle_stop_fires_on_a_baseline_on_several_levels(phase1_ratios):
+    from cfm.orchestrator import throttle_stop_reason
+    reason = throttle_stop_reason(_phase1_baseline(phase1_ratios))
+    assert reason is not None
+    assert "throttle level" in reason
+
+
+@pytest.mark.parametrize("phase1_ratios", [
+    # 722.palm_r (experiment 196): bimodal but within 4%.
+    [35.553, 35.29, 34.162, 35.283, 35.315, 34.388, 35.379],
+    # 854.graph500_s (experiment 185): one rep 19.7% below, the rest within 10%.
+    [0.887, 0.867, 0.912, 0.891, 0.929, 0.915, 0.89, 0.955, 0.876, 0.767, 0.874, 0.875],
+    # A single outlier (777.zstd_r's trial 542 shape).
+    [17.1, 17.2, 12.2, 17.15, 17.1],
+    [],
+])
+def test_throttle_stop_leaves_a_steady_or_single_outlier_baseline_alone(phase1_ratios):
+    from cfm.orchestrator import throttle_stop_reason
+    assert throttle_stop_reason(_phase1_baseline(phase1_ratios)) is None
+
+
 def test_confirm_reruns_every_slow_rep_when_two_are_throttled(tmp_path):
     # 782.lbm_r on niwot: the same -O3 binary at 6.33 (unthrottled) and 3.02/4.24.
     cfg = _cfg(tmp_path)
