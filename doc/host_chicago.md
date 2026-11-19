@@ -67,6 +67,7 @@ python3 -m pytest -q
 | 2026-11-12 | `867.nest_s` | memory-bound 65.6% (corpus) | `-O3` | 0.00% | [link](mining_results.867.nest_s.2026-11-12.md) (noisy: `-O3` runs spread 4.2%, baseline CI ±3.65%; `-march=native` +3.67% rejected on CI overlap, about +2.7% over six runs; 10 excluded on shape) |
 | 2026-11-12 | `872.marian_s` | memory-bound 86.9% (corpus) | `-O3 -march=native` | **+56.38%** | [link](mining_results.872.marian_s.2026-11-12.md) (`-mprefer-vector-width=256` -15.1% on top; `-fprefetch-loop-arrays` about +1.8% on top, rejected on CI overlap as on marian_r; PGO -1.0% at 1h42m a trial; 10 excluded on shape) |
 | 2026-11-13 | `881.neutron_s` | memory-bound 67.0% (corpus) | `-O3 -flto -march=native` | **+10.89%** | [link](mining_results.881.neutron_s.2026-11-13.md) (`-flto` +6.2%, `-march=native` +2.0% alone, +4.4% on top of LTO; PGO -25.4% at 15% lower package power; 10 excluded on shape) |
+| 2026-11-19 | `706.stockfish_r` | memory-bound 45.3% (corpus, under the 55% gate) | `-O3 -march=native -fno-pie -no-pie` | **+54.65%** | [link](mining_results.706.stockfish_r.2026-11-19.md) (`-march=native` +52.8%, non-PIE +1.2% on top; `-flto` -18%, `-fipa-pta` -41% at screening; first intrate mine here) |
 
 ## Summary by suite
 
@@ -122,38 +123,63 @@ loops in every fpspeed build, was raised from 24 to 32 on 2026-11-06 to match, b
 | **Suite geomean gain (13, unmined = 1.00×)** | | | | +12.99% | |
 | Mined-only geomean (13 of 13) | 2.636 | 2.978 | | +12.99% | |
 
+### intrate (1 of 14 mined)
+
+Started 2026-11-18, in suite order. SPECrate runs 32 copies, as for fprate.
+
+| Benchmark | Base (`-O3`) | Best | Winning flags | Gain | Write-up |
+|---|---|---|---|---|---|
+| `706.stockfish_r` | 112.742 | 174.353 | `-O3 -march=native -fno-pie -no-pie` | **+54.65%** | [2026-11-19](mining_results.706.stockfish_r.2026-11-19.md) |
+| `707.ntest_r` | | | | | |
+| `708.sqlite_r` | | | | | |
+| `710.omnetpp_r` | | | | | |
+| `714.cpython_r` | | | | | |
+| `721.gcc_r` | | | | | |
+| `723.llvm_r` | | | | | |
+| `727.cppcheck_r` | | | | | |
+| `729.abc_r` | | | | | |
+| `734.vpr_r` | | | | | |
+| `735.gem5_r` | | | | | |
+| `750.sealcrypto_r` | | | | | |
+| `753.ns3_r` | | | | | |
+| `777.zstd_r` | | | | | |
+| **Suite geomean gain (14, unmined = 1.00×)** | | | | +3.16% | |
+| Mined-only geomean (1 of 14) | 112.742 | 174.353 | | +54.65% | |
+
 ### Suite geomean progression
 
-Suite geomean gain (unmined = 1.00×), recorded after each mine: fprate over 12 benchmarks, fpspeed over 13.
+Suite geomean gain (unmined = 1.00×), recorded after each mine: fprate over 12 benchmarks, fpspeed over 13, intrate
+over 14.
 
-| After | fprate (12) | fpspeed (13) |
-|---|---|---|
-| `782.lbm_r` | +0.24% | — |
-| `782.lbm_r` `--no-shape-filter` re-mine | +0.29% | — |
-| `709.cactus_r` | +1.57% | — |
-| `749.fotonik3d_r` | +2.15% | — |
-| `765.roms_r` | +2.74% | — |
-| `722.palm_r` | +3.18% | — |
-| `731.astcenc_r` | +5.43% | — |
-| `736.ocio_r` | +7.19% | — |
-| `737.gmsh_r` | +7.40% | — |
-| `748.flightdm_r` | +9.53% | — |
-| `766.femflow_r` | +17.48% | — |
-| `767.nest_r` | +17.61% | — |
-| `772.marian_r` | +23.08% | — |
-| `803.sph_exa_s` | +23.08% | +0.93% |
-| `809.cactus_s` | +23.08% | +1.98% |
-| `811.tealeaf_s` | +23.08% | +1.98% |
-| `800.pot3d_s` re-mine | +23.08% | +3.95% |
-| `816.nab_s` | +23.08% | +5.09% |
-| `820.cloverleaf_s` | +23.08% | +5.09% |
-| `822.palm_s` | +23.08% | +6.81% |
-| `849.fotonik3d_s` | +23.08% | +6.81% |
-| `857.namd_s` | +23.08% | +8.14% |
-| `865.roms_s` | +23.08% | +8.30% |
-| `867.nest_s` | +23.08% | +8.30% |
-| `872.marian_s` | +23.08% | +12.09% |
-| `881.neutron_s` | +23.08% | +12.99% |
+| After | fprate (12) | fpspeed (13) | intrate (14) |
+|---|---|---|---|
+| `782.lbm_r` | +0.24% | — | — |
+| `782.lbm_r` `--no-shape-filter` re-mine | +0.29% | — | — |
+| `709.cactus_r` | +1.57% | — | — |
+| `749.fotonik3d_r` | +2.15% | — | — |
+| `765.roms_r` | +2.74% | — | — |
+| `722.palm_r` | +3.18% | — | — |
+| `731.astcenc_r` | +5.43% | — | — |
+| `736.ocio_r` | +7.19% | — | — |
+| `737.gmsh_r` | +7.40% | — | — |
+| `748.flightdm_r` | +9.53% | — | — |
+| `766.femflow_r` | +17.48% | — | — |
+| `767.nest_r` | +17.61% | — | — |
+| `772.marian_r` | +23.08% | — | — |
+| `803.sph_exa_s` | +23.08% | +0.93% | — |
+| `809.cactus_s` | +23.08% | +1.98% | — |
+| `811.tealeaf_s` | +23.08% | +1.98% | — |
+| `800.pot3d_s` re-mine | +23.08% | +3.95% | — |
+| `816.nab_s` | +23.08% | +5.09% | — |
+| `820.cloverleaf_s` | +23.08% | +5.09% | — |
+| `822.palm_s` | +23.08% | +6.81% | — |
+| `849.fotonik3d_s` | +23.08% | +6.81% | — |
+| `857.namd_s` | +23.08% | +8.14% | — |
+| `865.roms_s` | +23.08% | +8.30% | — |
+| `867.nest_s` | +23.08% | +8.30% | — |
+| `872.marian_s` | +23.08% | +12.09% | — |
+| `881.neutron_s` | +23.08% | +12.99% | — |
+| `706.stockfish_r` | +23.08% | +12.99% | +3.16% |
 
 ## Standing facts about this host
 
@@ -165,7 +191,7 @@ Suite geomean gain (unmined = 1.00×), recorded after each mine: fprate over 12 
   niwot the same night ([write-up](mining_results.782.lbm_r.2026-11-03.md)).
 - **Under 32 copies of lbm, package power sits at about 85 W** for the whole run, and the CPU at 91-95°C.
 - **A SPECrate trial of lbm takes about 19 minutes**, so a full mine is about 11 hours (21 with `--no-shape-filter`).
-- **Package power sits at 85.0 W under every 32-copy fprate mine so far** (lbm, cactus, fotonik3d, roms, palm, astcenc, ocio, gmsh, flightdm, femflow, nest, marian): the sustained package limit.
+- **Package power sits at 85.0 W under every 32-copy rate mine so far** (stockfish_r too) (lbm, cactus, fotonik3d, roms, palm, astcenc, ocio, gmsh, flightdm, femflow, nest, marian): the sustained package limit.
 - **SPECspeed runs use 32 threads**, and `-ftree-parallelize-loops=32` (raised from 24 on 2026-11-06).
 - **A speed benchmark drawing far under 85 W is mis-placed**: pot3d_s, pinned to one CPU, drew 24.6 W.
 - **The bandwidth gate sometimes catches the tail of the previous run.** In experiment 3 it waited 30 s before
@@ -192,3 +218,4 @@ Suite geomean gain (unmined = 1.00×), recorded after each mine: fprate over 12 
 | 15 | L | **`-march=native -mprefer-vector-width=256` on fotonik3d_s.** `-march=native` read -0.71% there, so the vector-width multiplier (which needs an `-march=` in the winning set) never ran; on fotonik3d_r 256-bit vectors added +1.5% on top of `-march=native`. | `cfm measure` `-O3 -march=native -mprefer-vector-width=256`, interleaved with `-O3` (3 rounds). | Whether the rate result's vector-width effect carries to speed. |
 | 16 | M | **`-march=native` on nest_s, under the noise.** `-O3` runs spread 4.2% (4.302-4.483), so the baseline CI was ±3.65% and `-march=native`'s +3.67% was rejected on overlap; six runs of its code (with the same-code `-march=znver5`) average +2.69%. | `cfm measure` `-O3` and `-O3 -march=native` interleaved, 6+ rounds each. | Whether nest_s has a ~2.7% win the 3-rep CI test can't see, and how to mine a benchmark this noisy. |
 | 17 | L | **`-fprefetch-loop-arrays` on top of `-march=native` on marian.** Rejected on CI overlap on both marian_r (+1.68%) and marian_s (+1.63%), and both times the pair tournament measured the same code higher; on marian_s the six runs pool to +1.77%, CI clear. | `cfm measure` `-O3 -march=native` and `-O3 -march=native -fprefetch-loop-arrays` interleaved (3+ rounds each), on both. | Whether marian's winner is missing a real ~1.7% step; also bears on item 10's pair rule. |
+| 18 | L | **`-fipa-pta` lost 40.7% on stockfish_r** in its one screening trial (66.86 against 112.70), and `-flto` 18.1% (as on niwot, niwot open item 4). | `cfm measure` `-O3 -fipa-pta`, interleaved with `-O3` (2 rounds), then `perf` both binaries if it holds. | Whether a points-to analysis flag really costs 41%, and what it blocks. |
