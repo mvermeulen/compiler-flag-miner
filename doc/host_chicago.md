@@ -68,6 +68,7 @@ python3 -m pytest -q
 | 2026-11-12 | `872.marian_s` | memory-bound 86.9% (corpus) | `-O3 -march=native` | **+56.38%** | [link](mining_results.872.marian_s.2026-11-12.md) (`-mprefer-vector-width=256` -15.1% on top; `-fprefetch-loop-arrays` about +1.8% on top, rejected on CI overlap as on marian_r; PGO -1.0% at 1h42m a trial; 10 excluded on shape) |
 | 2026-11-13 | `881.neutron_s` | memory-bound 67.0% (corpus) | `-O3 -flto -march=native` | **+10.89%** | [link](mining_results.881.neutron_s.2026-11-13.md) (`-flto` +6.2%, `-march=native` +2.0% alone, +4.4% on top of LTO; PGO -25.4% at 15% lower package power; 10 excluded on shape) |
 | 2026-11-19 | `706.stockfish_r` | memory-bound 45.3% (corpus, under the 55% gate) | `-O3 -march=native -fno-pie -no-pie` | **+54.65%** | [link](mining_results.706.stockfish_r.2026-11-19.md) (`-march=native` +52.8%, non-PIE +1.2% on top; `-flto` -18%, `-fipa-pta` -41% at screening; first intrate mine here) |
+| 2026-11-19 | `707.ntest_r` | compute-bound 40.6% (corpus, under the 55% gate) | `-O3 -march=native -fno-pie -no-pie -fprofile-use` | **+26.22%** | [link](mining_results.707.ntest_r.2026-11-19.md) (`-march=native` +14.8%, non-PIE +6.5% on top, PGO +3.2%; `-flto` +0.96% on top, rejected on CI overlap) |
 
 ## Summary by suite
 
@@ -123,14 +124,14 @@ loops in every fpspeed build, was raised from 24 to 32 on 2026-11-06 to match, b
 | **Suite geomean gain (13, unmined = 1.00×)** | | | | +12.99% | |
 | Mined-only geomean (13 of 13) | 2.636 | 2.978 | | +12.99% | |
 
-### intrate (1 of 14 mined)
+### intrate (2 of 14 mined)
 
 Started 2026-11-18, in suite order. SPECrate runs 32 copies, as for fprate.
 
 | Benchmark | Base (`-O3`) | Best | Winning flags | Gain | Write-up |
 |---|---|---|---|---|---|
 | `706.stockfish_r` | 112.742 | 174.353 | `-O3 -march=native -fno-pie -no-pie` | **+54.65%** | [2026-11-19](mining_results.706.stockfish_r.2026-11-19.md) |
-| `707.ntest_r` | | | | | |
+| `707.ntest_r` | 62.642 | 79.069 | `-O3 -march=native -fno-pie -no-pie -fprofile-use` | **+26.22%** | [2026-11-19](mining_results.707.ntest_r.2026-11-19.md) |
 | `708.sqlite_r` | | | | | |
 | `710.omnetpp_r` | | | | | |
 | `714.cpython_r` | | | | | |
@@ -143,8 +144,8 @@ Started 2026-11-18, in suite order. SPECrate runs 32 copies, as for fprate.
 | `750.sealcrypto_r` | | | | | |
 | `753.ns3_r` | | | | | |
 | `777.zstd_r` | | | | | |
-| **Suite geomean gain (14, unmined = 1.00×)** | | | | +3.16% | |
-| Mined-only geomean (1 of 14) | 112.742 | 174.353 | | +54.65% | |
+| **Suite geomean gain (14, unmined = 1.00×)** | | | | +4.89% | |
+| Mined-only geomean (2 of 14) | 84.038 | 117.414 | | +39.72% | |
 
 ### Suite geomean progression
 
@@ -180,6 +181,7 @@ over 14.
 | `872.marian_s` | +23.08% | +12.09% | — |
 | `881.neutron_s` | +23.08% | +12.99% | — |
 | `706.stockfish_r` | +23.08% | +12.99% | +3.16% |
+| `707.ntest_r` | +23.08% | +12.99% | +4.89% |
 
 ## Standing facts about this host
 
