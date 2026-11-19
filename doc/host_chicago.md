@@ -18,7 +18,7 @@ them as history, not as this host's baselines.
 | Clocks | every CPU max 5.19 GHz (no Zen5c cores, so `fastest_cpus()` returns all 32) |
 | Memory | 91 GB, 8 GB swap |
 | Chassis | mini PC: GMKtec NucBox EVO-X2 (DMI chassis type 35) |
-| OS / compiler | Ubuntu 26.04.1 LTS, Linux 7.0.0-42-generic, GCC 15.2.0 (Ubuntu 15.2.0-16ubuntu1) |
+| OS / compiler | Ubuntu 26.04.1 LTS, Linux 7.0.0-43-generic (from 2026-11-18; -42 before), GCC 15.2.0 (Ubuntu 15.2.0-16ubuntu1) |
 | SPEC | CPU2026 1.0.1 at `/home/mev/cpu2026`, `gcc_O3.cfg` (label `gcc_O3`, `copies = 32`, `threads = 32`) |
 | Phoronix Test Suite | `~/.phoronix-test-suite`, 35 tests installed (coremark and c-ray among them); none mined here yet |
 | Power | **profile `performance` since 2026-11-03** (`powerprofilesctl set performance`; governor and EPP follow to `performance`). amd-pstate `active`. It shipped in `balanced` (governor `powersave`, EPP `balance_performance`) |
