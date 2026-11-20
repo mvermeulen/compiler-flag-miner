@@ -144,12 +144,12 @@ and ran PGO on plain `-O3` (26.79, +7.78%), so it never measured the two togethe
 | **Suite geomean gain (13, unmined = 1.00×)** | | | | +20.56% | |
 | Mined-only geomean (13 of 13) | 1.867 | 2.251 | | +20.56% | |
 
-### fpspeed (2 of 13 mined)
+### fpspeed (3 of 13 mined)
 
 | Benchmark | Base (`-O3`) | Best | Winning flags | Gain | Write-up |
 |---|---|---|---|---|---|
 | `800.pot3d_s` | — | — | not mined yet | — | |
-| `803.sph_exa_s` | — | — | not mined yet | — | |
+| `803.sph_exa_s` | 1.4990 | 1.6920 | `-O3 -march=native -fprofile-use` (`-march=native` +9.04%, two of five reps in a 3.8%-slower mode; PGO +3.51% on top) | **+12.88%** | [2026-11-19](mining_results.803.sph_exa_s.2026-11-19.md) |
 | `809.cactus_s` | — | — | not mined yet | — | |
 | `811.tealeaf_s` | — | — | not mined yet | — | |
 | `816.nab_s` | 1.6230 | 1.8744 | `-O3 -Ofast -fprofile-use -march=znver5` (`-march=native` +0.26% alone, `-march=znver5` +7.04% on top of fast-math and PGO) | **+15.49%** | [2026-11-17](mining_results.816.nab_s.2026-11-17.md) |
@@ -161,8 +161,8 @@ and ran PGO on plain `-O3` (26.79, +7.78%), so it never measured the two togethe
 | `867.nest_s` | — | — | not mined yet | — | |
 | `872.marian_s` | — | — | not mined yet | — | |
 | `881.neutron_s` | — | — | not mined yet | — | |
-| **Suite geomean gain (13, unmined = 1.00×)** | | | | +2.59% | |
-| Mined-only geomean (2 of 13) | 1.4036 | 1.6570 | | +18.05% | |
+| **Suite geomean gain (13, unmined = 1.00×)** | | | | +3.55% | |
+| Mined-only geomean (3 of 13) | 1.4347 | 1.6686 | | +16.30% | |
 
 ### Suite geomean progression
 
@@ -222,6 +222,7 @@ Suite geomean gain over every benchmark in the suite, unmined = 1.00×, recorded
 | `765.roms_r` (held back, throttled; nothing accepted) | +20.13% | +20.50% | +20.56% | +0.00% |
 | `816.nab_s` | +20.13% | +20.50% | +20.56% | +1.11% |
 | `857.namd_s` | +20.13% | +20.50% | +20.56% | +2.59% |
+| `803.sph_exa_s` | +20.13% | +20.50% | +20.56% | +3.55% |
 
 SPECspeed mining started on 2026-10-24 with `834.vpr_s`, the first `_s` benchmark cfm has mined on
 either host. Speed ratios come from one 16-thread process (`threads = 16`), not 16 copies. Before fpspeed (2026-11-17), the config's `-ftree-parallelize-loops`, which auto-parallelizes `800.pot3d_s`'s `DO CONCURRENT` loops (the only `doconcurrent` benchmark), was lowered from 24 to 16 to match, as `chicago` raised its to 32. Since PR #55,
