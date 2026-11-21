@@ -72,6 +72,7 @@ python3 -m pytest -q
 | 2026-11-20 | `708.sqlite_r` | memory-bound 39.7% (corpus, under the 55% gate) | `-O3 -U_FORTIFY_SOURCE -fno-pie -no-pie -fprofile-use` | **+15.66%** | [link](mining_results.708.sqlite_r.2026-11-20.md) (PGO +12.1%; five hardening/layout opt-outs accepted alone, overlapping; `-march=native` -0.5%) |
 | 2026-11-20 | `710.omnetpp_r` | frontend-bound 45.9% (corpus, under the 55% gate) | `-O3 -flto -fno-stack-protector -fprofile-use` | **+36.42%** | [link](mining_results.710.omnetpp_r.2026-11-20.md) (LTO +12.8%, PGO +17.3%; non-PIE +2.9% alone, +0.2% on top of LTO; baseline recheck +1.26%) |
 | 2026-11-20 | `714.cpython_r` | frontend-bound 65.8% (corpus, over the 55% gate) | `-O3 -flto -fprofile-use -mtune=znver5` | **+30.37%** | [link](mining_results.714.cpython_r.2026-11-20.md) (LTO +3.7%, PGO +22.0%, `-mtune=znver5` +3.1% on top, the first microarch accept here; seven flags excluded on shape) |
+| 2026-11-21 | `721.gcc_r` | memory-bound 45.2% (corpus, under the 55% gate) | `-O3 -flto -fno-pie -no-pie -fprofile-use` | **+12.68%** | [link](mining_results.721.gcc_r.2026-11-21.md) (LTO +2.2%, non-PIE +1.6%, PGO +8.5%; the first accept on gcc_r, whose earlier mines never tried LTO or PGO) |
 
 ## Summary by suite
 
@@ -127,7 +128,7 @@ loops in every fpspeed build, was raised from 24 to 32 on 2026-11-06 to match, b
 | **Suite geomean gain (13, unmined = 1.00×)** | | | | +12.99% | |
 | Mined-only geomean (13 of 13) | 2.636 | 2.978 | | +12.99% | |
 
-### intrate (5 of 14 mined)
+### intrate (6 of 14 mined)
 
 Started 2026-11-18, in suite order. SPECrate runs 32 copies, as for fprate.
 
@@ -138,7 +139,7 @@ Started 2026-11-18, in suite order. SPECrate runs 32 copies, as for fprate.
 | `708.sqlite_r` | 49.712 | 57.498 | `-O3 -U_FORTIFY_SOURCE -fno-pie -no-pie -fprofile-use` | **+15.66%** | [2026-11-20](mining_results.708.sqlite_r.2026-11-20.md) |
 | `710.omnetpp_r` | 54.317 | 74.099 | `-O3 -flto -fno-stack-protector -fprofile-use` | **+36.42%** | [2026-11-20](mining_results.710.omnetpp_r.2026-11-20.md) |
 | `714.cpython_r` | 80.440 | 104.869 | `-O3 -flto -fprofile-use -mtune=znver5` | **+30.37%** | [2026-11-20](mining_results.714.cpython_r.2026-11-20.md) |
-| `721.gcc_r` | | | | | |
+| `721.gcc_r` | 47.358 | 53.365 | `-O3 -flto -fno-pie -no-pie -fprofile-use` | **+12.68%** | [2026-11-21](mining_results.721.gcc_r.2026-11-21.md) |
 | `723.llvm_r` | | | | | |
 | `727.cppcheck_r` | | | | | |
 | `729.abc_r` | | | | | |
@@ -147,8 +148,8 @@ Started 2026-11-18, in suite order. SPECrate runs 32 copies, as for fprate.
 | `750.sealcrypto_r` | | | | | |
 | `753.ns3_r` | | | | | |
 | `777.zstd_r` | | | | | |
-| **Suite geomean gain (14, unmined = 1.00×)** | | | | +10.44% | |
-| Mined-only geomean (5 of 14) | 68.733 | 90.763 | | +32.05% | |
+| **Suite geomean gain (14, unmined = 1.00×)** | | | | +11.39% | |
+| Mined-only geomean (6 of 14) | 64.596 | 83.074 | | +28.61% | |
 
 ### Suite geomean progression
 
@@ -188,6 +189,7 @@ over 14.
 | `708.sqlite_r` | +23.08% | +12.99% | +5.99% |
 | `710.omnetpp_r` | +23.08% | +12.99% | +8.37% |
 | `714.cpython_r` | +23.08% | +12.99% | +10.44% |
+| `721.gcc_r` | +23.08% | +12.99% | +11.39% |
 
 ## Standing facts about this host
 
