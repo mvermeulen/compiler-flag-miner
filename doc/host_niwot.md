@@ -144,7 +144,7 @@ and ran PGO on plain `-O3` (26.79, +7.78%), so it never measured the two togethe
 | **Suite geomean gain (13, unmined = 1.00×)** | | | | +20.56% | |
 | Mined-only geomean (13 of 13) | 1.867 | 2.251 | | +20.56% | |
 
-### fpspeed (3 of 13 mined)
+### fpspeed (4 of 13 mined)
 
 | Benchmark | Base (`-O3`) | Best | Winning flags | Gain | Write-up |
 |---|---|---|---|---|---|
@@ -159,10 +159,10 @@ and ran PGO on plain `-O3` (26.79, +7.78%), so it never measured the two togethe
 | `857.namd_s` | 1.2139 | 1.4648 | `-O3 -march=native` (fast-math -2.7%; PGO, near-miss and vector width +0.5-0.65% on top, under the bar) | **+20.67%** | [2026-11-18](mining_results.857.namd_s.2026-11-18.md) |
 | `865.roms_s` | — | — | not mined yet | — | |
 | `867.nest_s` | — | — | not mined yet | — | |
-| `872.marian_s` | — | — | not mined yet | — | |
+| `872.marian_s` | 2.2856 | 2.6896 | `-O3 -march=native` (+56.38% on `chicago`; prefetch +9.7% and graphite +6.2% alone, nothing on top; `=256` -6.66%) | **+17.68%** | [2026-11-20](mining_results.872.marian_s.2026-11-20.md) |
 | `881.neutron_s` | — | — | not mined yet | — | |
-| **Suite geomean gain (13, unmined = 1.00×)** | | | | +3.55% | |
-| Mined-only geomean (3 of 13) | 1.4347 | 1.6686 | | +16.30% | |
+| **Suite geomean gain (13, unmined = 1.00×)** | | | | +4.85% | |
+| Mined-only geomean (4 of 13) | 1.6118 | 1.8801 | | +16.64% | |
 
 ### Suite geomean progression
 
@@ -223,6 +223,7 @@ Suite geomean gain over every benchmark in the suite, unmined = 1.00×, recorded
 | `816.nab_s` | +20.13% | +20.50% | +20.56% | +1.11% |
 | `857.namd_s` | +20.13% | +20.50% | +20.56% | +2.59% |
 | `803.sph_exa_s` | +20.13% | +20.50% | +20.56% | +3.55% |
+| `872.marian_s` | +20.13% | +20.50% | +20.56% | +4.85% |
 
 SPECspeed mining started on 2026-10-24 with `834.vpr_s`, the first `_s` benchmark cfm has mined on
 either host. Speed ratios come from one 16-thread process (`threads = 16`), not 16 copies. Before fpspeed (2026-11-17), the config's `-ftree-parallelize-loops`, which auto-parallelizes `800.pot3d_s`'s `DO CONCURRENT` loops (the only `doconcurrent` benchmark), was lowered from 24 to 16 to match, as `chicago` raised its to 32. Since PR #55,
