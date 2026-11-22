@@ -75,6 +75,7 @@ python3 -m pytest -q
 | 2026-11-21 | `721.gcc_r` | memory-bound 45.2% (corpus, under the 55% gate) | `-O3 -flto -fno-pie -no-pie -fprofile-use` | **+12.68%** | [link](mining_results.721.gcc_r.2026-11-21.md) (LTO +2.2%, non-PIE +1.6%, PGO +8.5%; the first accept on gcc_r, whose earlier mines never tried LTO or PGO) |
 | 2026-11-22 | `723.llvm_r` | frontend-bound 61.6% (corpus, over the 55% gate) | `-O3 -fno-pie -no-pie -fno-stack-protector -fprofile-use` | **+16.95%** | [link](mining_results.723.llvm_r.2026-11-22.md) (non-PIE +4.6%, stack protector +1.4%, PGO +10.3%; `-flto` -1.26%, so no LTO, unlike both earlier mines (+32.2%, +24.8%); open item 19) |
 | 2026-11-22 | `727.cppcheck_r` | frontend-bound 71.0% (corpus, over the 55% gate) | `-O3 -fno-stack-protector -fprofile-use` | **+8.76%** | [link](mining_results.727.cppcheck_r.2026-11-22.md) (stack protector +3.6%, PGO +5.0%; `-flto` +1.3% rejected on overlap; non-PIE flat; loose baseline, ±1.23%) |
+| 2026-11-22 | `729.abc_r` | memory-bound 38.2% (corpus, under the 55% gate) | `-O3 -flto` | **+2.26%** | [link](mining_results.729.abc_r.2026-11-22.md) (LTO +2.3%, matching niwot's follow-up; PGO -8.6% on top, as on niwot; `-fgraphite-identity` and `-U_FORTIFY_SOURCE` accepted alone, nothing on top of LTO) |
 
 ## Summary by suite
 
@@ -130,7 +131,7 @@ loops in every fpspeed build, was raised from 24 to 32 on 2026-11-06 to match, b
 | **Suite geomean gain (13, unmined = 1.00×)** | | | | +12.99% | |
 | Mined-only geomean (13 of 13) | 2.636 | 2.978 | | +12.99% | |
 
-### intrate (8 of 14 mined)
+### intrate (9 of 14 mined)
 
 Started 2026-11-18, in suite order. SPECrate runs 32 copies, as for fprate.
 
@@ -144,14 +145,14 @@ Started 2026-11-18, in suite order. SPECrate runs 32 copies, as for fprate.
 | `721.gcc_r` | 47.358 | 53.365 | `-O3 -flto -fno-pie -no-pie -fprofile-use` | **+12.68%** | [2026-11-21](mining_results.721.gcc_r.2026-11-21.md) |
 | `723.llvm_r` | 57.671 | 67.447 | `-O3 -fno-pie -no-pie -fno-stack-protector -fprofile-use` | **+16.95%** | [2026-11-22](mining_results.723.llvm_r.2026-11-22.md) |
 | `727.cppcheck_r` | 47.535 | 51.698 | `-O3 -fno-stack-protector -fprofile-use` | **+8.76%** | [2026-11-22](mining_results.727.cppcheck_r.2026-11-22.md) |
-| `729.abc_r` | | | | | |
+| `729.abc_r` | 59.809 | 61.162 | `-O3 -flto` | **+2.26%** | [2026-11-22](mining_results.729.abc_r.2026-11-22.md) |
 | `734.vpr_r` | | | | | |
 | `735.gem5_r` | | | | | |
 | `750.sealcrypto_r` | | | | | |
 | `753.ns3_r` | | | | | |
 | `777.zstd_r` | | | | | |
-| **Suite geomean gain (14, unmined = 1.00×)** | | | | +13.32% | |
-| Mined-only geomean (8 of 14) | 61.291 | 76.279 | | +24.45% | |
+| **Suite geomean gain (14, unmined = 1.00×)** | | | | +13.50% | |
+| Mined-only geomean (9 of 14) | 61.125 | 74.430 | | +21.77% | |
 
 ### Suite geomean progression
 
@@ -194,6 +195,7 @@ over 14.
 | `721.gcc_r` | +23.08% | +12.99% | +11.39% |
 | `723.llvm_r` | +23.08% | +12.99% | +12.64% |
 | `727.cppcheck_r` | +23.08% | +12.99% | +13.32% |
+| `729.abc_r` | +23.08% | +12.99% | +13.50% |
 
 ## Standing facts about this host
 
