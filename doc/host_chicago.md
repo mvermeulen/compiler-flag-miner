@@ -73,6 +73,7 @@ python3 -m pytest -q
 | 2026-11-20 | `710.omnetpp_r` | frontend-bound 45.9% (corpus, under the 55% gate) | `-O3 -flto -fno-stack-protector -fprofile-use` | **+36.42%** | [link](mining_results.710.omnetpp_r.2026-11-20.md) (LTO +12.8%, PGO +17.3%; non-PIE +2.9% alone, +0.2% on top of LTO; baseline recheck +1.26%) |
 | 2026-11-20 | `714.cpython_r` | frontend-bound 65.8% (corpus, over the 55% gate) | `-O3 -flto -fprofile-use -mtune=znver5` | **+30.37%** | [link](mining_results.714.cpython_r.2026-11-20.md) (LTO +3.7%, PGO +22.0%, `-mtune=znver5` +3.1% on top, the first microarch accept here; seven flags excluded on shape) |
 | 2026-11-21 | `721.gcc_r` | memory-bound 45.2% (corpus, under the 55% gate) | `-O3 -flto -fno-pie -no-pie -fprofile-use` | **+12.68%** | [link](mining_results.721.gcc_r.2026-11-21.md) (LTO +2.2%, non-PIE +1.6%, PGO +8.5%; the first accept on gcc_r, whose earlier mines never tried LTO or PGO) |
+| 2026-11-22 | `723.llvm_r` | frontend-bound 61.6% (corpus, over the 55% gate) | `-O3 -fno-pie -no-pie -fno-stack-protector -fprofile-use` | **+16.95%** | [link](mining_results.723.llvm_r.2026-11-22.md) (non-PIE +4.6%, stack protector +1.4%, PGO +10.3%; `-flto` -1.26%, so no LTO, unlike both earlier mines (+32.2%, +24.8%); open item 19) |
 
 ## Summary by suite
 
@@ -128,7 +129,7 @@ loops in every fpspeed build, was raised from 24 to 32 on 2026-11-06 to match, b
 | **Suite geomean gain (13, unmined = 1.00×)** | | | | +12.99% | |
 | Mined-only geomean (13 of 13) | 2.636 | 2.978 | | +12.99% | |
 
-### intrate (6 of 14 mined)
+### intrate (7 of 14 mined)
 
 Started 2026-11-18, in suite order. SPECrate runs 32 copies, as for fprate.
 
@@ -140,7 +141,7 @@ Started 2026-11-18, in suite order. SPECrate runs 32 copies, as for fprate.
 | `710.omnetpp_r` | 54.317 | 74.099 | `-O3 -flto -fno-stack-protector -fprofile-use` | **+36.42%** | [2026-11-20](mining_results.710.omnetpp_r.2026-11-20.md) |
 | `714.cpython_r` | 80.440 | 104.869 | `-O3 -flto -fprofile-use -mtune=znver5` | **+30.37%** | [2026-11-20](mining_results.714.cpython_r.2026-11-20.md) |
 | `721.gcc_r` | 47.358 | 53.365 | `-O3 -flto -fno-pie -no-pie -fprofile-use` | **+12.68%** | [2026-11-21](mining_results.721.gcc_r.2026-11-21.md) |
-| `723.llvm_r` | | | | | |
+| `723.llvm_r` | 57.671 | 67.447 | `-O3 -fno-pie -no-pie -fno-stack-protector -fprofile-use` | **+16.95%** | [2026-11-22](mining_results.723.llvm_r.2026-11-22.md) |
 | `727.cppcheck_r` | | | | | |
 | `729.abc_r` | | | | | |
 | `734.vpr_r` | | | | | |
@@ -148,8 +149,8 @@ Started 2026-11-18, in suite order. SPECrate runs 32 copies, as for fprate.
 | `750.sealcrypto_r` | | | | | |
 | `753.ns3_r` | | | | | |
 | `777.zstd_r` | | | | | |
-| **Suite geomean gain (14, unmined = 1.00×)** | | | | +11.39% | |
-| Mined-only geomean (6 of 14) | 64.596 | 83.074 | | +28.61% | |
+| **Suite geomean gain (14, unmined = 1.00×)** | | | | +12.64% | |
+| Mined-only geomean (7 of 14) | 63.558 | 80.638 | | +26.87% | |
 
 ### Suite geomean progression
 
@@ -190,6 +191,7 @@ over 14.
 | `710.omnetpp_r` | +23.08% | +12.99% | +8.37% |
 | `714.cpython_r` | +23.08% | +12.99% | +10.44% |
 | `721.gcc_r` | +23.08% | +12.99% | +11.39% |
+| `723.llvm_r` | +23.08% | +12.99% | +12.64% |
 
 ## Standing facts about this host
 
@@ -229,3 +231,4 @@ over 14.
 | 16 | M | **`-march=native` on nest_s, under the noise.** `-O3` runs spread 4.2% (4.302-4.483), so the baseline CI was ±3.65% and `-march=native`'s +3.67% was rejected on overlap; six runs of its code (with the same-code `-march=znver5`) average +2.69%. | `cfm measure` `-O3` and `-O3 -march=native` interleaved, 6+ rounds each. | Whether nest_s has a ~2.7% win the 3-rep CI test can't see, and how to mine a benchmark this noisy. |
 | 17 | L | **`-fprefetch-loop-arrays` on top of `-march=native` on marian.** Rejected on CI overlap on both marian_r (+1.68%) and marian_s (+1.63%), and both times the pair tournament measured the same code higher; on marian_s the six runs pool to +1.77%, CI clear. | `cfm measure` `-O3 -march=native` and `-O3 -march=native -fprefetch-loop-arrays` interleaved (3+ rounds each), on both. | Whether marian's winner is missing a real ~1.7% step; also bears on item 10's pair rule. |
 | 18 | L | **`-fipa-pta` lost 40.7% on stockfish_r** in its one screening trial (66.86 against 112.70), and `-flto` 18.1% (as on niwot, niwot open item 4). | `cfm measure` `-O3 -fipa-pta`, interleaved with `-O3` (2 rounds), then `perf` both binaries if it holds. | Whether a points-to analysis flag really costs 41%, and what it blocks. |
+| 19 | M | **`-flto` with PGO on llvm_r.** `-flto` lost 1.26% alone (CI-clear), so the winning set has no LTO, and PGO added only +10.3% where both earlier mines got about +24% on top of `-flto`. On niwot's gcc_r follow-up LTO and PGO together beat the sum of their separate gains. The mine never re-tries a rejected flag on top of PGO. | `cfm measure` the winner + PGO with and without `-flto`, interleaved, 3 rounds. | If LTO + PGO wins here, Phase 6 should also try PGO with Phase 4's LTO reject added, as it does for near-misses. |
