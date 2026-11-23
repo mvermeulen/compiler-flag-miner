@@ -79,6 +79,7 @@ python3 -m pytest -q
 | 2026-11-23 | `734.vpr_r` | memory-bound 45.4% (corpus, under the 55% gate) | `-O3 -flto -fprofile-use` | **+17.95%** | [link](mining_results.734.vpr_r.2026-11-23.md) (LTO +13.2%, PGO +4.2%; both earlier mines never tried them and found `-march=native` at about +1%, which read +0.77% here) |
 | 2026-11-23 | `735.gem5_r` | frontend-bound 60.3% (corpus, over the 55% gate) | `-O3 -flto -fno-pie -no-pie -fno-stack-protector -march=znver5` | **+13.05%** | [link](mining_results.735.gem5_r.2026-11-23.md) (LTO +6.7%, non-PIE +2.8%, stack protector +1.4%, `-march=znver5` +1.7% on top; PGO -9.4%, as on both earlier mines; six excluded on shape) |
 | 2026-11-23 | `750.sealcrypto_r` | compute-bound 55.1% (corpus, over the 55% gate) | `-O3 -march=native -fprofile-use` | **+34.93%** | [link](mining_results.750.sealcrypto_r.2026-11-23.md) (`-march=native` +23.7%, PGO +9.0% on top, matching niwot's follow-up; `-flto` -1.8%; nine excluded on shape, non-PIE among them) |
+| 2026-11-23 | `753.ns3_r` | frontend-bound 60.7% (corpus, over the 55% gate) | `-O3 -flto -fno-pie -no-pie -fno-stack-protector -fprofile-use` | **+32.13%** | [link](mining_results.753.ns3_r.2026-11-23.md) (LTO +17.0%, non-PIE +6.8% on top (+11.7% alone, the largest here), stack protector +3.0%, PGO +2.8%; six excluded on shape) |
 
 ## Summary by suite
 
@@ -134,7 +135,7 @@ loops in every fpspeed build, was raised from 24 to 32 on 2026-11-06 to match, b
 | **Suite geomean gain (13, unmined = 1.00×)** | | | | +12.99% | |
 | Mined-only geomean (13 of 13) | 2.636 | 2.978 | | +12.99% | |
 
-### intrate (12 of 14 mined)
+### intrate (13 of 14 mined)
 
 Started 2026-11-18, in suite order. SPECrate runs 32 copies, as for fprate.
 
@@ -152,10 +153,10 @@ Started 2026-11-18, in suite order. SPECrate runs 32 copies, as for fprate.
 | `734.vpr_r` | 46.645 | 55.016 | `-O3 -flto -fprofile-use` | **+17.95%** | [2026-11-23](mining_results.734.vpr_r.2026-11-23.md) |
 | `735.gem5_r` | 75.832 | 85.729 | `-O3 -flto -fno-pie -no-pie -fno-stack-protector -march=znver5` | **+13.05%** | [2026-11-23](mining_results.735.gem5_r.2026-11-23.md) |
 | `750.sealcrypto_r` | 60.902 | 82.178 | `-O3 -march=native -fprofile-use` | **+34.93%** | [2026-11-23](mining_results.750.sealcrypto_r.2026-11-23.md) |
-| `753.ns3_r` | | | | | |
+| `753.ns3_r` | 85.800 | 113.367 | `-O3 -flto -fno-pie -no-pie -fno-stack-protector -fprofile-use` | **+32.13%** | [2026-11-23](mining_results.753.ns3_r.2026-11-23.md) |
 | `777.zstd_r` | | | | | |
-| **Suite geomean gain (14, unmined = 1.00×)** | | | | +18.36% | |
-| Mined-only geomean (12 of 14) | 60.828 | 74.047 | | +21.73% | |
+| **Suite geomean gain (14, unmined = 1.00×)** | | | | +20.74% | |
+| Mined-only geomean (13 of 14) | 62.459 | 76.513 | | +22.50% | |
 
 ### Suite geomean progression
 
@@ -202,6 +203,7 @@ over 14.
 | `734.vpr_r` | +23.08% | +12.99% | +14.84% |
 | `735.gem5_r` | +23.08% | +12.99% | +15.85% |
 | `750.sealcrypto_r` | +23.08% | +12.99% | +18.36% |
+| `753.ns3_r` | +23.08% | +12.99% | +20.74% |
 
 ## Standing facts about this host
 
