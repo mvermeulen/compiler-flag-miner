@@ -78,6 +78,7 @@ python3 -m pytest -q
 | 2026-11-22 | `729.abc_r` | memory-bound 38.2% (corpus, under the 55% gate) | `-O3 -flto` | **+2.26%** | [link](mining_results.729.abc_r.2026-11-22.md) (LTO +2.3%, matching niwot's follow-up; PGO -8.6% on top, as on niwot; `-fgraphite-identity` and `-U_FORTIFY_SOURCE` accepted alone, nothing on top of LTO) |
 | 2026-11-23 | `734.vpr_r` | memory-bound 45.4% (corpus, under the 55% gate) | `-O3 -flto -fprofile-use` | **+17.95%** | [link](mining_results.734.vpr_r.2026-11-23.md) (LTO +13.2%, PGO +4.2%; both earlier mines never tried them and found `-march=native` at about +1%, which read +0.77% here) |
 | 2026-11-23 | `735.gem5_r` | frontend-bound 60.3% (corpus, over the 55% gate) | `-O3 -flto -fno-pie -no-pie -fno-stack-protector -march=znver5` | **+13.05%** | [link](mining_results.735.gem5_r.2026-11-23.md) (LTO +6.7%, non-PIE +2.8%, stack protector +1.4%, `-march=znver5` +1.7% on top; PGO -9.4%, as on both earlier mines; six excluded on shape) |
+| 2026-11-23 | `750.sealcrypto_r` | compute-bound 55.1% (corpus, over the 55% gate) | `-O3 -march=native -fprofile-use` | **+34.93%** | [link](mining_results.750.sealcrypto_r.2026-11-23.md) (`-march=native` +23.7%, PGO +9.0% on top, matching niwot's follow-up; `-flto` -1.8%; nine excluded on shape, non-PIE among them) |
 
 ## Summary by suite
 
@@ -133,7 +134,7 @@ loops in every fpspeed build, was raised from 24 to 32 on 2026-11-06 to match, b
 | **Suite geomean gain (13, unmined = 1.00×)** | | | | +12.99% | |
 | Mined-only geomean (13 of 13) | 2.636 | 2.978 | | +12.99% | |
 
-### intrate (11 of 14 mined)
+### intrate (12 of 14 mined)
 
 Started 2026-11-18, in suite order. SPECrate runs 32 copies, as for fprate.
 
@@ -150,11 +151,11 @@ Started 2026-11-18, in suite order. SPECrate runs 32 copies, as for fprate.
 | `729.abc_r` | 59.809 | 61.162 | `-O3 -flto` | **+2.26%** | [2026-11-22](mining_results.729.abc_r.2026-11-22.md) |
 | `734.vpr_r` | 46.645 | 55.016 | `-O3 -flto -fprofile-use` | **+17.95%** | [2026-11-23](mining_results.734.vpr_r.2026-11-23.md) |
 | `735.gem5_r` | 75.832 | 85.729 | `-O3 -flto -fno-pie -no-pie -fno-stack-protector -march=znver5` | **+13.05%** | [2026-11-23](mining_results.735.gem5_r.2026-11-23.md) |
-| `750.sealcrypto_r` | | | | | |
+| `750.sealcrypto_r` | 60.902 | 82.178 | `-O3 -march=native -fprofile-use` | **+34.93%** | [2026-11-23](mining_results.750.sealcrypto_r.2026-11-23.md) |
 | `753.ns3_r` | | | | | |
 | `777.zstd_r` | | | | | |
-| **Suite geomean gain (14, unmined = 1.00×)** | | | | +15.85% | |
-| Mined-only geomean (11 of 14) | 60.821 | 73.349 | | +20.60% | |
+| **Suite geomean gain (14, unmined = 1.00×)** | | | | +18.36% | |
+| Mined-only geomean (12 of 14) | 60.828 | 74.047 | | +21.73% | |
 
 ### Suite geomean progression
 
@@ -200,6 +201,7 @@ over 14.
 | `729.abc_r` | +23.08% | +12.99% | +13.50% |
 | `734.vpr_r` | +23.08% | +12.99% | +14.84% |
 | `735.gem5_r` | +23.08% | +12.99% | +15.85% |
+| `750.sealcrypto_r` | +23.08% | +12.99% | +18.36% |
 
 ## Standing facts about this host
 
@@ -240,3 +242,4 @@ over 14.
 | 17 | L | **`-fprefetch-loop-arrays` on top of `-march=native` on marian.** Rejected on CI overlap on both marian_r (+1.68%) and marian_s (+1.63%), and both times the pair tournament measured the same code higher; on marian_s the six runs pool to +1.77%, CI clear. | `cfm measure` `-O3 -march=native` and `-O3 -march=native -fprefetch-loop-arrays` interleaved (3+ rounds each), on both. | Whether marian's winner is missing a real ~1.7% step; also bears on item 10's pair rule. |
 | 18 | L | **`-fipa-pta` lost 40.7% on stockfish_r** in its one screening trial (66.86 against 112.70), and `-flto` 18.1% (as on niwot, niwot open item 4). | `cfm measure` `-O3 -fipa-pta`, interleaved with `-O3` (2 rounds), then `perf` both binaries if it holds. | Whether a points-to analysis flag really costs 41%, and what it blocks. |
 | 19 | M | **`-flto` with PGO on llvm_r (and cppcheck_r).** `-flto` lost 1.26% alone (CI-clear), so the winning set has no LTO, and PGO added only +10.3% where both earlier mines got about +24% on top of `-flto`. On niwot's gcc_r follow-up LTO and PGO together beat the sum of their separate gains. The mine never re-tries a rejected flag on top of PGO. cppcheck_r is the same case: `-flto` +1.31% rejected on overlap, PGO +5.0% on top of `-fno-stack-protector`. | `cfm measure` the winner + PGO with and without `-flto`, interleaved, 3 rounds. | If LTO + PGO wins here, Phase 6 should also try PGO with Phase 4's LTO reject added, as it does for near-misses. |
+| 20 | M | **Non-PIE on sealcrypto_r.** Its 55.1% compute-bound read, 0.1 points over the gate, excluded `-fno-pie -no-pie` with eight other flags. On ntest, the other compute-bound intrate benchmark, non-PIE added +6.53% on top of `-march=native`; it has never been measured on sealcrypto on either host. | `cfm measure` `-O3 -march=native -fno-pie -no-pie -fprofile-use`, interleaved with the winner (3 rounds). | Whether non-PIE adds to sealcrypto's +34.93%. |
