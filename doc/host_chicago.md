@@ -82,6 +82,7 @@ python3 -m pytest -q
 | 2026-11-23 | `753.ns3_r` | frontend-bound 60.7% (corpus, over the 55% gate) | `-O3 -flto -fno-pie -no-pie -fno-stack-protector -fprofile-use` | **+32.13%** | [link](mining_results.753.ns3_r.2026-11-23.md) (LTO +17.0%, non-PIE +6.8% on top (+11.7% alone, the largest here), stack protector +3.0%, PGO +2.8%; six excluded on shape) |
 | 2026-11-24 | `777.zstd_r` | memory-bound 64.0% (corpus, over the 55% gate) | `-O3 -march=native` | **+1.18%** | [link](mining_results.777.zstd_r.2026-11-24.md) (between August's +0.7% and niwot's +1.72%; PGO -3.3%, `-flto` flat; ten excluded on shape; last intrate mine here) |
 | 2026-11-24 | `801.xz_s` | memory-bound 56.3% (corpus, over the 55% gate) | `-O3 -fprofile-use` | **+1.10%** | [link](mining_results.801.xz_s.2026-11-24.md) (PGO +1.1%, where niwot's +0.7% overlapped; `-march=znver5` +0.8% more on top, CI-clear but under the bar; ten excluded on shape; first intspeed mine here) |
+| 2026-11-24 | `807.ntest_s` | memory-bound 41.9% (corpus, under the 55% gate) | `-O3 -march=native -flto -fno-pie -no-pie -fprofile-use` | **+25.53%** | [link](mining_results.807.ntest_s.2026-11-24.md) (`-march=native` +11.7%, LTO +4.3%, non-PIE +3.1%, PGO +4.6%; niwot's three steps reproduce, plus non-PIE) |
 
 ## Summary by suite
 
@@ -160,7 +161,7 @@ Started 2026-11-18, in suite order, and finished 2026-11-24. SPECrate runs 32 co
 | **Suite geomean gain (14, unmined = 1.00×)** | | | | +20.84% | |
 | Mined-only geomean (14 of 14) | 60.680 | 73.326 | | +20.84% | |
 
-### intspeed (1 of 13 mined)
+### intspeed (2 of 13 mined)
 
 Started 2026-11-24, in suite order. SPECspeed runs one copy with `threads = 32`, placed by threading model as for
 fpspeed (`thread_placement()`).
@@ -168,7 +169,7 @@ fpspeed (`thread_placement()`).
 | Benchmark | Base (`-O3`) | Best | Winning flags | Gain | Write-up |
 |---|---|---|---|---|---|
 | `801.xz_s` | 1.8575 | 1.8779 | `-O3 -fprofile-use` | **+1.10%** | [2026-11-24](mining_results.801.xz_s.2026-11-24.md) |
-| `807.ntest_s` | | | | | |
+| `807.ntest_s` | 1.9921 | 2.5006 | `-O3 -march=native -flto -fno-pie -no-pie -fprofile-use` | **+25.53%** | [2026-11-24](mining_results.807.ntest_s.2026-11-24.md) |
 | `817.flac_s` | | | | | |
 | `821.gcc_s` | | | | | |
 | `823.llvm_s` | | | | | |
@@ -180,8 +181,8 @@ fpspeed (`thread_placement()`).
 | `846.minizinc_s` | | | | | |
 | `853.ns3_s` | | | | | |
 | `854.graph500_s` | | | | | |
-| **Suite geomean gain (13, unmined = 1.00×)** | | | | +0.08% | |
-| Mined-only geomean (1 of 13) | 1.8575 | 1.8779 | | +1.10% | |
+| **Suite geomean gain (13, unmined = 1.00×)** | | | | +1.85% | |
+| Mined-only geomean (2 of 13) | 1.9236 | 2.1670 | | +12.65% | |
 
 ### Suite geomean progression
 
@@ -231,6 +232,7 @@ over 14, intspeed over 13.
 | `753.ns3_r` | +23.08% | +12.99% | +20.74% | — |
 | `777.zstd_r` | +23.08% | +12.99% | +20.84% | — |
 | `801.xz_s` | +23.08% | +12.99% | +20.84% | +0.08% |
+| `807.ntest_s` | +23.08% | +12.99% | +20.84% | +1.85% |
 
 ## Standing facts about this host
 
