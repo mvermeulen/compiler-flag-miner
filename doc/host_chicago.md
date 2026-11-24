@@ -81,6 +81,7 @@ python3 -m pytest -q
 | 2026-11-23 | `750.sealcrypto_r` | compute-bound 55.1% (corpus, over the 55% gate) | `-O3 -march=native -fprofile-use` | **+34.93%** | [link](mining_results.750.sealcrypto_r.2026-11-23.md) (`-march=native` +23.7%, PGO +9.0% on top, matching niwot's follow-up; `-flto` -1.8%; nine excluded on shape, non-PIE among them) |
 | 2026-11-23 | `753.ns3_r` | frontend-bound 60.7% (corpus, over the 55% gate) | `-O3 -flto -fno-pie -no-pie -fno-stack-protector -fprofile-use` | **+32.13%** | [link](mining_results.753.ns3_r.2026-11-23.md) (LTO +17.0%, non-PIE +6.8% on top (+11.7% alone, the largest here), stack protector +3.0%, PGO +2.8%; six excluded on shape) |
 | 2026-11-24 | `777.zstd_r` | memory-bound 64.0% (corpus, over the 55% gate) | `-O3 -march=native` | **+1.18%** | [link](mining_results.777.zstd_r.2026-11-24.md) (between August's +0.7% and niwot's +1.72%; PGO -3.3%, `-flto` flat; ten excluded on shape; last intrate mine here) |
+| 2026-11-24 | `801.xz_s` | memory-bound 56.3% (corpus, over the 55% gate) | `-O3 -fprofile-use` | **+1.10%** | [link](mining_results.801.xz_s.2026-11-24.md) (PGO +1.1%, where niwot's +0.7% overlapped; `-march=znver5` +0.8% more on top, CI-clear but under the bar; ten excluded on shape; first intspeed mine here) |
 
 ## Summary by suite
 
@@ -159,53 +160,77 @@ Started 2026-11-18, in suite order, and finished 2026-11-24. SPECrate runs 32 co
 | **Suite geomean gain (14, unmined = 1.00×)** | | | | +20.84% | |
 | Mined-only geomean (14 of 14) | 60.680 | 73.326 | | +20.84% | |
 
+### intspeed (1 of 13 mined)
+
+Started 2026-11-24, in suite order. SPECspeed runs one copy with `threads = 32`, placed by threading model as for
+fpspeed (`thread_placement()`).
+
+| Benchmark | Base (`-O3`) | Best | Winning flags | Gain | Write-up |
+|---|---|---|---|---|---|
+| `801.xz_s` | 1.8575 | 1.8779 | `-O3 -fprofile-use` | **+1.10%** | [2026-11-24](mining_results.801.xz_s.2026-11-24.md) |
+| `807.ntest_s` | | | | | |
+| `817.flac_s` | | | | | |
+| `821.gcc_s` | | | | | |
+| `823.llvm_s` | | | | | |
+| `827.cppcheck_s` | | | | | |
+| `829.abc_s` | | | | | |
+| `834.vpr_s` | | | | | |
+| `835.gem5_s` | | | | | |
+| `838.diamond_s` | | | | | |
+| `846.minizinc_s` | | | | | |
+| `853.ns3_s` | | | | | |
+| `854.graph500_s` | | | | | |
+| **Suite geomean gain (13, unmined = 1.00×)** | | | | +0.08% | |
+| Mined-only geomean (1 of 13) | 1.8575 | 1.8779 | | +1.10% | |
+
 ### Suite geomean progression
 
 Suite geomean gain (unmined = 1.00×), recorded after each mine: fprate over 12 benchmarks, fpspeed over 13, intrate
-over 14.
+over 14, intspeed over 13.
 
-| After | fprate (12) | fpspeed (13) | intrate (14) |
-|---|---|---|---|
-| `782.lbm_r` | +0.24% | — | — |
-| `782.lbm_r` `--no-shape-filter` re-mine | +0.29% | — | — |
-| `709.cactus_r` | +1.57% | — | — |
-| `749.fotonik3d_r` | +2.15% | — | — |
-| `765.roms_r` | +2.74% | — | — |
-| `722.palm_r` | +3.18% | — | — |
-| `731.astcenc_r` | +5.43% | — | — |
-| `736.ocio_r` | +7.19% | — | — |
-| `737.gmsh_r` | +7.40% | — | — |
-| `748.flightdm_r` | +9.53% | — | — |
-| `766.femflow_r` | +17.48% | — | — |
-| `767.nest_r` | +17.61% | — | — |
-| `772.marian_r` | +23.08% | — | — |
-| `803.sph_exa_s` | +23.08% | +0.93% | — |
-| `809.cactus_s` | +23.08% | +1.98% | — |
-| `811.tealeaf_s` | +23.08% | +1.98% | — |
-| `800.pot3d_s` re-mine | +23.08% | +3.95% | — |
-| `816.nab_s` | +23.08% | +5.09% | — |
-| `820.cloverleaf_s` | +23.08% | +5.09% | — |
-| `822.palm_s` | +23.08% | +6.81% | — |
-| `849.fotonik3d_s` | +23.08% | +6.81% | — |
-| `857.namd_s` | +23.08% | +8.14% | — |
-| `865.roms_s` | +23.08% | +8.30% | — |
-| `867.nest_s` | +23.08% | +8.30% | — |
-| `872.marian_s` | +23.08% | +12.09% | — |
-| `881.neutron_s` | +23.08% | +12.99% | — |
-| `706.stockfish_r` | +23.08% | +12.99% | +3.16% |
-| `707.ntest_r` | +23.08% | +12.99% | +4.89% |
-| `708.sqlite_r` | +23.08% | +12.99% | +5.99% |
-| `710.omnetpp_r` | +23.08% | +12.99% | +8.37% |
-| `714.cpython_r` | +23.08% | +12.99% | +10.44% |
-| `721.gcc_r` | +23.08% | +12.99% | +11.39% |
-| `723.llvm_r` | +23.08% | +12.99% | +12.64% |
-| `727.cppcheck_r` | +23.08% | +12.99% | +13.32% |
-| `729.abc_r` | +23.08% | +12.99% | +13.50% |
-| `734.vpr_r` | +23.08% | +12.99% | +14.84% |
-| `735.gem5_r` | +23.08% | +12.99% | +15.85% |
-| `750.sealcrypto_r` | +23.08% | +12.99% | +18.36% |
-| `753.ns3_r` | +23.08% | +12.99% | +20.74% |
-| `777.zstd_r` | +23.08% | +12.99% | +20.84% |
+| After | fprate (12) | fpspeed (13) | intrate (14) | intspeed (13) |
+|---|---|---|---|---|
+| `782.lbm_r` | +0.24% | — | — | — |
+| `782.lbm_r` `--no-shape-filter` re-mine | +0.29% | — | — | — |
+| `709.cactus_r` | +1.57% | — | — | — |
+| `749.fotonik3d_r` | +2.15% | — | — | — |
+| `765.roms_r` | +2.74% | — | — | — |
+| `722.palm_r` | +3.18% | — | — | — |
+| `731.astcenc_r` | +5.43% | — | — | — |
+| `736.ocio_r` | +7.19% | — | — | — |
+| `737.gmsh_r` | +7.40% | — | — | — |
+| `748.flightdm_r` | +9.53% | — | — | — |
+| `766.femflow_r` | +17.48% | — | — | — |
+| `767.nest_r` | +17.61% | — | — | — |
+| `772.marian_r` | +23.08% | — | — | — |
+| `803.sph_exa_s` | +23.08% | +0.93% | — | — |
+| `809.cactus_s` | +23.08% | +1.98% | — | — |
+| `811.tealeaf_s` | +23.08% | +1.98% | — | — |
+| `800.pot3d_s` re-mine | +23.08% | +3.95% | — | — |
+| `816.nab_s` | +23.08% | +5.09% | — | — |
+| `820.cloverleaf_s` | +23.08% | +5.09% | — | — |
+| `822.palm_s` | +23.08% | +6.81% | — | — |
+| `849.fotonik3d_s` | +23.08% | +6.81% | — | — |
+| `857.namd_s` | +23.08% | +8.14% | — | — |
+| `865.roms_s` | +23.08% | +8.30% | — | — |
+| `867.nest_s` | +23.08% | +8.30% | — | — |
+| `872.marian_s` | +23.08% | +12.09% | — | — |
+| `881.neutron_s` | +23.08% | +12.99% | — | — |
+| `706.stockfish_r` | +23.08% | +12.99% | +3.16% | — |
+| `707.ntest_r` | +23.08% | +12.99% | +4.89% | — |
+| `708.sqlite_r` | +23.08% | +12.99% | +5.99% | — |
+| `710.omnetpp_r` | +23.08% | +12.99% | +8.37% | — |
+| `714.cpython_r` | +23.08% | +12.99% | +10.44% | — |
+| `721.gcc_r` | +23.08% | +12.99% | +11.39% | — |
+| `723.llvm_r` | +23.08% | +12.99% | +12.64% | — |
+| `727.cppcheck_r` | +23.08% | +12.99% | +13.32% | — |
+| `729.abc_r` | +23.08% | +12.99% | +13.50% | — |
+| `734.vpr_r` | +23.08% | +12.99% | +14.84% | — |
+| `735.gem5_r` | +23.08% | +12.99% | +15.85% | — |
+| `750.sealcrypto_r` | +23.08% | +12.99% | +18.36% | — |
+| `753.ns3_r` | +23.08% | +12.99% | +20.74% | — |
+| `777.zstd_r` | +23.08% | +12.99% | +20.84% | — |
+| `801.xz_s` | +23.08% | +12.99% | +20.84% | +0.08% |
 
 ## Standing facts about this host
 
@@ -247,3 +272,4 @@ over 14.
 | 18 | L | **`-fipa-pta` lost 40.7% on stockfish_r** in its one screening trial (66.86 against 112.70), and `-flto` 18.1% (as on niwot, niwot open item 4). | `cfm measure` `-O3 -fipa-pta`, interleaved with `-O3` (2 rounds), then `perf` both binaries if it holds. | Whether a points-to analysis flag really costs 41%, and what it blocks. |
 | 19 | M | **`-flto` with PGO on llvm_r (and cppcheck_r).** `-flto` lost 1.26% alone (CI-clear), so the winning set has no LTO, and PGO added only +10.3% where both earlier mines got about +24% on top of `-flto`. On niwot's gcc_r follow-up LTO and PGO together beat the sum of their separate gains. The mine never re-tries a rejected flag on top of PGO. cppcheck_r is the same case: `-flto` +1.31% rejected on overlap, PGO +5.0% on top of `-fno-stack-protector`. | `cfm measure` the winner + PGO with and without `-flto`, interleaved, 3 rounds. | If LTO + PGO wins here, Phase 6 should also try PGO with Phase 4's LTO reject added, as it does for near-misses. |
 | 20 | M | **Non-PIE on sealcrypto_r.** Its 55.1% compute-bound read, 0.1 points over the gate, excluded `-fno-pie -no-pie` with eight other flags. On ntest, the other compute-bound intrate benchmark, non-PIE added +6.53% on top of `-march=native`; it has never been measured on sealcrypto on either host. | `cfm measure` `-O3 -march=native -fno-pie -no-pie -fprofile-use`, interleaved with the winner (3 rounds). | Whether non-PIE adds to sealcrypto's +34.93%. |
+| 21 | L | **`-march=znver5` with PGO on xz_s.** On top of `-O3 -fprofile-use` it read +0.82%, CI-clear but under the 1% bar, for +1.92% over `-O3` against PGO's accepted +1.10%. `-march=native` alone read -0.20%. | `cfm measure` `-O3 -fprofile-use -march=znver5` and `-O3 -march=znver5`, interleaved with the winner (3 rounds). | Whether the gain is real, and whether it needs PGO. |
