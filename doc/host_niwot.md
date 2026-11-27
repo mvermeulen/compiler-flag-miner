@@ -144,7 +144,7 @@ and ran PGO on plain `-O3` (26.79, +7.78%), so it never measured the two togethe
 | **Suite geomean gain (13, unmined = 1.00×)** | | | | +20.56% | |
 | Mined-only geomean (13 of 13) | 1.867 | 2.251 | | +20.56% | |
 
-### fpspeed (11 of 13 mined)
+### fpspeed (12 of 13 mined)
 
 | Benchmark | Base (`-O3`) | Best | Winning flags | Gain | Write-up |
 |---|---|---|---|---|---|
@@ -155,14 +155,14 @@ and ran PGO on plain `-O3` (26.79, +7.78%), so it never measured the two togethe
 | `816.nab_s` | 1.6230 | 1.8744 | `-O3 -Ofast -fprofile-use -march=znver5` (`-march=native` +0.26% alone, `-march=znver5` +7.04% on top of fast-math and PGO) | **+15.49%** | [2026-11-17](mining_results.816.nab_s.2026-11-17.md) |
 | `820.cloverleaf_s` | 0.7429 | 0.7627 | `-O3 -march=znver5` (microarch multiplier; `-march=native`, the same code, +2.04% rejected on CI overlap; `chicago` +0.57%, under the bar; `=256` on top +1.60%, CI overlap, #43) | **+2.67%** | [2026-11-26](mining_results.820.cloverleaf_s.2026-11-26.md) |
 | `822.palm_s` | 1.6908 | 1.9431 | `-O3 -march=native -fprofile-use` (`-march=native` +10.26% against +19.22% on `chicago`; PGO +4.22%; `-flto` +1.34%, CI overlap on both hosts) | **+14.92%** | [2026-11-22](mining_results.822.palm_s.2026-11-22.md) |
-| `849.fotonik3d_s` | — | — | not mined yet | — | |
+| `849.fotonik3d_s` | 0.8105 | 0.8105 | `-O3` (nothing accepted, as on `chicago`; every flagset CI-clear below baseline but within ±1.1% of the flagged -2.41% recheck: a slow drift, not the throttle; `-march` code +0.46% pooled vs the recheck) | +0.00% | [2026-11-27](mining_results.849.fotonik3d_s.2026-11-27.md) |
 | `857.namd_s` | 1.2139 | 1.4648 | `-O3 -march=native` (fast-math -2.7%; PGO, near-miss and vector width +0.5-0.65% on top, under the bar) | **+20.67%** | [2026-11-18](mining_results.857.namd_s.2026-11-18.md) |
 | `865.roms_s` | — | — | not mined yet | — | |
 | `867.nest_s` | 1.0029 | 1.0029 | `-O3` (nothing accepted, as on `chicago`; `-O3` runs spread 3.8%, recheck flagged -2.03%; `-march` code +0.6% pooled; PGO -4.4%) | +0.00% | [2026-11-22](mining_results.867.nest_s.2026-11-22.md) |
 | `872.marian_s` | 2.2856 | 2.6896 | `-O3 -march=native` (+56.38% on `chicago`; prefetch +9.7% and graphite +6.2% alone, nothing on top; `=256` -6.66%) | **+17.68%** | [2026-11-20](mining_results.872.marian_s.2026-11-20.md) |
 | `881.neutron_s` | 1.1209 | 1.2230 | `-O3 -flto -march=znver5` (the same code as `chicago`'s `-flto -march=native`; `-march=native` -1.05% alone, `-march=znver5` +3.28% on top of `-flto`; PGO -29.1%) | **+9.11%** | [2026-11-21](mining_results.881.neutron_s.2026-11-21.md) |
 | **Suite geomean gain (13, unmined = 1.00×)** | | | | +10.19% | |
-| Mined-only geomean (11 of 13) | 1.2195 | 1.3676 | | +12.15% | |
+| Mined-only geomean (12 of 13) | 1.1787 | 1.3093 | | +11.08% | |
 
 ### Suite geomean progression
 
@@ -231,6 +231,7 @@ Suite geomean gain over every benchmark in the suite, unmined = 1.00×, recorded
 | `809.cactus_s` | +20.13% | +20.50% | +20.56% | +9.96% |
 | `811.tealeaf_s` (throttle stop; recorded 0.0%) | +20.13% | +20.50% | +20.56% | +9.96% |
 | `820.cloverleaf_s` | +20.13% | +20.50% | +20.56% | +10.19% |
+| `849.fotonik3d_s` | +20.13% | +20.50% | +20.56% | +10.19% |
 
 SPECspeed mining started on 2026-10-24 with `834.vpr_s`, the first `_s` benchmark cfm has mined on
 either host. Speed ratios come from one 16-thread process (`threads = 16`), not 16 copies. Before fpspeed (2026-11-17), the config's `-ftree-parallelize-loops`, which auto-parallelizes `800.pot3d_s`'s `DO CONCURRENT` loops (the only `doconcurrent` benchmark), was lowered from 24 to 16 to match, as `chicago` raised its to 32. Since PR #55,
