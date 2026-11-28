@@ -89,6 +89,7 @@ python3 -m pytest -q
 | 2026-11-27 | `827.cppcheck_s` | frontend-bound 74.1% (corpus, over the 55% gate) | `-O3 -fno-stack-protector -fprofile-use` | **+9.67%** | [link](mining_results.827.cppcheck_s.2026-11-27.md) (stack protector +2.6%, PGO +6.9%; the same set as niwot and cppcheck_r; three other accepts each lost on top of the stack protector; `-flto` -1.3%) |
 | 2026-11-27 | `829.abc_s` | memory-bound 72.9% (corpus, over the 55% gate) | `-O3 -flto` | **+2.53%** | [link](mining_results.829.abc_s.2026-11-27.md) (LTO +2.5%, as on abc_r and niwot's follow-up, found by the mine itself through the `-flto` shape exemption; PGO +0.4% on top, CI overlap; eleven excluded on shape; pinned, 20 W) |
 | 2026-11-27 | `834.vpr_s` | memory-bound 35.9% (corpus, under the 55% gate) | `-O3 -flto -funroll-loops -fprofile-use -march=znver5` | **+24.66%** | [link](mining_results.834.vpr_s.2026-11-27.md) (LTO +16.6%, PGO +4.9%, `-march=znver5` +1.3%, as on niwot; `-funroll-loops` +0.65% through the pair tournament; four more accepts lost on top of LTO; 24 W) |
+| 2026-11-28 | `835.gem5_s` | frontend-bound 40.4% (corpus, under the 55% gate) | `-O3 -flto -march=znver5` | **+5.46%** | [link](mining_results.835.gem5_s.2026-11-28.md) (LTO +4.3%, as on niwot; `-march=znver5` +1.1% on top; PGO -8.8%, as on gem5_r and niwot; non-PIE +1.1% alone on CI overlap, #23; recheck flagged -0.60%) |
 
 ## Summary by suite
 
@@ -167,7 +168,7 @@ Started 2026-11-18, in suite order, and finished 2026-11-24. SPECrate runs 32 co
 | **Suite geomean gain (14, unmined = 1.00×)** | | | | +20.84% | |
 | Mined-only geomean (14 of 14) | 60.680 | 73.326 | | +20.84% | |
 
-### intspeed (8 of 13 mined)
+### intspeed (9 of 13 mined)
 
 Started 2026-11-24, in suite order. SPECspeed runs one copy with `threads = 32`, placed by threading model as for
 fpspeed (`thread_placement()`).
@@ -182,13 +183,13 @@ fpspeed (`thread_placement()`).
 | `827.cppcheck_s` | 2.1307 | 2.3367 | `-O3 -fno-stack-protector -fprofile-use` | **+9.67%** | [2026-11-27](mining_results.827.cppcheck_s.2026-11-27.md) |
 | `829.abc_s` | 2.1917 | 2.2472 | `-O3 -flto` | **+2.53%** | [2026-11-27](mining_results.829.abc_s.2026-11-27.md) |
 | `834.vpr_s` | 4.0891 | 5.0976 | `-O3 -flto -funroll-loops -fprofile-use -march=znver5` | **+24.66%** | [2026-11-27](mining_results.834.vpr_s.2026-11-27.md) |
-| `835.gem5_s` | | | | | |
+| `835.gem5_s` | 5.3897 | 5.6841 | `-O3 -flto -march=znver5` | **+5.46%** | [2026-11-28](mining_results.835.gem5_s.2026-11-28.md) |
 | `838.diamond_s` | | | | | |
 | `846.minizinc_s` | | | | | |
 | `853.ns3_s` | | | | | |
 | `854.graph500_s` | | | | | |
-| **Suite geomean gain (13, unmined = 1.00×)** | | | | +15.21% | |
-| Mined-only geomean (8 of 13) | 2.4470 | 3.0802 | | +25.87% | |
+| **Suite geomean gain (13, unmined = 1.00×)** | | | | +15.68% | |
+| Mined-only geomean (9 of 13) | 2.6714 | 3.2972 | | +23.42% | |
 
 ### Suite geomean progression
 
@@ -245,6 +246,7 @@ over 14, intspeed over 13.
 | `827.cppcheck_s` | +23.08% | +12.99% | +20.84% | +13.06% |
 | `829.abc_s` | +23.08% | +12.99% | +20.84% | +13.28% |
 | `834.vpr_s` | +23.08% | +12.99% | +20.84% | +15.21% |
+| `835.gem5_s` | +23.08% | +12.99% | +20.84% | +15.68% |
 
 ## Standing facts about this host
 
@@ -288,3 +290,4 @@ over 14, intspeed over 13.
 | 20 | M | **Non-PIE on sealcrypto_r.** Its 55.1% compute-bound read, 0.1 points over the gate, excluded `-fno-pie -no-pie` with eight other flags. On ntest, the other compute-bound intrate benchmark, non-PIE added +6.53% on top of `-march=native`; it has never been measured on sealcrypto on either host. | `cfm measure` `-O3 -march=native -fno-pie -no-pie -fprofile-use`, interleaved with the winner (3 rounds). | Whether non-PIE adds to sealcrypto's +34.93%. |
 | 21 | L | **`-march=znver5` with PGO on xz_s.** On top of `-O3 -fprofile-use` it read +0.82%, CI-clear but under the 1% bar, for +1.92% over `-O3` against PGO's accepted +1.10%. `-march=native` alone read -0.20%. | `cfm measure` `-O3 -fprofile-use -march=znver5` and `-O3 -march=znver5`, interleaved with the winner (3 rounds). | Whether the gain is real, and whether it needs PGO. |
 | 22 | M | **`-fno-stack-protector` with PGO on gcc_s.** It was accepted alone (+1.44%), then rejected as a greedy step on top of non-PIE and LTO (+0.88%, CI-clear, under the bar). The PGO near-miss list takes only Phase 4 rejects, so it was never tried with PGO; on niwot it was a Phase 4 near-miss and added +1.07% on top of PGO. | `cfm measure` the winner with and without `-fno-stack-protector`, interleaved, 3 rounds. | Whether gcc_s's winner is missing about 1%, and whether the near-miss list should also take CI-clear greedy-step rejects. |
+| 23 | M | **Non-PIE and `-fno-stack-protector` on top of LTO on gem5_s.** Non-PIE read +1.10% alone, rejected on CI overlap (two reps at +1.68%, one at -0.05%), and `-fno-stack-protector` +0.57%. With `-flto` the only Phase 4 accept, neither was tried on top of it; on gem5_r here they added +2.84% and +1.38% on top of LTO. | `cfm measure` `-O3 -flto -march=znver5` with and without `-fno-pie -no-pie` (and then `-fno-stack-protector`), interleaved, 3 rounds. | Whether gem5_s's winner is missing 2-4%, and whether a single-accept mine should still try CI-overlapping Phase 4 near-wins on top of its winner. |
